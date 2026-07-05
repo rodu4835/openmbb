@@ -14,4 +14,4 @@ Console work is done PARKED, key on, kill switch off. Never while riding.
 """
 
 APP_NAME = "OpenMBB"
-__version__ = "0.7.0"
+__version__ = "0.8.0"

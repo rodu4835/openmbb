@@ -87,8 +87,11 @@ pin-12 wiring vary by year; on 2017+ FX/FXS the port is under the seat.)
 1. **Read** — per-command buttons; **FULL BASELINE** captures everything incl.
    the settings dump (your backup) and `dumplogs` (~1 MB, progress shown).
    Unlocks Login. *You can stop here — reads are the whole point of day one.*
-2. **Login** — explicit; tries `tpsreport` then `wideopenthrottle`. Both failing
-   is a valid outcome (tool stays read-only). On success: re-captures help +
+2. **Login** — explicit. "Try known passwords" attempts the community-known ones
+   (`tpsreport`, `wideopenthrottle`) in order; or type a specific password in the
+   field (masked in the logs, never saved to disk). Both failing is fine (stays
+   read-only). A confirmed password can be added to the built-in `COMMUNITY_PASSWORDS`
+   list so it's tried automatically thereafter. On success: re-captures help +
    settings, diffs the logged-in menu.
 3. **Writes** — locked behind login + master unlock toggle + per-write confirm.
    Rows appear only for settings that are BOTH on the whitelist AND present in

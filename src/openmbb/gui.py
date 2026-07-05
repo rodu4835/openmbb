@@ -35,6 +35,13 @@ from .transport import (DUMP_COMMANDS, PROMPT_RE, READ_COMMANDS, SessionLogger,
                         open_real_port, parse_settings_dump)
 
 
+# MBB console login passwords tried by the "Try known passwords" button, in
+# order. These are community-reported guesses (unverified per firmware). When a
+# password is confirmed to work on a bike, ADD IT HERE so it is tried
+# automatically and no one has to type it again.
+COMMUNITY_PASSWORDS = ["tpsreport", "wideopenthrottle"]
+
+
 INSTRUCTIONS_TEXT = """\
 HOW TO USE OPENMBB
 
@@ -53,8 +60,11 @@ PHASE 1 — READ
   only FULL BASELINE does. This guarantees a backup exists before any change.
 
 PHASE 2 — LOGIN
-  Explicit — click "Attempt login". It tries the community passwords in order.
-  Both failing is fine; the tool simply stays read-only. Success unlocks Writes.
+  Explicit. "Try known passwords" attempts the community-known ones in order;
+  or type a specific password and "Try this password" (it is masked in the logs
+  and never saved to disk). Both failing is fine — the tool stays read-only.
+  Success unlocks Writes. A confirmed password can be baked into the built-in
+  list (COMMUNITY_PASSWORDS in gui.py) so it is tried automatically thereafter.
 
 PHASE 3 — WRITES
   Triple-gated: logged in + the master UNLOCK WRITES switch + a per-write
@@ -623,15 +633,26 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             f = ttk.Frame(self.nb, padding=12)
             self.nb.add(f, text=" 2 · Login ")
             ttk.Label(f, text=(
-                "Login is explicit and never automatic. Try-order: "
-                "'login tpsreport' then 'login wideopenthrottle' (community lore — "
-                "both may fail; tool stays read-only then)."),
-                wraplength=900, justify="left").pack(anchor="w")
-            self.btn_login = ttk.Button(f, text="Attempt login",
-                                        style=self.sty["accent"],
-                                        command=self._login)
-            self.btn_login.pack(anchor="w", pady=8)
-            self.txt_login = self._console_text(f, 26)
+                "Login is explicit and never automatic. Click 'Try known "
+                "passwords' to attempt the community-known ones (%s), or type a "
+                "specific password and 'Try this password'. Both may fail — the "
+                "tool just stays read-only then. A typed password is never saved "
+                "to disk (it is masked in the logs)." % ", ".join(COMMUNITY_PASSWORDS)),
+                wraplength=920, justify="left").pack(anchor="w")
+
+            row = ttk.Frame(f)
+            row.pack(fill="x", pady=8)
+            ttk.Button(row, text="Try known passwords", style=self.sty["accent"],
+                       command=self._login).pack(side="left")
+            ttk.Label(row, text="     Password:").pack(side="left")
+            self.login_pw = tk.StringVar()
+            ent = ttk.Entry(row, textvariable=self.login_pw, width=22, show="*")
+            ent.pack(side="left", padx=4)
+            ent.bind("<Return>", lambda e: self._login_custom())
+            ttk.Button(row, text="Try this password",
+                       command=self._login_custom).pack(side="left")
+
+            self.txt_login = self._console_text(f, 24)
             self.txt_login.pack(fill="both", expand=True)
 
         def _login_log(self, text):
@@ -640,33 +661,60 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_login.see("end")
             self.txt_login.config(state="disabled")
 
-        def _login(self):
+        def _login_custom(self):
+            pw = self.login_pw.get().strip()
+            if not pw:
+                messagebox.showinfo(APP_NAME, "Type a password first.")
+                return
+            self._login([pw], redact=True)
+
+        def _login(self, passwords=None, redact=False):
+            pws = [p for p in (passwords if passwords is not None
+                               else COMMUNITY_PASSWORDS) if p]
+            if not pws:
+                messagebox.showinfo(APP_NAME, "Enter a password to try.")
+                return
+
+            def shown(pw):
+                return "****" if redact else pw
+
             def job():
                 attempts = []
                 success = False
-                for pw in ("tpsreport", "wideopenthrottle"):
-                    out = self.transport.exec_command("login %s" % pw, idle_timeout=2.0)
+                used = None
+                for pw in pws:
+                    out = self.transport.exec_command(
+                        "login %s" % pw, idle_timeout=2.0,
+                        redact=pw if redact else None)
                     attempts.append((pw, out))
                     if re.search(r"logged in|level\s*[1-9]", out, re.I):
                         success = True
+                        used = pw
                         break
                 post = {}
                 if success:
                     post["help"] = self.transport.exec_command("help", idle_timeout=2.5)
                     post["set"] = self.transport.exec_command("set", idle_timeout=4.0,
                                                               max_time=120.0)
-                return attempts, success, post
+                return attempts, success, post, used
 
             def done(result):
-                attempts, success, post = result
+                attempts, success, post, used = result
                 for pw, out in attempts:
-                    self._login_log(">>> login %s\n%s\n" % (pw, out))
+                    masked = out.replace(pw, "****") if redact else out
+                    self._login_log(">>> login %s\n%s\n" % (shown(pw), masked))
                 if not success:
-                    self._login_log("Both passwords rejected — staying read-only. "
-                                    "(Valid outcome; MBB passwords are community-held.)")
+                    self._login_log("Rejected — staying read-only. (MBB passwords "
+                                    "are community-held; try another.)")
                     return
                 self.logged_in = True
-                self._login_log("LOGIN OK. Re-captured help + settings (logged-in view).")
+                if redact:
+                    self._login_log("LOGIN OK with your typed password. It was NOT "
+                                    "saved. To have it tried automatically next "
+                                    "time, add it to COMMUNITY_PASSWORDS in gui.py.")
+                else:
+                    self._login_log("LOGIN OK (login %s). Re-captured help + settings."
+                                    % used)
                 if self.help_logged_out and post.get("help"):
                     diff = "\n".join(difflib.unified_diff(
                         self.help_logged_out.splitlines(),

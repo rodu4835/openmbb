@@ -114,14 +114,25 @@ class Transport:
             self.port.write(NEWLINE)
             return self._drain(quiet=0.6, max_time=3.0)
 
-    def exec_command(self, cmd, idle_timeout=2.0, max_time=30.0, progress_cb=None):
+    def exec_command(self, cmd, idle_timeout=2.0, max_time=30.0, progress_cb=None,
+                     redact=None):
+        """Send `cmd`, return the response. If `redact` is given, that substring
+        (e.g. a typed password) is masked in everything written to disk — the
+        raw log and the per-command file — so it never persists."""
         reason = command_blocked(cmd)
         if reason:
             raise BlockedCommandError(reason)
+
+        def _mask_b(b):
+            return b.replace(redact.encode("ascii", "replace"), b"****") if redact else b
+
+        def _mask_s(s):
+            return s.replace(redact, "****") if redact else s
+
         with self.lock:
             self._drain(quiet=0.1, max_time=0.3)  # flush stale bytes
             wire = cmd.encode("ascii", errors="replace") + NEWLINE
-            self.logger.raw("TX", wire)
+            self.logger.raw("TX", _mask_b(wire))
             self.port.write(wire)
             buf = b""
             start = time.time()
@@ -145,7 +156,7 @@ class Transport:
                     time.sleep(0.02)
                 if now - start > max_time:
                     break
-        self.logger.raw("RX", buf)
+        self.logger.raw("RX", _mask_b(buf))
         text = buf.decode("utf-8", errors="replace")
         # strip our own echo and the trailing prompt
         lines = text.splitlines()
@@ -156,7 +167,7 @@ class Transport:
         result = "\n".join(lines).strip("\n")
         # spec: every command response gets its own file (transport-level, so
         # headless/scripted use is covered too, not just the GUI)
-        self.last_saved_path = self.logger.save_command(cmd, result)
+        self.last_saved_path = self.logger.save_command(_mask_s(cmd), _mask_s(result))
         return result
 
 

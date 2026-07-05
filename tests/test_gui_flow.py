@@ -78,6 +78,24 @@ def test_full_flow(app):
     assert not app._errors
 
 
+def test_login_custom_password_is_redacted(app):
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+
+    app.login_pw.set("tpsreport")            # the sim's accepted password
+    app._login_custom()
+    assert _pump(app, lambda: app.logged_in)
+
+    # a typed password must never be persisted to the raw session log
+    with open(app.logger.raw_path, encoding="utf-8", errors="replace") as fh:
+        raw = fh.read()
+    assert "tpsreport" not in raw
+    assert "login ****" in raw
+    assert not app._errors
+
+
 def test_analyze_tab(app):
     app._connect()
     assert _pump(app, lambda: app.connected)
