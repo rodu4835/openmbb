@@ -86,10 +86,15 @@ tests/           pytest suite (safety/transport headless + GUI flow)
 
 ## Session output
 
-Everything lands in `zero-console-sessions/<timestamp>_<port>/`:
+Everything lands in `<save-base>/zero-console-sessions/<timestamp>_<port>/`:
 `session_raw.log` (every byte, timestamped), one file per command,
 `settings_baseline_*.txt`, `settings_backup_*.txt` (auto, pre-write),
 `writes_journal.txt`.
+
+**Where it saves:** by default the `<save-base>` is the current working
+directory. Change it via **Session → Set save location…** (remembered across
+runs in `~/.zero-console/config.json`) or per-launch with `--logdir <path>`.
+The current save target is shown in the top status strip and is clickable.
 
 ## First real session checklist
 

@@ -83,9 +83,11 @@ value limits. Coast regen of exactly 0 is refused (fishtail risk).
 """
 
 
-def build_gui(sim=False, preselect_port=None):
+def build_gui(sim=False, preselect_port=None, log_dir=None):
     import tkinter as tk
-    from tkinter import ttk, messagebox
+    from tkinter import filedialog, messagebox, ttk
+
+    from . import config
 
     P = PALETTE
 
@@ -108,6 +110,8 @@ def build_gui(sim=False, preselect_port=None):
             self.settings_order = []
             self.journal_entries = []   # (name, old, new)
             self._busy = False
+            # save base for session folders: explicit arg > saved config > cwd
+            self.log_dir = log_dir or config.get_log_dir()
             # thread-safe UI callback queue: workers must never touch Tk
             # directly (Tcl is not thread-safe); they enqueue, main loop pumps
             self._cbq = queue.Queue()
@@ -122,6 +126,7 @@ def build_gui(sim=False, preselect_port=None):
             self._build_login_tab()
             self._build_write_tab()
             self._apply_gates()
+            self._refresh_save_label()
 
         # -- helpers ---------------------------------------------------------
         def _console_text(self, parent, height, fg=None):
@@ -168,6 +173,8 @@ def build_gui(sim=False, preselect_port=None):
             m = tk.Menu(self)
 
             sess = tk.Menu(m, tearoff=0)
+            sess.add_command(label="Set save location…",
+                             command=self._set_log_dir)
             sess.add_command(label="Open session folder",
                              command=self._open_session_folder)
             sess.add_command(label="Copy session path",
@@ -215,22 +222,49 @@ def build_gui(sim=False, preselect_port=None):
             win.focus_set()
             return win
 
+        def _session_root(self):
+            return os.path.join(self.log_dir or os.getcwd(), "zero-console-sessions")
+
+        def _refresh_save_label(self):
+            if self.logger:
+                self.lbl_sess.config(text="session: %s" % self.logger.dir)
+            else:
+                self.lbl_sess.config(text="save to: %s" % self._session_root())
+
+        def _set_log_dir(self):
+            chosen = filedialog.askdirectory(
+                title="Choose where Zero Console saves session logs",
+                initialdir=self.log_dir or os.getcwd(), mustexist=True)
+            if not chosen:
+                return
+            self.log_dir = os.path.normpath(chosen)
+            saved = config.set_log_dir(self.log_dir)
+            self._refresh_save_label()
+            msg = "Session logs will be saved under:\n%s" % self._session_root()
+            if not saved:
+                msg += ("\n\n(Couldn't persist the choice to the config file; "
+                        "it applies for this run only.)")
+            if self.connected:
+                msg += ("\n\nThe current session stays where it started — this "
+                        "takes effect on your next Connect.")
+            messagebox.showinfo(APP_NAME, msg)
+
         def _open_session_folder(self):
-            if not self.logger:
-                messagebox.showinfo(APP_NAME, "No session yet — connect first.")
+            target = self.logger.dir if self.logger else self._session_root()
+            if not os.path.isdir(target):
+                messagebox.showinfo(APP_NAME, "That folder doesn't exist yet. "
+                                    "Logs will save under:\n%s" % self._session_root())
                 return
             try:
-                os.startfile(self.logger.dir)   # Windows
+                os.startfile(target)   # Windows
             except Exception as e:
                 messagebox.showerror(APP_NAME, "Couldn't open folder:\n%s" % e)
 
         def _copy_session_path(self):
-            if not self.logger:
-                messagebox.showinfo(APP_NAME, "No session yet — connect first.")
-                return
+            path = self.logger.dir if self.logger else self._session_root()
             self.clipboard_clear()
-            self.clipboard_append(self.logger.dir)
-            messagebox.showinfo(APP_NAME, "Copied to clipboard:\n%s" % self.logger.dir)
+            self.clipboard_append(path)
+            messagebox.showinfo(APP_NAME, "Copied to clipboard:\n%s" % path)
 
         def _bike_facts(self):
             facts = []
@@ -393,7 +427,7 @@ def build_gui(sim=False, preselect_port=None):
 
             def job():
                 tag = "sim" if (sim or port_name == "SIMULATOR") else port_name.replace(":", "")
-                logger = SessionLogger(tag=tag)
+                logger = SessionLogger(base_dir=self.log_dir, tag=tag)
                 if sim or port_name == "SIMULATOR":
                     port = SimPort()
                 else:
@@ -433,7 +467,7 @@ def build_gui(sim=False, preselect_port=None):
                 self._probe_log(ver)
                 m = re.search(r"Firmware Rev\s*:?\s*(\w+)", ver)
                 self.lbl_ver.config(text="MBB firmware rev %s" % m.group(1) if m else "")
-                self.lbl_sess.config(text=logger.dir)
+                self._refresh_save_label()
                 self._apply_gates()
                 self.nb.select(1)
 

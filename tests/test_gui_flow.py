@@ -16,19 +16,20 @@ from zero_console.transport import first_number
 @pytest.fixture
 def app(monkeypatch):
     tk = pytest.importorskip("tkinter")
-    try:
-        root = tk.Tk()
-        root.destroy()
-    except tk.TclError:
-        pytest.skip("no display available for Tk")
     import tkinter.messagebox as mb
     monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
     monkeypatch.setattr(mb, "showinfo", lambda *a, **k: None)
     monkeypatch.setattr(mb, "showwarning", lambda *a, **k: None)
     errors = []
     monkeypatch.setattr(mb, "showerror", lambda *a, **k: errors.append(a))
+    import tempfile
     from zero_console.gui import build_gui
-    application = build_gui(sim=True)
+    # hermetic: sessions go to a temp dir, never the user's configured location.
+    # Build directly (no throwaway probe root) and skip cleanly with no display.
+    try:
+        application = build_gui(sim=True, log_dir=tempfile.mkdtemp(prefix="zcflow_"))
+    except tk.TclError:
+        pytest.skip("no display available for Tk")
     application._errors = errors
     yield application
     try:

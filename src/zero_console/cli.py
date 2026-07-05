@@ -120,6 +120,7 @@ def main():
     ap = argparse.ArgumentParser(description="Zero Console — 2017 Zero FXS MBB tool")
     ap.add_argument("--sim", action="store_true", help="simulator mode (no hardware)")
     ap.add_argument("--port", help="preselect a COM port")
+    ap.add_argument("--logdir", help="base dir for session logs (overrides saved config)")
     ap.add_argument("--selftest", action="store_true", help="headless tests, no GUI")
     ap.add_argument("--smoketest", action="store_true", help="build GUI once and exit")
     args = ap.parse_args()
@@ -135,8 +136,10 @@ def main():
             print("pyserial is not installed. Install the package (pip install .) or\n"
                   "run the simulator:  zero-console --sim")
             sys.exit(1)
+    from .config import get_log_dir
     from .gui import build_gui
-    app = build_gui(sim=args.sim, preselect_port=args.port)
+    app = build_gui(sim=args.sim, preselect_port=args.port,
+                    log_dir=args.logdir or get_log_dir())
     app.mainloop()
 
 
