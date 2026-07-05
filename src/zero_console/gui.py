@@ -18,6 +18,71 @@ from .transport import (DUMP_COMMANDS, PROMPT_RE, READ_COMMANDS, SessionLogger,
                         open_real_port, parse_settings_dump)
 
 
+INSTRUCTIONS_TEXT = """\
+HOW TO USE ZERO CONSOLE
+
+The app is phase-gated — each phase unlocks the next. You can stop after any
+phase; closing the window never loses data (everything is saved as you go).
+
+PHASE 0 — CONNECT
+  Pick the COM port (or SIMULATOR) and click "Connect & Probe". The app looks
+  for the console prompt and reads the firmware version. Garbage output at
+  38400 baud usually means the Tx/Rx wires are swapped — stop and recheck.
+
+PHASE 1 — READ
+  Click any command button for a one-off read. To advance, click the blue
+  ★ FULL BASELINE button: it captures every read plus the full settings dump
+  (your backup) and the ~1 MB log dump. Individual reads do NOT unlock Login —
+  only FULL BASELINE does. This guarantees a backup exists before any change.
+
+PHASE 2 — LOGIN
+  Explicit — click "Attempt login". It tries the community passwords in order.
+  Both failing is fine; the tool simply stays read-only. Success unlocks Writes.
+
+PHASE 3 — WRITES
+  Triple-gated: logged in + the master UNLOCK WRITES switch + a per-write
+  confirm dialog. Only whitelisted settings that actually exist on your bike
+  appear. Each write re-reads the current value, backs up all settings, sends
+  the change, reads it back to verify, and journals it (with a Revert button).
+
+TIP: Session menu -> "Open session folder" jumps to where everything is saved.
+"""
+
+WIRING_TEXT = """\
+WIRING — FTDI TTL-232R-3V3  ->  OBD-II / C3 port (under the seat)
+
+  FTDI Black  (GND)  -> OBD pin 5   (Diagnostic ground)
+  FTDI Yellow (RXD)  -> OBD pin 8   (bike MBB Tx)
+  FTDI Orange (TXD)  -> OBD pin 9   (bike MBB Rx)
+  FTDI Red    (+5V)  -> NOT CONNECTED — never
+
+  Serial: 38400 baud, 8-N-1, no flow control, newline CR-LF.
+
+Before connecting: bike PARKED on stand, key ON, kill switch OFF. Confirm the
+FTDI Orange line idles ~3.3 V vs Black and the Red lead is taped off.
+Never stream the console while riding.
+"""
+
+SAFETY_TEXT = """\
+SAFETY MODEL
+
+Read-first, whitelist-only writes. The transport layer refuses dangerous
+commands from EVERY path (buttons and the raw box), including:
+  format/erase/eeprom, settingsrst, statsrst, log clears/adds, reset,
+  exit_to_bl, test, wdt, timing, can, charger, sevcon preop, and any "set" of
+  a protected value (abs_disable, bypass_bms, ov_* overrides, motstage*/
+  ctrlstage* thermal limits, sevnoregspeed/sevmaxregv/sevnoregfull regen
+  guards, model/vin/serial identity).
+
+Those regen and thermal guards are shown READ-ONLY in the Writes tab so you can
+see them without being able to change them.
+
+Writable settings are limited to speedo/gearing, custom-mode speed/torque/
+regen, and a few gauge/charge options — each with an effect + risk note and
+value limits. Coast regen of exactly 0 is refused (fishtail risk).
+"""
+
+
 def build_gui(sim=False, preselect_port=None):
     import tkinter as tk
     from tkinter import ttk, messagebox
@@ -48,6 +113,7 @@ def build_gui(sim=False, preselect_port=None):
             self._cbq = queue.Queue()
             self.after(40, self._pump_cbq)
 
+            self._build_menubar()
             self._build_statusbar()
             self.nb = ttk.Notebook(self)
             self.nb.pack(fill="both", expand=True, padx=6, pady=(0, 6))
@@ -90,8 +156,142 @@ def build_gui(sim=False, preselect_port=None):
             self.lbl_login = ttk.Label(bar, text="not logged in",
                                        foreground=P["dim"])
             self.lbl_login.pack(side="left", padx=16)
-            self.lbl_sess = ttk.Label(bar, text="", foreground=P["dim"])
+            self.lbl_sess = ttk.Label(bar, text="session: (none yet)",
+                                      foreground=P["dim"], cursor="hand2")
             self.lbl_sess.pack(side="right")
+            self.lbl_sess.bind("<Button-1>", lambda e: self._open_session_folder())
+            ttk.Label(bar, text="v%s" % __version__,
+                      foreground=P["dim"]).pack(side="right", padx=16)
+
+        # -- menu bar --------------------------------------------------------
+        def _build_menubar(self):
+            m = tk.Menu(self)
+
+            sess = tk.Menu(m, tearoff=0)
+            sess.add_command(label="Open session folder",
+                             command=self._open_session_folder)
+            sess.add_command(label="Copy session path",
+                             command=self._copy_session_path)
+            sess.add_separator()
+            sess.add_command(label="Refresh COM ports", command=self._refresh_ports)
+            sess.add_separator()
+            sess.add_command(label="Exit", command=self.destroy)
+            m.add_cascade(label="Session", menu=sess)
+
+            bike = tk.Menu(m, tearoff=0)
+            bike.add_command(label="Bike info…", command=self._show_bike_info)
+            m.add_cascade(label="Bike", menu=bike)
+
+            hlp = tk.Menu(m, tearoff=0)
+            hlp.add_command(label="Instructions   (F1)",
+                            command=self._show_instructions)
+            hlp.add_command(label="Wiring diagram", command=self._show_wiring)
+            hlp.add_command(label="Safety notes", command=self._show_safety)
+            hlp.add_separator()
+            hlp.add_command(label="About", command=self._show_about)
+            m.add_cascade(label="Help", menu=hlp)
+
+            self.config(menu=m)
+            self.bind("<F1>", lambda e: self._show_instructions())
+
+        def _info_window(self, title, text):
+            win = tk.Toplevel(self)
+            win.title("%s — %s" % (APP_NAME, title))
+            win.geometry("760x560")
+            win.configure(bg=P["console"])
+            frame = ttk.Frame(win)
+            frame.pack(fill="both", expand=True)
+            sb = ttk.Scrollbar(frame)
+            sb.pack(side="right", fill="y")
+            txt = tk.Text(frame, wrap="word", font=("Consolas", 10),
+                          bg=P["console"], fg=P["termfg"], relief="flat",
+                          padx=16, pady=14, insertbackground=P["fg"],
+                          yscrollcommand=sb.set)
+            txt.pack(side="left", fill="both", expand=True)
+            sb.config(command=txt.yview)
+            txt.insert("1.0", text)
+            txt.config(state="disabled")
+            win.transient(self)
+            win.focus_set()
+            return win
+
+        def _open_session_folder(self):
+            if not self.logger:
+                messagebox.showinfo(APP_NAME, "No session yet — connect first.")
+                return
+            try:
+                os.startfile(self.logger.dir)   # Windows
+            except Exception as e:
+                messagebox.showerror(APP_NAME, "Couldn't open folder:\n%s" % e)
+
+        def _copy_session_path(self):
+            if not self.logger:
+                messagebox.showinfo(APP_NAME, "No session yet — connect first.")
+                return
+            self.clipboard_clear()
+            self.clipboard_append(self.logger.dir)
+            messagebox.showinfo(APP_NAME, "Copied to clipboard:\n%s" % self.logger.dir)
+
+        def _bike_facts(self):
+            facts = []
+            if self.version_text:
+                for pat, label in [
+                        (r"Firmware Rev\s*:?\s*(\w+)", "MBB firmware rev"),
+                        (r"Board Rev\s*:?\s*(\w+)", "Board rev"),
+                        (r"Firmware Built\s*:?\s*(.+)", "Firmware built")]:
+                    mm = re.search(pat, self.version_text)
+                    if mm:
+                        facts.append((label, mm.group(1).strip()))
+            for key, label in [("model", "Model"), ("model_year", "Model year"),
+                               ("vin", "VIN"), ("serial", "Board serial"),
+                               ("spfront", "Front sprocket"),
+                               ("sprear", "Rear sprocket"),
+                               ("rwhcirc", "Rear wheel circ")]:
+                if key in self.settings:
+                    facts.append((label, self.settings[key]["value"]))
+            return facts
+
+        def _show_bike_info(self):
+            lines = ["BIKE INFO", ""]
+            facts = self._bike_facts()
+            if facts:
+                for k, v in facts:
+                    lines.append("  %-18s : %s" % (k, v))
+            elif not self.connected:
+                lines.append("Not connected. Connect on the Connect tab, then run")
+                lines.append("FULL BASELINE for model / serial / gearing details.")
+            else:
+                lines.append("Connected, but no baseline yet — click FULL BASELINE")
+                lines.append("on the Read tab to populate model / gearing / serials.")
+            lines += ["", "Login level :", "  %s" % ("logged in"
+                      if self.logged_in else "not logged in")]
+            lines += ["", "Session folder:",
+                      "  %s" % (self.logger.dir if self.logger else "(none yet)")]
+            self._info_window("Bike info", "\n".join(lines))
+
+        def _show_instructions(self, _evt=None):
+            self._info_window("Instructions", INSTRUCTIONS_TEXT)
+
+        def _show_wiring(self):
+            self._info_window("Wiring", WIRING_TEXT)
+
+        def _show_safety(self):
+            self._info_window("Safety notes", SAFETY_TEXT)
+
+        def _show_about(self):
+            import sys
+            text = (
+                "%s  v%s\n\n"
+                "Phase-gated serial console for the 2017 Zero FXS MBB.\n\n"
+                "  Theme backend : %s\n"
+                "  Python        : %s\n"
+                "  Repo          : github.com/rodu4835/zero-console (private)\n"
+                "  License       : MIT (no warranty)\n\n"
+                "Personal diagnostic tool for your own vehicle. Not affiliated\n"
+                "with Zero Motorcycles."
+                % (APP_NAME, __version__, self.sty.get("backend"),
+                   sys.version.split()[0]))
+            self._info_window("About", text)
 
         def _apply_gates(self):
             states = [

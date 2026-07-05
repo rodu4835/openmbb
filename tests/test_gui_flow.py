@@ -75,3 +75,16 @@ def test_full_flow(app):
                if f.startswith("settings_backup")]
     assert backups
     assert not app._errors
+
+
+def test_menu_dialogs_open(app):
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    for opener in (app._show_instructions, app._show_wiring, app._show_safety,
+                   app._show_about, app._show_bike_info):
+        opener()
+        app.update()
+    # bike info should surface the firmware rev parsed from the version banner
+    facts = dict(app._bike_facts())
+    assert facts.get("MBB firmware rev") == "41"
+    assert not app._errors

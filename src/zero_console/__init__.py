@@ -14,4 +14,4 @@ Console work is done PARKED, key on, kill switch off. Never while riding.
 """
 
 APP_NAME = "Zero Console"
-__version__ = "0.3.0"
+__version__ = "0.4.0"

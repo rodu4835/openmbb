@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zero-console"
-version = "0.3.0"
+version = "0.4.0"
 description = "Phase-gated serial console GUI for the 2017 Zero FXS MBB (OBD-II diagnostics)"
 readme = "README.md"
 requires-python = ">=3.9"
