@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zero-console"
+version = "0.3.0"
+description = "Phase-gated serial console GUI for the 2017 Zero FXS MBB (OBD-II diagnostics)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pyserial>=3.5",
+    "sv-ttk>=2.6",   # Windows-11-native ttk theme (graceful fallback if absent)
+]
+
+[project.scripts]
+zero-console = "zero_console.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
