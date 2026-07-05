@@ -8,7 +8,7 @@ config never stops the app, it just falls back to defaults.
 import json
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".zero-console"
+CONFIG_DIR = Path.home() / ".openmbb"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
 

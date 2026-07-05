@@ -1,6 +1,6 @@
 """Headless tests for the safety + transport layers (no display needed).
 
-Run with:  python -m pytest   (or)   zero-console --selftest
+Run with:  python -m pytest   (or)   openmbb --selftest
 """
 
 import os
@@ -8,11 +8,11 @@ import tempfile
 
 import pytest
 
-from zero_console.safety import (WRITE_WHITELIST, BlockedCommandError,
-                                 _v_coast_regen, command_blocked)
-from zero_console.sim import SimPort
-from zero_console.transport import (READ_COMMANDS, SessionLogger, Transport,
-                                    first_number, parse_settings_dump)
+from openmbb.safety import (WRITE_WHITELIST, BlockedCommandError,
+                            _v_coast_regen, command_blocked)
+from openmbb.sim import SimPort
+from openmbb.transport import (READ_COMMANDS, SessionLogger, Transport,
+                               first_number, parse_settings_dump)
 
 
 def make_transport():

@@ -9,8 +9,8 @@ import time
 
 import pytest
 
-from zero_console.safety import WRITE_WHITELIST
-from zero_console.transport import first_number
+from openmbb.safety import WRITE_WHITELIST
+from openmbb.transport import first_number
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def app(monkeypatch):
     errors = []
     monkeypatch.setattr(mb, "showerror", lambda *a, **k: errors.append(a))
     import tempfile
-    from zero_console.gui import build_gui
+    from openmbb.gui import build_gui
     # hermetic: sessions go to a temp dir, never the user's configured location.
     # Build directly (no throwaway probe root) and skip cleanly with no display.
     try:

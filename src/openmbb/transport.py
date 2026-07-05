@@ -25,10 +25,10 @@ DUMP_COMMANDS = ["eventlogdump", "errorlogdump", "dumplogs"]
 class SessionLogger:
     def __init__(self, base_dir=None, tag="session"):
         stamp = _dt.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        # sessions always live in a self-contained "zero-console-sessions"
-        # folder under the chosen base (or cwd), so picking any directory never
+        # sessions always live in a self-contained "openmbb-sessions" folder
+        # under the chosen base (or cwd), so picking any directory never
         # scatters timestamped folders loose into it.
-        root = os.path.join(base_dir or os.getcwd(), "zero-console-sessions")
+        root = os.path.join(base_dir or os.getcwd(), "openmbb-sessions")
         self.dir = os.path.join(root, "%s_%s" % (stamp, tag))
         os.makedirs(self.dir, exist_ok=True)
         self.raw_path = os.path.join(self.dir, "session_raw.log")

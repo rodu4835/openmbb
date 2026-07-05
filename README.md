@@ -1,35 +1,50 @@
-# Zero Console
+# OpenMBB
 
-Phase-gated GUI for the 2017 Zero FXS **MBB serial console** (OBD-II / C3 port).
-Windows-11-native look (Sun Valley theme), read-first, whitelist-only writes.
+Phase-gated GUI for the **MBB serial console** on Gen2 Zero electric
+motorcycles (OBD-II / C3 port). Windows-11-native look (Sun Valley theme),
+read-first, whitelist-only writes.
 
 > Personal diagnostic tool for **your own** vehicle. Not affiliated with Zero
 > Motorcycles. No warranty — see LICENSE. Changing settings may affect your
 > vehicle warranty; you are responsible for what you write to your bike.
 
+## Compatibility
+
+OpenMBB talks to the **MBB (Main Bike Board) console** at 38400 baud with the
+Gen2 command set (`spfront`, `maxcustsp`, `bms`, …). That pins the scope:
+
+| | |
+|---|---|
+| **Verified** | 2017 Zero FXS (MBB firmware rev 41) |
+| **Should work (same console, unverified)** | Gen2 MBB Zeros, ~2013–2019: **S, SR, DS, DSR, FX, FXS, FXE**. The write panel auto-adapts — it only shows whitelisted settings that appear in *that* bike's live dump. |
+| **Not compatible as-is** | Pre-2013 **Gen1** (9600 baud) and 2020+ **Cypher III / SR-F generation** (SR/F, SR/S, DSR/X, newer S/DS) — different baud *and* a different console language. |
+
+The console baud is fixed at 38400 (the Gen2 rate). Gen1/Gen3 would need both a
+different baud and a different command set, so OpenMBB is a Gen2 tool by design.
+
 ## Install
 
 ```
-git clone <your-private-repo-url> zero-console
-cd zero-console
+git clone https://github.com/rodu4835/openmbb
+cd openmbb
 pip install .            # or:  pip install -e .   for a dev/editable install
 ```
 
 Then run:
 
 ```
-zero-console             # real serial (auto-lists COM ports)
-zero-console --sim       # simulator — click through everything at the desk
-zero-console --port COM4 # preselect a port
-zero-console --selftest  # headless transport/safety tests
-zero-console --smoketest # build the GUI once, sim-connect, exit
+openmbb             # real serial (auto-lists COM ports)
+openmbb --sim       # simulator — click through everything at the desk
+openmbb --port COM4 # preselect a port
+openmbb --selftest  # headless transport/safety tests
+openmbb --smoketest # build the GUI once, sim-connect, exit
 ```
 
 Requires Python 3.9+. Dependencies (`pyserial`, `sv-ttk`) install automatically.
 If `sv-ttk` is ever unavailable the app falls back to a built-in dark theme.
 
-> If the `zero-console` command isn't found after install, your Python
-> `Scripts` dir isn't on PATH — use `python -m zero_console.cli` (same flags).
+> If the `openmbb` command isn't found after install, your Python `Scripts` dir
+> isn't on PATH — use `python -m openmbb.cli` (same flags).
 
 ## Wiring (FTDI TTL-232R-3V3 → OBD-II J1962, port under the seat)
 
@@ -41,7 +56,8 @@ If `sv-ttk` is ever unavailable the app falls back to a built-in dark theme.
 | **Red (+5 V)** | — | — | **NEVER connected** |
 
 38400 baud, 8-N-1, no flow control, newline CR-LF. Bike PARKED, key ON,
-kill switch OFF. Never stream the console while riding.
+kill switch OFF. Never stream the console while riding. (Port location and
+pin-12 wiring vary by year; on 2017+ FX/FXS the port is under the seat.)
 
 ## Phase flow
 
@@ -73,35 +89,35 @@ kill switch OFF. Never stream the console while riding.
 ## Package layout
 
 ```
-src/zero_console/
-  __init__.py    version + module docstring
+src/openmbb/
+  __init__.py    name, version, module docstring
   safety.py      blocklist, write whitelist, validators
   transport.py   serial transport, session logging, settings parser
-  sim.py         fake serial port (real MBB transcripts, adapted to this bike)
+  sim.py         fake serial port (synthetic fixtures for hardware-free use)
   theme.py       Sun Valley (Win11) theme with dark fallback
-  gui.py         the four phase-gated Tkinter panels
+  gui.py         the four phase-gated Tkinter panels + menu bar
   cli.py         entry point + --selftest / --smoketest
-tests/           pytest suite (safety/transport headless + GUI flow)
+tests/           pytest suite (safety/transport/config + GUI flow)
 ```
 
 ## Session output
 
-Everything lands in `<save-base>/zero-console-sessions/<timestamp>_<port>/`:
+Everything lands in `<save-base>/openmbb-sessions/<timestamp>_<port>/`:
 `session_raw.log` (every byte, timestamped), one file per command,
 `settings_baseline_*.txt`, `settings_backup_*.txt` (auto, pre-write),
 `writes_journal.txt`.
 
 **Where it saves:** by default the `<save-base>` is the current working
 directory. Change it via **Session → Set save location…** (remembered across
-runs in `~/.zero-console/config.json`) or per-launch with `--logdir <path>`.
-The current save target is shown in the top status strip and is clickable.
+runs in `~/.openmbb/config.json`) or per-launch with `--logdir <path>`. The
+current save target is shown in the top status strip and is clickable.
 
 ## First real session checklist
 
 1. Meter check: FTDI Orange idles ~3.3 V vs Black; Red taped off.
 2. Connect & probe (Phase 0). Garbage at 38400 ⇒ suspect Tx/Rx swap — stop.
-3. FULL BASELINE before anything else. Firmware rev 41 is newer than all
+3. FULL BASELINE before anything else. Recent firmware may be newer than the
    community docs — the captured `help`/`set` output is the ground truth; the
-   simulator's menus are 2014-era transcripts adapted to this bike.
+   simulator's menus are synthetic samples, not a live capture.
 4. Login attempt only after the baseline is on disk.
 5. No writes on day one. Bring the session folder home first.

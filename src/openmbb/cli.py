@@ -1,10 +1,10 @@
 """Command-line entry point + headless diagnostics.
 
-  zero-console                 # launch GUI on real serial (needs pyserial)
-  zero-console --sim           # simulator (no hardware)
-  zero-console --port COM4     # preselect a port
-  zero-console --selftest      # headless transport/safety tests
-  zero-console --smoketest     # build the GUI once and exit
+  openmbb                 # launch GUI on real serial (needs pyserial)
+  openmbb --sim           # simulator (no hardware)
+  openmbb --port COM4     # preselect a port
+  openmbb --selftest      # headless transport/safety tests
+  openmbb --smoketest     # build the GUI once and exit
 """
 
 import argparse
@@ -117,7 +117,8 @@ def smoketest():
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Zero Console — 2017 Zero FXS MBB tool")
+    ap = argparse.ArgumentParser(
+        description="OpenMBB — serial console for Gen2 MBB-based Zero motorcycles")
     ap.add_argument("--sim", action="store_true", help="simulator mode (no hardware)")
     ap.add_argument("--port", help="preselect a COM port")
     ap.add_argument("--logdir", help="base dir for session logs (overrides saved config)")
@@ -134,7 +135,7 @@ def main():
             import serial  # noqa: F401
         except ImportError:
             print("pyserial is not installed. Install the package (pip install .) or\n"
-                  "run the simulator:  zero-console --sim")
+                  "run the simulator:  openmbb --sim")
             sys.exit(1)
     from .config import get_log_dir
     from .gui import build_gui

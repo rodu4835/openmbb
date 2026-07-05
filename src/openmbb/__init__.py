@@ -1,4 +1,4 @@
-"""Zero Console — phase-gated serial console tool for a 2017 Zero FXS MBB.
+"""OpenMBB — phase-gated serial console for Gen2 MBB-based Zero motorcycles.
 
 Phases:  0 Connect -> 1 Read (baseline) -> 2 Login -> 3 Writes (whitelist-only)
 
@@ -13,5 +13,5 @@ Safety model (enforced in the TRANSPORT layer, not just the UI):
 Console work is done PARKED, key on, kill switch off. Never while riding.
 """
 
-APP_NAME = "Zero Console"
-__version__ = "0.5.0"
+APP_NAME = "OpenMBB"
+__version__ = "0.6.0"

@@ -94,7 +94,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
     class App(tk.Tk):
         def __init__(self):
             super().__init__()
-            self.title("%s v%s  —  2017 Zero FXS MBB" % (APP_NAME, __version__))
+            self.title("%s v%s  —  Zero MBB console (Gen2)" % (APP_NAME, __version__))
             self.geometry("1080x760")
             self.minsize(900, 620)
             self.sty = apply_theme(self)
@@ -223,7 +223,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             return win
 
         def _session_root(self):
-            return os.path.join(self.log_dir or os.getcwd(), "zero-console-sessions")
+            return os.path.join(self.log_dir or os.getcwd(), "openmbb-sessions")
 
         def _refresh_save_label(self):
             if self.logger:
@@ -233,7 +233,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _set_log_dir(self):
             chosen = filedialog.askdirectory(
-                title="Choose where Zero Console saves session logs",
+                title="Choose where OpenMBB saves session logs",
                 initialdir=self.log_dir or os.getcwd(), mustexist=True)
             if not chosen:
                 return
@@ -316,10 +316,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             import sys
             text = (
                 "%s  v%s\n\n"
-                "Phase-gated serial console for the 2017 Zero FXS MBB.\n\n"
+                "Serial console & diagnostics for Gen2 MBB-based Zero\n"
+                "electric motorcycles (~2013-2019: S/SR/DS/DSR/FX/FXS/FXE).\n"
+                "Verified on the 2017 FXS (MBB rev 41).\n\n"
                 "  Theme backend : %s\n"
                 "  Python        : %s\n"
-                "  Repo          : github.com/rodu4835/zero-console (private)\n"
+                "  Repo          : github.com/rodu4835/openmbb\n"
                 "  License       : MIT (no warranty)\n\n"
                 "Personal diagnostic tool for your own vehicle. Not affiliated\n"
                 "with Zero Motorcycles."
