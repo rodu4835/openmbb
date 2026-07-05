@@ -78,6 +78,39 @@ def test_full_flow(app):
     assert not app._errors
 
 
+def test_analyze_tab(app):
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+
+    # load the just-captured session into the Analyze tab
+    app._analyze_use_current()
+    app.update()
+    assert app.analyze_session is not None
+    assert len(app.health_tree.get_children()) > 3      # health metrics rendered
+    assert len(app.ride_tree.get_children()) >= 1        # rides parsed from dumplogs
+
+    # gearing calculator
+    app.gear_front.set("22")
+    app.gear_rear.set("88")
+    app._gearing_compute()
+    gtext = app.txt_gearing.get("1.0", "end")
+    assert "4.00" in gtext and "spfront = 22" in gtext
+
+    # compare de-dupes the same session (adding current twice keeps one)
+    app._compare_add_current()
+    app._compare_add_current()
+    app.update()
+    assert len(app.compare_list) == 1
+
+    # bad gearing input is rejected gracefully, not crashed
+    app.gear_circ.set("0")
+    app._gearing_compute()
+    assert "positive" in app.txt_gearing.get("1.0", "end").lower()
+    assert not app._errors
+
+
 def test_menu_dialogs_open(app):
     app._connect()
     assert _pump(app, lambda: app.connected)

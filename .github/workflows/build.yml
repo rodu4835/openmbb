@@ -1,0 +1,81 @@
+name: build
+
+# Builds the single-file OpenMBB binary for Windows and Linux. Runs on any
+# tag push (attaches binaries to a GitHub Release) or on manual dispatch.
+# PyInstaller can't cross-compile, so each binary is built on its own runner.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write        # needed to create/attach releases on tag builds
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: openmbb-windows-x64.exe
+            bin: dist/openmbb.exe
+          - os: ubuntu-22.04
+            asset: openmbb-linux-x64
+            bin: dist/openmbb
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Linux GUI + build deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
+
+      - name: Install package + dev tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Full test suite
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m pytest -q; \
+          else python -m pytest -q; fi
+
+      - name: Build single-file binary
+        run: python packaging/build.py
+
+      - name: Verify binary (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ./dist/openmbb --selftest
+          xvfb-run -a ./dist/openmbb --smoketest
+
+      - name: Verify binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\openmbb.exe -ArgumentList '--selftest' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "frozen --selftest failed ($($p.ExitCode))" }
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "${{ matrix.bin }}" "out/${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/${{ matrix.asset }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/${{ matrix.asset }}

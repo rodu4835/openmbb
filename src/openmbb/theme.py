@@ -29,42 +29,77 @@ PALETTE = {
 DANGER_RED = "#c42b1c"        # Win11 system "critical" red
 DANGER_RED_ACTIVE = "#b02718"
 
+# Resolved at apply_theme() time to families that exist on the running OS.
+UI_FAMILY = "TkDefaultFont"
+MONO_FAMILY = "TkFixedFont"
+
+# Preference order: native Windows first, then common Linux/macOS families,
+# then a Tk named font that always resolves.
+_UI_PREFS = ["Segoe UI", "DejaVu Sans", "Noto Sans", "Cantarell", "Ubuntu",
+             "Helvetica Neue", "Arial"]
+_MONO_PREFS = ["Consolas", "DejaVu Sans Mono", "Noto Sans Mono",
+               "Liberation Mono", "Ubuntu Mono", "Menlo", "Courier New"]
+
+
+def _families(root):
+    try:
+        from tkinter import font
+        return set(font.families(root))
+    except Exception:
+        return set()
+
+
+def _pick(avail, prefs, default):
+    for p in prefs:
+        if p in avail:
+            return p
+    return default
+
 
 def apply_theme(root):
-    """Apply the best available theme; return resolved style names."""
+    """Apply the best available theme; return resolved style names + fonts.
+
+    Cross-platform: picks UI/monospace font families that actually exist on the
+    running OS, and falls back to a hand-rolled dark clam theme if sv-ttk is
+    unavailable.
+    """
     from tkinter import ttk
+    global UI_FAMILY, MONO_FAMILY
+    avail = _families(root)
+    UI_FAMILY = _pick(avail, _UI_PREFS, "TkDefaultFont")
+    MONO_FAMILY = _pick(avail, _MONO_PREFS, "TkFixedFont")
+    ui = UI_FAMILY
     try:
         import sv_ttk
         sv_ttk.set_theme("dark")
         style = ttk.Style(root)
-        # Native accent (blue) already exists as Accent.TButton and the toggle
-        # switch as Switch.TCheckbutton. Add a red danger variant.
+        # Native accent (blue) and the toggle switch already exist; add a red
+        # danger variant.
         style.configure("Danger.TButton", background=DANGER_RED,
                         foreground="#ffffff")
         style.map("Danger.TButton",
                   background=[("active", DANGER_RED_ACTIVE),
                               ("pressed", DANGER_RED_ACTIVE)])
-        _tree_tags(style)
-        return {"backend": "sv-ttk", "accent": "Accent.TButton",
-                "danger": "Danger.TButton", "toggle": "Switch.TCheckbutton"}
+        style.configure("Treeview", rowheight=28)
+        out = {"backend": "sv-ttk", "accent": "Accent.TButton",
+               "danger": "Danger.TButton", "toggle": "Switch.TCheckbutton"}
     except Exception:
-        _apply_clam(root)
-        return {"backend": "clam", "accent": "Accent.TButton",
-                "danger": "Danger.TButton", "toggle": "Unlock.TCheckbutton"}
+        _apply_clam(root, ui)
+        out = {"backend": "clam", "accent": "Accent.TButton",
+               "danger": "Danger.TButton", "toggle": "Unlock.TCheckbutton"}
+    out["ui"] = UI_FAMILY
+    out["mono"] = MONO_FAMILY
+    return out
 
 
-def _tree_tags(style):
-    style.configure("Treeview", rowheight=28)
-
-
-def _apply_clam(root):
+def _apply_clam(root, ui):
     from tkinter import ttk
     P = PALETTE
     style = ttk.Style(root)
     style.theme_use("clam")
     root.configure(bg=P["bg"])
     style.configure(".", background=P["bg"], foreground=P["fg"],
-                    font=("Segoe UI", 10), fieldbackground=P["field"],
+                    font=(ui, 10), fieldbackground=P["field"],
                     troughcolor=P["panel"], bordercolor=P["panel"],
                     lightcolor=P["panel"], darkcolor=P["bg"],
                     focuscolor=P["green"])
@@ -86,14 +121,14 @@ def _apply_clam(root):
     style.configure("TNotebook", background=P["bg"], borderwidth=0,
                     tabmargins=(8, 8, 8, 0))
     style.configure("TNotebook.Tab", background=P["panel"], foreground=P["dim"],
-                    padding=(16, 8), font=("Segoe UI", 10, "bold"))
+                    padding=(16, 8), font=(ui, 10, "bold"))
     style.map("TNotebook.Tab",
               background=[("selected", P["field"])],
               foreground=[("selected", P["green"]), ("disabled", "#3d414d")])
     style.configure("Treeview", background=P["field"], fieldbackground=P["field"],
                     foreground=P["fg"], rowheight=26, borderwidth=0)
     style.configure("Treeview.Heading", background=P["panel"], foreground=P["dim"],
-                    font=("Segoe UI", 9, "bold"), borderwidth=0)
+                    font=(ui, 9, "bold"), borderwidth=0)
     style.map("Treeview.Heading", background=[("active", P["panel"])])
     style.map("Treeview", background=[("selected", P["sel"])],
               foreground=[("selected", "#eafff2")])
@@ -111,7 +146,7 @@ def _apply_clam(root):
     style.map("TCheckbutton", background=[("active", P["bg"])],
               indicatorcolor=[("selected", P["green"]), ("!selected", P["field"])])
     style.configure("Unlock.TCheckbutton", foreground=P["warn"],
-                    font=("Segoe UI", 10, "bold"))
+                    font=(ui, 10, "bold"))
     style.configure("Horizontal.TProgressbar", background=P["green"],
                     troughcolor=P["panel"], borderwidth=0,
                     lightcolor=P["green"], darkcolor=P["green"])

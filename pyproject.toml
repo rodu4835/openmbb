@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openmbb"
-version = "0.6.0"
+version = "0.7.0"
 description = "Phase-gated serial console & diagnostics for Gen2 MBB-based Zero electric motorcycles (2013-2019: S/SR/DS/DSR/FX/FXS/FXE)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,6 +12,9 @@ dependencies = [
     "pyserial>=3.5",
     "sv-ttk>=2.6",   # Windows-11-native ttk theme (graceful fallback if absent)
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pyinstaller>=6"]
 
 [project.scripts]
 openmbb = "openmbb.cli:main"

@@ -1,14 +1,31 @@
-"""Tkinter GUI: the four phase-gated panels (Connect / Read / Login / Writes)."""
+"""Tkinter GUI: four phase-gated panels (Connect / Read / Login / Writes) plus
+an always-available Analyze tab (Health / Rides / Compare / Gearing)."""
 
 import datetime as _dt
 import difflib
 import os
 import queue
 import re
+import subprocess
+import sys
 import threading
 import time
 
+
+def open_in_file_manager(path):
+    """Open a folder in the OS file manager (Windows / macOS / Linux)."""
+    if sys.platform == "win32":
+        os.startfile(path)                       # noqa: only exists on Windows
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
+
 from . import APP_NAME, __version__
+from . import compare as compare_mod
+from . import gearing as gearing_mod
+from . import health as health_mod
+from . import parsers, rides, sessions
 from .safety import (READONLY_GUARDS, WRITE_PANEL_CONTEXT, WRITE_WHITELIST,
                      command_blocked)
 from .sim import SimPort
@@ -19,7 +36,7 @@ from .transport import (DUMP_COMMANDS, PROMPT_RE, READ_COMMANDS, SessionLogger,
 
 
 INSTRUCTIONS_TEXT = """\
-HOW TO USE ZERO CONSOLE
+HOW TO USE OPENMBB
 
 The app is phase-gated — each phase unlocks the next. You can stop after any
 phase; closing the window never loses data (everything is saved as you go).
@@ -44,6 +61,16 @@ PHASE 3 — WRITES
   confirm dialog. Only whitelisted settings that actually exist on your bike
   appear. Each write re-reads the current value, backs up all settings, sends
   the change, reads it back to verify, and journals it (with a Revert button).
+
+ANALYZE (always available, no bike needed)
+  Reads a saved session folder (or the current one) and interprets it:
+    - Health : SOC vs voltage, cell balance, capacity, temps, cycles, and the
+               effective gearing ratio, each flagged ok / watch / alert.
+    - Rides  : per-ride distance, SOC%/km, and temps parsed from the log dump.
+    - Compare: pick 2+ sessions to see settings changes and capacity / gearing
+               trends over time (battery degradation tracking).
+    - Gearing: enter new front/rear teeth to get the ratio and the exact
+               spfront/sprear/rwhcirc values to write.
 
 TIP: Session menu -> "Open session folder" jumps to where everything is saved.
 """
@@ -110,6 +137,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.settings_order = []
             self.journal_entries = []   # (name, old, new)
             self._busy = False
+            self.analyze_session = None      # currently loaded Session for analysis
+            self.compare_list = []           # [Session, ...] for the Compare panel
             # save base for session folders: explicit arg > saved config > cwd
             self.log_dir = log_dir or config.get_log_dir()
             # thread-safe UI callback queue: workers must never touch Tk
@@ -125,13 +154,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._build_read_tab()
             self._build_login_tab()
             self._build_write_tab()
+            self._build_analyze_tab()
             self._apply_gates()
             self._refresh_save_label()
 
         # -- helpers ---------------------------------------------------------
         def _console_text(self, parent, height, fg=None):
             return tk.Text(parent, height=height, state="disabled",
-                           font=("Consolas", 9), bg=P["console"],
+                           font=(self.sty["mono"], 9), bg=P["console"],
                            fg=fg or P["termfg"], insertbackground=P["fg"],
                            selectbackground=P["sel"],
                            selectforeground="#eafff2",
@@ -154,7 +184,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             bar.pack(fill="x")
             self.lbl_conn = ttk.Label(bar, text="● DISCONNECTED",
                                       foreground=P["danger"],
-                                      font=("Segoe UI", 10, "bold"))
+                                      font=(self.sty["ui"], 10, "bold"))
             self.lbl_conn.pack(side="left")
             self.lbl_ver = ttk.Label(bar, text="", foreground=P["green"])
             self.lbl_ver.pack(side="left", padx=16)
@@ -210,7 +240,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             frame.pack(fill="both", expand=True)
             sb = ttk.Scrollbar(frame)
             sb.pack(side="right", fill="y")
-            txt = tk.Text(frame, wrap="word", font=("Consolas", 10),
+            txt = tk.Text(frame, wrap="word", font=(self.sty["mono"], 10),
                           bg=P["console"], fg=P["termfg"], relief="flat",
                           padx=16, pady=14, insertbackground=P["fg"],
                           yscrollcommand=sb.set)
@@ -256,7 +286,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                     "Logs will save under:\n%s" % self._session_root())
                 return
             try:
-                os.startfile(target)   # Windows
+                open_in_file_manager(target)
             except Exception as e:
                 messagebox.showerror(APP_NAME, "Couldn't open folder:\n%s" % e)
 
@@ -698,7 +728,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             jrow = ttk.Frame(f)
             jrow.pack(fill="both", expand=True)
             self.lst_journal = tk.Listbox(
-                jrow, height=5, font=("Consolas", 9), bg=P["console"],
+                jrow, height=5, font=(self.sty["mono"], 9), bg=P["console"],
                 fg=P["termfg"], selectbackground=P["sel"],
                 selectforeground="#eafff2", relief="flat",
                 highlightthickness=1, highlightbackground=P["panel"],
@@ -816,5 +846,287 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     break
             messagebox.showinfo(APP_NAME, "Revert staged: %s -> %s. Review and press "
                                 "Write… to apply (same confirm/backup flow)." % (name, old))
+
+        # -- Analyze tab (Health / Rides / Compare / Gearing) ----------------
+        def _build_analyze_tab(self):
+            f = ttk.Frame(self.nb, padding=10)
+            self.nb.add(f, text=" 4 · Analyze ")
+
+            top = ttk.Frame(f)
+            top.pack(fill="x")
+            ttk.Button(top, text="Load session folder…",
+                       command=self._analyze_load).pack(side="left")
+            ttk.Button(top, text="Use current session",
+                       command=self._analyze_use_current).pack(side="left", padx=6)
+            self.lbl_loaded = ttk.Label(top, text="no session loaded",
+                                        foreground=P["dim"])
+            self.lbl_loaded.pack(side="left", padx=12)
+
+            sub = ttk.Notebook(f)
+            sub.pack(fill="both", expand=True, pady=(8, 0))
+
+            # Health
+            hf = ttk.Frame(sub, padding=8)
+            sub.add(hf, text=" Health ")
+            cols = ("metric", "value", "status")
+            self.health_tree = ttk.Treeview(hf, columns=cols, show="headings", height=12)
+            for c, w in zip(cols, (200, 260, 90)):
+                self.health_tree.heading(c, text=c.title())
+                self.health_tree.column(c, width=w, anchor="w")
+            for tag, col in (("ok", "#7fe0a0"), ("watch", P["warn"]),
+                             ("alert", P["danger"]), ("info", P["fg"])):
+                self.health_tree.tag_configure(tag, foreground=col)
+            self.health_tree.pack(fill="both", expand=True)
+            self.health_tree.bind("<<TreeviewSelect>>", self._health_note)
+            self.lbl_health_note = ttk.Label(hf, text="", wraplength=980,
+                                             foreground=P["dim"], justify="left")
+            self.lbl_health_note.pack(anchor="w", pady=(6, 0))
+
+            # Rides
+            rf = ttk.Frame(sub, padding=8)
+            sub.add(rf, text=" Rides ")
+            self.lbl_ride_totals = ttk.Label(rf, text="Load a session with a "
+                                             "dumplogs capture to analyze rides.",
+                                             foreground=P["dim"])
+            self.lbl_ride_totals.pack(anchor="w")
+            rcols = ("start", "km", "soc", "socpkm", "temp", "rpm")
+            heads = ("Start", "Distance km", "SOC used %", "SOC%/km",
+                     "Max temp C", "Max rpm")
+            self.ride_tree = ttk.Treeview(rf, columns=rcols, show="headings", height=11)
+            for c, h, w in zip(rcols, heads, (150, 100, 90, 90, 90, 90)):
+                self.ride_tree.heading(c, text=h)
+                self.ride_tree.column(c, width=w, anchor="w")
+            self.ride_tree.pack(fill="both", expand=True, pady=(6, 0))
+
+            # Compare
+            cf = ttk.Frame(sub, padding=8)
+            sub.add(cf, text=" Compare ")
+            crow = ttk.Frame(cf)
+            crow.pack(fill="x")
+            ttk.Button(crow, text="Add loaded/current",
+                       command=self._compare_add_current).pack(side="left")
+            ttk.Button(crow, text="Add folder…",
+                       command=self._compare_add_folder).pack(side="left", padx=6)
+            ttk.Button(crow, text="Clear",
+                       command=self._compare_clear).pack(side="left")
+            self.txt_compare = self._console_text(cf, 16)
+            self.txt_compare.pack(fill="both", expand=True, pady=(8, 0))
+
+            # Gearing
+            gf = ttk.Frame(sub, padding=8)
+            sub.add(gf, text=" Gearing ")
+            grow = ttk.Frame(gf)
+            grow.pack(fill="x")
+            self.gear_front = tk.StringVar(value="22")
+            self.gear_rear = tk.StringVar(value="88")
+            self.gear_circ = tk.StringVar(value=str(gearing_mod.DEFAULT_CIRC_MM))
+            for label, var, w in (("Front teeth", self.gear_front, 6),
+                                  ("Rear teeth", self.gear_rear, 6),
+                                  ("Wheel circ mm", self.gear_circ, 8)):
+                ttk.Label(grow, text=label + ":").pack(side="left", padx=(0, 2))
+                ttk.Entry(grow, textvariable=var, width=w).pack(side="left", padx=(0, 10))
+            ttk.Button(grow, text="Compute", style=self.sty["accent"],
+                       command=self._gearing_compute).pack(side="left")
+            self.txt_gearing = self._console_text(gf, 12)
+            self.txt_gearing.pack(fill="both", expand=True, pady=(8, 4))
+            grow2 = ttk.Frame(gf)
+            grow2.pack(fill="x")
+            ttk.Button(grow2, text="Copy spfront/sprear/rwhcirc",
+                       command=self._gearing_copy).pack(side="left")
+            ttk.Button(grow2, text="Open Writes tab",
+                       command=lambda: self.nb.select(3)).pack(side="left", padx=6)
+            self._gearing_compute()   # populate with the default 22/88 plan
+
+        def _analyze_set(self, session):
+            self.analyze_session = session
+            self.lbl_loaded.config(text="loaded: %s" % session.name,
+                                   foreground=P["green"])
+            self._render_health()
+            self._render_rides()
+
+        def _analyze_load(self):
+            base = self._session_root()
+            folder = filedialog.askdirectory(
+                title="Choose a session folder to analyze",
+                initialdir=base if os.path.isdir(base) else (self.log_dir or os.getcwd()))
+            if not folder:
+                return
+            try:
+                self._analyze_set(sessions.load_session(folder))
+            except Exception as e:
+                messagebox.showerror(APP_NAME, "Couldn't load session:\n%s" % e)
+
+        def _analyze_use_current(self):
+            if not self.logger:
+                messagebox.showinfo(APP_NAME, "No live session yet — connect and "
+                                    "capture first, or load a saved folder.")
+                return
+            self._analyze_set(sessions.load_session(self.logger.dir))
+
+        def _render_health(self):
+            self.health_tree.delete(*self.health_tree.get_children())
+            self._health_notes = {}
+            if not self.analyze_session:
+                return
+            for i, m in enumerate(health_mod.health_snapshot(self.analyze_session)):
+                iid = str(i)
+                self.health_tree.insert("", "end", iid=iid, tags=(m["status"],),
+                                        values=(m["label"], m["value"],
+                                                m["status"].upper()))
+                self._health_notes[iid] = m["note"]
+
+        def _health_note(self, _evt=None):
+            sel = self.health_tree.selection()
+            note = self._health_notes.get(sel[0], "") if sel else ""
+            self.lbl_health_note.config(text=note)
+
+        def _render_rides(self):
+            self.ride_tree.delete(*self.ride_tree.get_children())
+            if not self.analyze_session:
+                self.lbl_ride_totals.config(text="Load a session with a dumplogs "
+                                            "capture to analyze rides.")
+                return
+            recs = parsers.parse_ride_log(self.analyze_session.cmd("dumplogs"))
+            summ = rides.summarize_rides(recs)
+            t = summ["totals"]
+            if not summ["rides"]:
+                self.lbl_ride_totals.config(text="No riding records found in this "
+                                            "session's dumplogs capture.")
+                return
+            self.lbl_ride_totals.config(
+                text="%d rides · %.1f km · mean %s SOC%%/km · max temp %s C · %d samples"
+                % (t["ride_count"], t["total_km"], t["mean_soc_per_km"],
+                   t["max_temp_c"], t["samples"]))
+            for r in summ["rides"]:
+                self.ride_tree.insert("", "end", values=(
+                    r["start_ts"] or "?", r["distance_km"], r["soc_used_pct"],
+                    r["soc_per_km"] if r["soc_per_km"] is not None else "n/a",
+                    r["max_temp_c"] if r["max_temp_c"] is not None else "n/a",
+                    r["max_rpm"] if r["max_rpm"] is not None else "n/a"))
+
+        def _compare_out(self, text):
+            self.txt_compare.config(state="normal")
+            self.txt_compare.insert("end", text + "\n")
+            self.txt_compare.see("end")
+            self.txt_compare.config(state="disabled")
+
+        def _compare_add(self, s):
+            if any(x.dir == s.dir for x in self.compare_list):
+                messagebox.showinfo(APP_NAME, "That session is already in the "
+                                    "comparison.")
+                return
+            self.compare_list.append(s)
+            self._render_compare()
+
+        def _compare_add_current(self):
+            s = self.analyze_session
+            if not s and self.logger:
+                s = sessions.load_session(self.logger.dir)
+            if not s:
+                messagebox.showinfo(APP_NAME, "Load or capture a session first.")
+                return
+            self._compare_add(s)
+
+        def _compare_add_folder(self):
+            folder = filedialog.askdirectory(
+                title="Add a session folder to the comparison",
+                initialdir=self._session_root())
+            if not folder:
+                return
+            try:
+                s = sessions.load_session(folder)
+            except Exception as e:
+                messagebox.showerror(APP_NAME, "Couldn't load session:\n%s" % e)
+                return
+            self._compare_add(s)
+
+        def _compare_clear(self):
+            self.compare_list = []
+            self.txt_compare.config(state="normal")
+            self.txt_compare.delete("1.0", "end")
+            self.txt_compare.config(state="disabled")
+
+        def _render_compare(self):
+            self.txt_compare.config(state="normal")
+            self.txt_compare.delete("1.0", "end")
+            self.txt_compare.config(state="disabled")
+            # order oldest->newest by folder mtime (works for any folder name);
+            # stable sort keeps insertion order when mtimes tie/are unavailable.
+            def _mtime(s):
+                try:
+                    return os.path.getmtime(s.dir)
+                except OSError:
+                    return 0
+            ordered = sorted(self.compare_list, key=_mtime)
+            self._compare_out("Comparing %d session(s), oldest -> newest:"
+                              % len(ordered))
+            for s in ordered:
+                self._compare_out("  - %s" % s.name)
+            if len(ordered) < 2:
+                self._compare_out("\nAdd a second session to see the diff and trends.")
+                return
+            res = compare_mod.compare_sessions(ordered)
+            self._compare_out("\nSETTINGS CHANGED (%s -> %s):"
+                              % (ordered[0].name, ordered[-1].name))
+            if res["settings_diff"]:
+                for name, old, new in res["settings_diff"]:
+                    self._compare_out("  %-16s %s -> %s" % (name, old, new))
+            else:
+                self._compare_out("  (none)")
+            self._compare_out("\nLEARNED PACK CAPACITY:")
+            for n, cap in res["capacity_trend"]:
+                self._compare_out("  %-28s %s Ah" % (n, cap if cap is not None else "n/a"))
+            self._compare_out("\nEFFECTIVE GEARING RATIO:")
+            for n, r in res["gearing_trend"]:
+                self._compare_out("  %-28s %s"
+                                  % (n, ("%.2f:1" % r) if r is not None else "n/a"))
+
+        def _gearing_plan(self):
+            try:
+                front = int(self.gear_front.get())
+                rear = int(self.gear_rear.get())
+                circ = int(float(self.gear_circ.get()))
+            except ValueError:
+                return None, "Enter whole numbers for teeth and wheel circumference."
+            if front <= 0 or rear <= 0 or circ <= 0:
+                return None, "Teeth counts and wheel circumference must be positive."
+            return gearing_mod.gearing_plan(front, rear, circ), None
+
+        def _gearing_compute(self):
+            plan, err = self._gearing_plan()
+            self.txt_gearing.config(state="normal")
+            self.txt_gearing.delete("1.0", "end")
+            if err:
+                self.txt_gearing.insert("end", err)
+            else:
+                lines = [
+                    gearing_mod.describe_plan(plan),
+                    "",
+                    "  Ratio            : %.3f:1" % plan["ratio"],
+                    "  vs stock 4.50:1  : %+.1f%%  (%s)"
+                    % (plan["vs_ref_pct"],
+                       "taller" if plan["taller_than_ref"] else "shorter"),
+                    "  Top-speed factor : %.3fx" % plan["top_speed_factor"],
+                    "  Motor rev/km     : %.0f" % plan["revs_per_km"],
+                    "  Closest setup    : %s" % plan["nearest"],
+                    "",
+                    "MBB settings to write (one at a time, via the Writes tab):",
+                    "  spfront = %d" % plan["spfront"],
+                    "  sprear  = %d" % plan["sprear"],
+                    "  rwhcirc = %d mm   (then trim against GPS)" % plan["rwhcirc"],
+                ]
+                self.txt_gearing.insert("end", "\n".join(lines))
+            self.txt_gearing.config(state="disabled")
+
+        def _gearing_copy(self):
+            plan, err = self._gearing_plan()
+            if err:
+                messagebox.showerror(APP_NAME, err)
+                return
+            text = "spfront=%d sprear=%d rwhcirc=%d" % (
+                plan["spfront"], plan["sprear"], plan["rwhcirc"])
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            messagebox.showinfo(APP_NAME, "Copied:\n%s" % text)
 
     return App()

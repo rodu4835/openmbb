@@ -140,6 +140,7 @@ SIM_STATS = """\
   Max motor temp      : 118 C
   Max controller temp : 52 C
   Lifetime efficiency : 64.8 Wh/km
+  Odometer (motor)    : 14088220 rev
   Odometer            : 6155 km (3825 mi)
   Top speed           : 137 kph (85 mph)
   Max motor speed     : 5449 rpm"""
