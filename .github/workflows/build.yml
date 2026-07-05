@@ -74,8 +74,20 @@ jobs:
           name: ${{ matrix.asset }}
           path: out/${{ matrix.asset }}
 
+  # One release job attaches both binaries — avoids the matrix jobs racing to
+  # create the same release concurrently.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download built binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-all
+          merge-multiple: true
+
       - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: out/${{ matrix.asset }}
+          files: dist-all/*
