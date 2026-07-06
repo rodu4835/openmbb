@@ -6,3 +6,5 @@ dist/
 .venv/
 venv/
 openmbb-sessions/
+packaging/Output/
+out/

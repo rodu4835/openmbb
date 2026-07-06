@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openmbb"
-version = "0.8.0"
+version = "0.9.0"
 description = "Phase-gated serial console & diagnostics for Gen2 MBB-based Zero electric motorcycles (2013-2019: S/SR/DS/DSR/FX/FXS/FXE)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -14,10 +14,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pyinstaller>=6"]
+dev = ["pytest>=7", "pyinstaller>=6", "pillow>=10"]  # pillow: icon regeneration only
 
 [project.scripts]
 openmbb = "openmbb.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+openmbb = ["assets/*.png"]

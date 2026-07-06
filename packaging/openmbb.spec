@@ -9,6 +9,7 @@ files must be collected explicitly) into one self-contained executable.
 """
 
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_all
 
@@ -24,6 +25,9 @@ hiddenimports += [
 
 here = SPECPATH                                     # dir of this spec file
 src = os.path.abspath(os.path.join(here, "..", "src"))
+
+# Window-icon PNGs (loaded at runtime via importlib.resources).
+datas += [(os.path.join(src, "openmbb", "assets"), "openmbb/assets")]
 
 a = Analysis(
     [os.path.join(here, "pyinstaller_entry.py")],
@@ -58,4 +62,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    # .exe / taskbar / Explorer icon; PyInstaller only embeds icons on Windows.
+    icon=(os.path.join(here, "icon", "openmbb.ico")
+          if sys.platform == "win32" else None),
 )

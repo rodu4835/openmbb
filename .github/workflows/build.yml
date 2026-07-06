@@ -63,16 +63,33 @@ jobs:
           $p = Start-Process -FilePath dist\openmbb.exe -ArgumentList '--selftest' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "frozen --selftest failed ($($p.ExitCode))" }
 
+      # Installer wraps the already-verified portable exe: Start menu entry,
+      # optional desktop icon, per-user (no admin), uninstaller.
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found on runner" }
+          $ver = python -c "import openmbb; print(openmbb.__version__)"
+          & $iscc "/DAppVersion=$ver" "/DExeSrc=$PWD\dist\openmbb.exe" packaging\openmbb.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+          if (-not (Test-Path packaging\Output\openmbb-setup-windows-x64.exe)) { throw "installer missing" }
+
       - name: Stage artifact
         shell: bash
         run: |
           mkdir -p out
           cp "${{ matrix.bin }}" "out/${{ matrix.asset }}"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp packaging/Output/openmbb-setup-windows-x64.exe out/
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: out/${{ matrix.asset }}
+          path: out/*
 
   # One release job attaches both binaries — avoids the matrix jobs racing to
   # create the same release concurrently.

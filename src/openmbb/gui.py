@@ -135,6 +135,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.geometry("1080x760")
             self.minsize(900, 620)
             self.sty = apply_theme(self)
+            self._set_window_icon()
 
             self.transport = None
             self.logger = None
@@ -169,6 +170,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._refresh_save_label()
 
         # -- helpers ---------------------------------------------------------
+        def _set_window_icon(self):
+            """Title-bar / taskbar / Alt-Tab icon (the gauge-bolt PNGs from
+            openmbb/assets; the frozen .exe's own icon comes from the spec)."""
+            try:
+                from importlib.resources import files
+                assets = files("openmbb") / "assets"
+                photos = [tk.PhotoImage(data=(assets / ("icon_%d.png" % s)).read_bytes())
+                          for s in (16, 32, 48, 64, 256)]
+                self.iconphoto(True, *photos)
+                self._icon_photos = photos   # Tk keeps no reference; we must
+            except Exception as exc:         # cosmetic only — never block launch
+                print("window icon unavailable: %s" % exc)
+
         def _console_text(self, parent, height, fg=None):
             return tk.Text(parent, height=height, state="disabled",
                            font=(self.sty["mono"], 9), bg=P["console"],

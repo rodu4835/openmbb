@@ -29,7 +29,10 @@ Runs on **Windows and Linux** (and macOS from source).
 Grab the binary for your OS from the repo's **Releases** page — one self-contained
 file that bundles Python, Tk, and all dependencies:
 
-- **Windows:** `openmbb-windows-x64.exe` — double-click to run.
+- **Windows (installer):** `openmbb-setup-windows-x64.exe` — Start menu entry,
+  optional desktop icon, and a proper uninstaller. No admin rights needed.
+- **Windows (portable):** `openmbb-windows-x64.exe` — double-click to run from
+  anywhere; nothing is installed.
 - **Linux:** `openmbb-linux-x64` — `chmod +x openmbb-linux-x64 && ./openmbb-linux-x64`.
 
 These are built and verified by CI (`.github/workflows/build.yml`) on each tagged
