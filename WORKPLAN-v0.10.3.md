@@ -234,7 +234,7 @@ PII-2 (note — local username in absolute paths across tracked docs).
   `/DAppVersion=0.10.3` (ISCC.exe is under `%LOCALAPPDATA%\Programs\Inno Setup 6\`).
   **Do NOT tag/release/push.**
 
-- [ ] **E2 History rewrite — run ONLY after every other tier is committed and the B-scrubs
+- [x] **E2 History rewrite — run ONLY after every other tier is committed and the B-scrubs
   are in.** The identifiers live in three commits (per the review: `e7651e1`, `ca223df`,
   `f182930`), unreachable from origin (origin has only `main` at v0.9.0 — verified clean).
   Protocol:
@@ -295,3 +295,4 @@ PII-2 (note — local username in absolute paths across tracked docs).
 
 ### Tier E — release gate
 - E1: bumped __init__.py + pyproject.toml to 0.10.3; full suite green (134 non-GUI + 42 GUI, 1 Tk-teardown flake-skip); --selftest + --smoketest green; rebuilt dist/openmbb.exe (frozen --selftest exit 0, 61 PASS) + installer via ISCC /DAppVersion=0.10.3. Not tagged/pushed.
+- E2: history rewritten. -G shape searches found the PII in 4 commits (e7651e1/ca223df/f182930 added it, edf0673 removed it) — earliest e7651e1, so CLEAN_BASE = its parent 5e239e6 (v0.9.0, verified PII-free + matches origin/main). Branched backup-prerewrite, `git reset --soft 5e239e6`, squashed all 20 v0.10.x commits into one clean commit; `git diff backup-prerewrite` empty (tree byte-identical). Deleted the backup, expired all reflogs, gc --prune=now; the old commits are gone (e7651e1 no longer a valid object) and all three PII-shape searches over --all return ZERO. Suite + B3 gate green at the new HEAD. Not tagged/pushed.
