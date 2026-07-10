@@ -22,6 +22,9 @@ SIM_SETTINGS = {
     "model_year":     ("Model year", "2017"),
     "vin":            ("Vehicle ID (placeholder)", "ZEROSIMVIN0000000"),
     "serial":         ("Board serial (placeholder)", "SIM-MBB-0000"),
+    "firmware_rev":   ("Firmware Revision", "41"),
+    "board_id":       ("Board ID", "7"),
+    "region":         ("Brake behavior region", "0x00"),
     "runtime":        ("Cumulative run time", "00013:05:40:10"),
     "secidle":        ("Idle seconds before shutdown", "7200"),
     "motstage1":      ("Motor temp warn point", "100 C"),
@@ -56,13 +59,41 @@ SIM_SETTINGS = {
     "logrun":         ("Ride log interval", "3000 ms"),
     "logchg":         ("Charge log interval", "600000 ms"),
     "chgstby":        ("Post-charge rebalance sleep", "1440 min"),
-    "maxcustsp":      ("Custom mode speed cap", "85 MPH ( 137 KPH ) ( 5385 RPM )"),
-    "maxcusttq":      ("Custom mode torque cap", "100 ( 100 % of allowed )"),
-    "maxcustregcotq": ("Custom mode coast regen", "6 ( 60 % of allowed )"),
-    "maxcustregbrtq": ("Custom mode brake regen", "80 ( 80 % of allowed )"),
+    # D5: the real 2017 FXS rev-41 post-login `set` (ground truth 020_set.txt) also
+    # exposes drive_mode, is_dnr_board, and the custom-mode RPM/KPH + x10 twins that
+    # sit alongside the mph/_allow forms. Include them (with the real values) so a
+    # --sim rehearsal shows the same custom-mode rows the owner sees on the bike.
+    "drive_mode":     ("Pres Drv Mode 123 norm 456 overide", "1"),
+    "maxcustsprpm":         ("Max Custom Speed", "5445 RPM"),
+    "maxcustspmph":         ("Max Custom Speed", "89 MPH"),
+    "maxcustspkph":         ("Max Custom Speed", "143 KPH"),
+    "maxcusttqx10":         ("Max Custom Torque x10", "1000 %x10"),
+    "maxcusttq_allowed":    ("Max Custom Torque Percent of Allowed", "100 %"),
+    "maxcustregcotqx10":    ("Max Custom Regen Coast Torque x10", "50 %x10"),
+    "maxcustregcotq_allow": ("Max Cust Regen Coast Torque % of Allowed", "55 %"),
+    "maxcustregbrtqx10":    ("Max Custom Regen Brake Torque x10", "70 %x10"),
+    "maxcustregbrtq_allow": ("Max Cust Regen Brake Torque % of Allowed", "77 %"),
+    "is_dnr_board":   ("Is D&R board", "0"),
+    # NOTE: many entries above (motstage*, ctrlstage*, sev*, ov_*, brake*, reserve*,
+    # fuelgaugepes, chgstby, logrun/logchg, zero*, debug_level) are SYNTHETIC — they
+    # are NOT in the real rev-41 `set` dump. They exercise the parser/whitelist paths
+    # but do not imply the bike exposes them (see safety.REV41_FXS_SETTINGS).
     "test_mode":      ("Diagnostic test mode", "Off"),
     "abs_disable":    ("Disable ABS via console", "Off"),
+    # T9: exercise the T8/C1 columnar value extraction through the sim itself.
+    # simwideval has BOTH a 2+-space DESCRIPTION (which the v0.10.1 regex
+    # truncates, leaking the tail into the value) and a value with an internal
+    # 2+-space run (which must stay whole); simblankval has a blank value (must
+    # parse as "", never the description).
+    "simwideval":     ("Synthetic  wide  value", "85 MPH  ( 137 KPH )"),
+    "simblankval":    ("Synthetic blank value", ""),
 }
+
+# On the real rev-41 bike, `set` at login level 0 shows ONLY these identity
+# items — the tunables (spfront/sprear/regen/...) are login-gated. The sim
+# mirrors that so --sim rehearses the actual first-session sequence.
+LEVEL0_NAMES = ["model_year", "serial", "vin", "firmware_rev", "board_id",
+                "model", "region"]
 
 # Synthetic version banner. Only the "Firmware Rev" line is parsed by the GUI.
 SIM_VERSION = """\
@@ -91,6 +122,7 @@ SIM_HELP_LOGGED_OUT = """\
   inputs          - raw input measurements
   outputs         - output states
   dash            - instrument cluster data
+  obd             - show all obd info
   eventlogdump    - print the event log
   errorlogdump    - print the error log
   dumpall         - print stats, inputs, settings and logs"""
@@ -218,12 +250,22 @@ SIM_RUNTIME = """\
   Total run time      : 00007:19:30:25
   Total charge time   : 00003:01:23:41"""
 
+SIM_OBD = """\
+== OBD Info (synthetic) ==
+  Protocol            : ISO 15765-4 (CAN 11/500)
+  VIN                 : ZEROSIMVIN0000000
+  Calibration ID      : SIM-CAL-0000
+  Stored DTCs         : 0
+  Pending DTCs        : 0
+  MIL                 : Off"""
+
 SIM_EVENTLOG = "\n".join(
     ["== Event Log (synthetic, most recent last) =="] +
-    ["  %05d 07/0%d/2026 0%d:1%d:0%d  riding  packTemp %dC  soc %d%%  "
-     "vpack 10%d.%03dV  motAmps %3d  motRPM %4d  odo 61%02dkm"
-     % (7000 + i, 1 + i % 4, 8 + i % 3, i % 6, i % 10, 24 + i % 4, 90 - i * 3,
-        6 - i % 3, 100 + i * 37, 60 + i * 9, 3100 + i * 60, 20 + i)
+    ["  %05d 07/0%d/2026 0%d:1%d:0%d Riding PackTemp: h %dC, l %dC, PackSOC: %d%%, "
+     "Vpack: 10%d.%03dV, MotAmps: %d, MotRPM: %d, MotTemp: %dC, Odo: 61%02dkm"
+     % (7000 + i, 1 + i % 4, 8 + i % 3, i % 6, i % 10, 24 + i % 4, 22 + i % 4,
+        90 - i * 3, 6 - i % 3, 100 + i * 37, 60 + i * 9, 3100 + i * 60,
+        30 + i * 2, 20 + i)
      for i in range(12)])
 
 SIM_ERRORLOG = """\
@@ -240,12 +282,14 @@ class SimPort:
     """Fake serial port replaying the synthetic fixtures above. Interface-
     compatible with the subset of pyserial that Transport uses."""
 
-    def __init__(self, greet=True):
+    def __init__(self, greet=True, level0_gated=True):
         self._rx = queue.Queue()
         self._linebuf = b""
         self._settings = {k: [d, v] for k, (d, v) in SIM_SETTINGS.items()}
         self.logged_in = False
+        self.level0_gated = level0_gated   # hide tunables until login (like rev 41)
         self.is_sim = True
+        self.written = b""        # every byte the tool has sent (test aid)
         if greet:
             self._push(PROMPT)
 
@@ -264,6 +308,7 @@ class SimPort:
         return self._rx.qsize()
 
     def write(self, data):
+        self.written += data
         self._linebuf += data
         while b"\n" in self._linebuf:
             line, _, self._linebuf = self._linebuf.partition(b"\n")
@@ -281,15 +326,58 @@ class SimPort:
     def _respond(self, text):
         self._push(text.encode() + PROMPT)
 
-    def _settings_dump(self):
-        lines = ["== System Settings (synthetic) =="]
-        for name, (desc, value) in self._settings.items():
-            pad = " " * max(1, 16 - len(name))
-            if name in ("model", "vin", "serial", "model_year", "runtime"):
-                lines.append("  %s%s- %-32s %s" % (name, pad, desc, value))
-            else:
-                lines.append("  %s%s- %-32s: %s" % (name, pad, desc, value))
-        return "\n".join(lines)
+    def _col_row(self, name, desc, value):
+        """A rev-41-geometry data row: name in [0:21], desc left-aligned from 21,
+        value RIGHT-aligned ending at col 73 when it fits (so a wide value like a
+        VIN overflows LEFT into the desc column, exactly like the real bike and
+        the case T8's parser must survive) — but clamped to keep a 2-space gap
+        after the desc, so a long tunable value stays whole instead of colliding."""
+        left = (" " + name).ljust(21) + " " + desc
+        start = max(73 - len(value), len(left) + 2)
+        return left.ljust(start) + value
+
+    def _settings_dump(self, names=None):
+        """Render settings in the rev-41 COLUMNAR table format (a +---+---+ ruler,
+        then right-aligned fixed-width rows) so --sim exercises the real parser
+        path — including the VIN-style left overflow. `names` restricts which
+        settings appear (identity-only at level 0). NOTE: a 3-column ruler is used
+        (value column runs to end-of-line) so a long tunable value is never cut at
+        a units-column boundary; the parser is proven against the real 4-column
+        narrow-column geometry directly in tests/test_rev41_fixture.py."""
+        names = list(self._settings.keys()) if names is None else names
+        ruler = "+" + "-" * 20 + "+" + "-" * 39 + "+" + "-" * 45
+        pruler = " +" + "-" * 15 + "+" + "-" * 24 + "+" + "-" * 20
+        rt = self._settings.get("runtime", ["Total Run Time", "00000:00:00:00"])[1]
+        out = [
+            "*************************************************************",
+            "*                       MBB Settings                        *",
+            "*************************************************************",
+            "  To change settings, type:",
+            '    "set <setting name> <value1> <value2> ..."',
+            "     0x preceding the value may be used to indicate a hex number",
+            "",
+            " ************",
+            " Psudo Settings",           # (verbatim firmware typo)
+            " ************",
+            "%-17s%-25s%s" % ("  Variable", " Description", "Value"),
+            pruler,
+            "",
+            "%-17s%-25s  %s" % ("  runtime", " Total Run Time", rt),
+            "",
+            " **************",
+            " Settings",
+            " **************",
+            " NV writes: 4242",
+            "",
+            "%-21s%-39s  %s" % (" Setting Name", " Setting Desc", "Value"),
+            ruler,
+        ]
+        for name in names:
+            if name == "runtime" or name not in self._settings:
+                continue
+            desc, value = self._settings[name]
+            out.append(self._col_row(name, desc, value))
+        return "\n".join(out)
 
     def _handle(self, cmd):
         if not cmd:
@@ -321,22 +409,43 @@ class SimPort:
             self._respond(SIM_OUTPUTS)
         elif head == "dash":
             self._respond(SIM_DASH)
+        elif head == "obd":
+            self._respond(SIM_OBD)
+        elif head == "eeprom":
+            # rev-41: bare `eeprom` is a READ ("Show EEPROM usage"), but it is only
+            # listed in the LOGGED-IN menu (019_help.txt), not at level 0
+            # (003_help.txt). D5: mirror that — at level 0 it's an unknown command.
+            # (Args / format / erase eeprom are blocked upstream and never reach here.)
+            if not self.logged_in:
+                self._respond("  unknown command - type help")
+            else:
+                self._respond("== EEPROM Usage (synthetic) ==\n"
+                              "  Used                : 5773 / 65536 bytes\n"
+                              "  NV writes           : 5773")
+        elif head == "dumplogs":
+            # faithful to the real rev-41 bike: `dumplogs` is not a command
+            self._respond("Sorry, 'dumplogs' is an invalid command. Type \"help\" "
+                          "for a list of commands")
         elif head == "eventlogdump":
             self._respond(SIM_EVENTLOG)
         elif head == "errorlogdump":
             self._respond(SIM_ERRORLOG)
-        elif head == "dumplogs" or head == "dumpall":
+        elif head == "dumpall":
+            # a heavy dump: synthetic ride-log-shaped lines (zero-log-parser DECODED
+            # field keys: PackTemp h/l, MotTemp, PackSOC, MotRPM, Odo)
             big = "\n".join(
-                " %05d 0%d/1%d/2026 0%d:%02d:%02d  riding  packTemp %dC  soc %d%%  "
-                "vpack 10%d.%03dV  motAmps %3d  motRPM %4d  odo 6%03dkm"
-                % (i, 5 + (i % 2), i % 10, 7 + i % 12, i % 60, (i * 7) % 60,
-                   22 + i % 30, 100 - (i % 80), 6 - i % 5, i * 13 % 1000,
-                   40 + i % 220, 2400 + (i * 17) % 3000, 100 + i % 100)
+                " %05d 05/%02d/2026 %02d:%02d:%02d Riding PackTemp: h %dC, l %dC, "
+                "PackSOC: %d%%, Vpack: 10%d.%03dV, MotAmps: %d, MotRPM: %d, "
+                "MotTemp: %dC, Odo: 6%03dkm"
+                % (i, 1 + i % 28, 8 + i % 12, i % 60, (i * 7) % 60,
+                   24 + i % 8, 22 + i % 6, 100 - (i % 80), 6 - i % 5, i * 13 % 1000,
+                   40 + i % 220, 2400 + (i * 17) % 3000, 30 + i % 60, 100 + i % 100)
                 for i in range(2600))
             self._respond("== Log Dump (synthetic, 2600 entries) ==\n" + big)
         elif head == "login":
             if len(parts) == 1:
-                self._respond("  login level: %d" % (2 if self.logged_in else 0))
+                # ground-truth phrasing (capital L, colon): "Login Level: N"
+                self._respond("Login Level: %d" % (2 if self.logged_in else 0))
             elif parts[1] == PW_ACCEPTED:
                 self.logged_in = True
                 self._respond("  logged in at level 2")
@@ -349,7 +458,11 @@ class SimPort:
             self._respond("== Bluetooth (synthetic) ==\n  Connected : No")
         elif head == "set":
             if len(parts) == 1:
-                self._respond(self._settings_dump())
+                # rev-41 gating: identity only until logged in
+                if self.level0_gated and not self.logged_in:
+                    self._respond(self._settings_dump(LEVEL0_NAMES))
+                else:
+                    self._respond(self._settings_dump())
             elif len(parts) >= 3:
                 name = parts[1].lower()
                 if not self.logged_in:

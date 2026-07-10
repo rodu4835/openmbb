@@ -26,13 +26,14 @@ from . import compare as compare_mod
 from . import gearing as gearing_mod
 from . import health as health_mod
 from . import parsers, rides, sessions
-from .safety import (READONLY_GUARDS, WRITE_PANEL_CONTEXT, WRITE_WHITELIST,
-                     command_blocked)
+from .safety import (READONLY_GUARDS, REV41_FXS_SETTINGS, WRITE_PANEL_CONTEXT,
+                     WRITE_WHITELIST, command_blocked)
 from .sim import SimPort
 from .theme import PALETTE, apply_theme
-from .transport import (DUMP_COMMANDS, PROMPT_RE, READ_COMMANDS, SessionLogger,
-                        Transport, first_number, list_serial_ports,
-                        open_real_port, parse_settings_dump)
+from .transport import (DUMP_COMMANDS, HEAVY_COMMANDS, LONG_COMMANDS,
+                        READ_COMMANDS, ConsoleRebootError, SessionLogger, Transport,
+                        first_number, list_serial_ports, looks_like_prompt,
+                        nonprintable_ratio, open_real_port, parse_settings_dump)
 
 
 # MBB console login passwords tried by the "Try known passwords" button, in
@@ -40,6 +41,21 @@ from .transport import (DUMP_COMMANDS, PROMPT_RE, READ_COMMANDS, SessionLogger,
 # password is confirmed to work on a bike, ADD IT HERE so it is tried
 # automatically and no one has to type it again.
 COMMUNITY_PASSWORDS = ["tpsreport", "wideopenthrottle"]
+
+# Firmware revisions OpenMBB's safety lists, parsers and whitelist were verified
+# against. A different rev still connects, but the user is warned before writes.
+KNOWN_FIRMWARE_REVS = {41}
+
+
+def _parse_fw_rev(ver_text):
+    """Integer MBB firmware rev from a `version` banner, or None."""
+    m = re.search(r"Firmware Rev\s*:?\s*(\d+)", ver_text or "")
+    return int(m.group(1)) if m else None
+
+
+def _looks_like_version(ver_text):
+    """True if the text is plausibly an MBB version banner (not empty/garbage)."""
+    return bool(re.search(r"MBB|Firmware|Board", ver_text or "", re.I))
 
 
 INSTRUCTIONS_TEXT = """\
@@ -55,9 +71,13 @@ PHASE 0 — CONNECT
 
 PHASE 1 — READ
   Click any command button for a one-off read. To advance, click the blue
-  ★ FULL BASELINE button: it captures every read plus the full settings dump
-  (your backup) and the ~1 MB log dump. Individual reads do NOT unlock Login —
-  only FULL BASELINE does. This guarantees a backup exists before any change.
+  ★ FULL BASELINE button: it runs the quick reads + the full settings dump
+  (your backup) + the small error log — NO heavy dumps. Individual reads do NOT
+  unlock Login — only FULL BASELINE does, so a backup exists before any change.
+  The heavy log reads (eventlogdump / dumpall) sit behind their OWN buttons and
+  confirm first: on a keyed-on bike a long ~1 MB dump can make the BMS briefly
+  OPEN the drivetrain contactor (a click + flashing dash; it recovers when the
+  read finishes). They are NOT part of the routine baseline.
 
 PHASE 2 — LOGIN
   Explicit. "Try known passwords" attempts the community-known ones in order;
@@ -76,7 +96,9 @@ ANALYZE (always available, no bike needed)
   Reads a saved session folder (or the current one) and interprets it:
     - Health : SOC vs voltage, cell balance, capacity, temps, cycles, and the
                effective gearing ratio, each flagged ok / watch / alert.
-    - Rides  : per-ride distance, SOC%/km, and temps parsed from the log dump.
+    - Rides  : per-ride distance, SOC%/km, and temps from a ride log you load
+               (.txt) — rev 41 doesn't stream ride telemetry as console text, so
+               use a decoded zero-log-parser export.
     - Compare: pick 2+ sessions to see settings changes and capacity / gearing
                trends over time (battery degradation tracking).
     - Gearing: enter new front/rear teeth to get the ratio and the exact
@@ -105,11 +127,12 @@ SAFETY MODEL
 
 Read-first, whitelist-only writes. The transport layer refuses dangerous
 commands from EVERY path (buttons and the raw box), including:
-  format/erase/eeprom, settingsrst, statsrst, log clears/adds, reset,
-  exit_to_bl, test, wdt, timing, can, charger, sevcon preop, and any "set" of
-  a protected value (abs_disable, bypass_bms, ov_* overrides, motstage*/
-  ctrlstage* thermal limits, sevnoregspeed/sevmaxregv/sevnoregfull regen
-  guards, model/vin/serial identity).
+  format/erase eeprom (bare eeprom is an allowed read; eeprom with arguments
+  is refused), settingsrst, statsrst, log clears/adds, reset, exit_to_bl,
+  dtc_clear, force_all_storage_mode, blcmds, burn, test, wdt, timing, can,
+  charger, sevcon preop, and any "set" of a protected value (abs_disable,
+  bypass_bms, ov_* overrides, motstage*/ctrlstage* thermal limits,
+  sevnoregspeed/sevmaxregv/sevnoregfull regen guards, model/vin/serial identity).
 
 Those regen and thermal guards are shown READ-ONLY in the Writes tab so you can
 see them without being able to change them.
@@ -157,6 +180,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._cbq = queue.Queue()
             self.after(40, self._pump_cbq)
 
+            # closing the window must release the serial port (and, once writes
+            # exist, guard an in-flight write) — route X and Exit through _on_close
+            self.protocol("WM_DELETE_WINDOW", self._on_close)
             self._build_menubar()
             self._build_statusbar()
             self.nb = ttk.Notebook(self)
@@ -195,13 +221,23 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                            highlightcolor=P["panel"])
 
         def _pump_cbq(self):
+            # D2: one bad callback must NOT kill the pump — if it did, every
+            # queued finish() would stop running and _busy would stay True
+            # forever, soft-locking the app. Catch per-callback; always reschedule.
             try:
                 while True:
                     fn = self._cbq.get_nowait()
-                    fn()
+                    try:
+                        fn()
+                    except Exception as exc:
+                        try:
+                            self._out("[callback error] %s" % exc)
+                        except Exception:
+                            pass
             except queue.Empty:
                 pass
-            self.after(40, self._pump_cbq)
+            finally:
+                self.after(40, self._pump_cbq)
 
         def _build_statusbar(self):
             bar = ttk.Frame(self, padding=(8, 6))
@@ -236,11 +272,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             sess.add_separator()
             sess.add_command(label="Refresh COM ports", command=self._refresh_ports)
             sess.add_separator()
-            sess.add_command(label="Exit", command=self.destroy)
+            sess.add_command(label="Exit", command=self._on_close)
             m.add_cascade(label="Session", menu=sess)
 
             bike = tk.Menu(m, tearoff=0)
             bike.add_command(label="Bike info…", command=self._show_bike_info)
+            bike.add_command(label="Write options (read-only)…",
+                             command=self._show_write_options)
             m.add_cascade(label="Bike", menu=bike)
 
             hlp = tk.Menu(m, tearoff=0)
@@ -275,6 +313,58 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             win.transient(self)
             win.focus_set()
             return win
+
+        def _show_write_options(self):
+            """D2: a read-only reference of every adjustable (whitelisted) setting
+            — what it does, its risk, and its current value if a session is loaded
+            — so you can SEE your options WITHOUT logging in or unlocking writes.
+            Purely informational: it never sends anything and touches no gate."""
+            lines = [
+                "WRITE OPTIONS  —  read-only reference",
+                "",
+                "These are the only settings OpenMBB will ever let you change (the",
+                "write whitelist). This view is informational: actually writing still",
+                "requires the Writes tab (login + master unlock + a per-write confirm),",
+                "and only settings present in the live dump can be written.",
+                "",
+                WRITE_PANEL_CONTEXT,
+                "",
+                "-" * 60,
+                "",
+            ]
+            for name, (label, effect, risk, _v, _w) in WRITE_WHITELIST.items():
+                cur = self.settings.get(name, {}).get("value")
+                verified = name in REV41_FXS_SETTINGS
+                # C3: be honest about the two "no value yet" states. A verified
+                # rev-41 name genuinely appears after login; a name the verified
+                # bike never exposes must NOT be labelled "(read after login)" —
+                # that implies login will reveal it when it won't on this bike.
+                if cur:
+                    cur_line = cur
+                elif verified:
+                    cur_line = "(read after login)"
+                else:
+                    cur_line = "(not in the live dump)"
+                row = [
+                    "● %s  —  %s" % (name, label),
+                    "    current: %s" % cur_line,
+                    "    risk:    %s" % risk,
+                    "    effect:  %s" % effect,
+                ]
+                if not verified:
+                    row.append("    note:    supported on other Gen2 models; NOT seen "
+                               "on the verified 2017 FXS rev 41 — may not appear even "
+                               "after login.")
+                row.append("")
+                lines += row
+            lines += ["-" * 60, "",
+                      "Safety guards (shown read-only, NEVER writable):",
+                      "(documented / Sevcon-side thresholds — rev 41 does NOT expose "
+                      "these via `set`, so they show '—' on this bike)"]
+            for gname, gdesc in READONLY_GUARDS:
+                gval = self.settings.get(gname, {}).get("value")
+                lines.append("    %-16s %-10s %s" % (gname, gval or "—", gdesc))
+            self._info_window("Write options (read-only)", "\n".join(lines))
 
         def _session_root(self):
             return os.path.join(self.log_dir or os.getcwd(), "openmbb-sessions")
@@ -402,6 +492,55 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 else "not logged in",
                 foreground=P["green"] if self.logged_in else P["dim"])
 
+        def _reset_session_state(self):
+            """Every connection re-earns its phases. Drop all prior phase state so
+            a --sim rehearsal (or a bike that was key-cycled) can't carry a stale
+            login / baseline / settings into a fresh, real connection."""
+            try:
+                if self.transport:
+                    self.transport.close()
+            except Exception:
+                pass
+            self.transport = None
+            self.logger = None
+            self.connected = False
+            self.baseline_done = False
+            self.logged_in = False
+            self.version_text = ""
+            self.help_logged_out = ""
+            self.settings = {}
+            self.settings_order = []
+            self.journal_entries = []
+            if hasattr(self, "unlock_var"):
+                self.unlock_var.set(False)
+            if hasattr(self, "lst_journal"):
+                self.lst_journal.delete(0, "end")
+            self.lbl_ver.config(text="")
+            self._refresh_write_rows()
+            self._apply_gates()
+
+        def _on_close(self):
+            """Window X / Session→Exit: guard an in-flight operation, then release
+            the serial port before quitting."""
+            if self._busy:
+                if not messagebox.askokcancel(APP_NAME,
+                        "A serial operation — possibly a WRITE — is still running. "
+                        "Closing now could interrupt it between send and verify. "
+                        "Close anyway?"):
+                    return
+                try:            # leave a trace in case a write was mid-flight
+                    if self.logger:
+                        self.logger.journal_write("(app closed while busy)",
+                                                  "-", "-", False)
+                except Exception:
+                    pass
+            try:
+                if self.transport:
+                    self.transport.close()
+            except Exception:
+                pass
+            self.destroy()
+
         def _run_bg(self, fn, done=None):
             if self._busy:
                 messagebox.showinfo(APP_NAME, "Busy — wait for the current operation.")
@@ -418,6 +557,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 def finish():
                     self._busy = False
                     if err is not None:
+                        # D6: a mid-session reboot invalidates the login/baseline
+                        # state — re-gate before surfacing the error
+                        if isinstance(err, ConsoleRebootError):
+                            self.logged_in = False
+                            self.baseline_done = False
+                            # T7: also disarm the master unlock — otherwise the
+                            # Writes tab re-opens with one gate pre-armed post-reboot
+                            if hasattr(self, "unlock_var"):
+                                self.unlock_var.set(False)
+                            self._apply_gates()
                         messagebox.showerror(APP_NAME, str(err))
                     elif done:
                         done(result)
@@ -447,22 +596,32 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                          values=ports, width=18)
             self.cbo_port.pack(side="left", padx=6)
             ttk.Button(row, text="Refresh", command=self._refresh_ports).pack(side="left")
+            self.btn_listen = ttk.Button(row, text="Listen only (Stage 1)",
+                                         command=self._listen_only)
+            self.btn_listen.pack(side="left", padx=(12, 0))
             self.btn_connect = ttk.Button(row, text="Connect && Probe",
                                           style=self.sty["accent"],
                                           command=self._connect)
             self.btn_connect.pack(side="left", padx=12)
 
             ttk.Label(f, text=(
-                "Checklist before connecting to the real bike:\n"
-                "  1. Bike PARKED on stand, key ON, kill switch OFF.\n"
-                "  2. FTDI Red (+5 V) connected to NOTHING; Orange idles ~3.3 V vs Black.\n"
-                "  3. GND→pin 5 (Teal), FTDI RXD←pin 8 bike Tx (Black/White), "
-                "FTDI TXD→pin 9 bike Rx (Red/White).\n"
-                "  4. Port is under the seat. 38400 8-N-1, newline CR-LF."),
+                "Staged bring-up (safe on any cable — Listen never transmits):\n"
+                "  1. Power: key ON, OR simply plug in the AC charger (wakes the "
+                "MBB; console is live for reads — bike shows Mode: Charging).\n"
+                "  2. STAGE 1 — click 'Listen only': it never transmits in software, "
+                "so it proves RX wiring/baud safely on a fixed 3-wire cable (physically "
+                "unplugging TX is an optional extra, not required). Power the bike "
+                "DURING the listen window to catch the boot banner.\n"
+                "  3. STAGE 2 — click 'Connect & Probe' to start the session.\n"
+                "  4. FTDI Red (+5 V) to NOTHING; Orange idles ~3.3 V vs Black. "
+                "GND→pin 5, FTDI RXD←pin 8 (bike Tx), FTDI TXD→pin 9 (bike Rx).\n"
+                "  5. Port is under the seat. 38400 8-N-1, CR-LF. Garbage = Tx/Rx "
+                "swap — STOP.\n"
+                "  Note: isolation-resistance reads are only valid OFF the charger."),
                 justify="left", padding=(0, 10),
                 foreground=P["warn"]).pack(anchor="w")
 
-            self.txt_probe = self._console_text(f, 18)
+            self.txt_probe = self._console_text(f, 16)
             self.txt_probe.pack(fill="both", expand=True)
 
         def _refresh_ports(self):
@@ -475,45 +634,148 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_probe.see("end")
             self.txt_probe.config(state="disabled")
 
-        def _connect(self):
+        def _make_port(self, port_name):
+            """Open a SimPort or a real serial port for `port_name`."""
+            if sim or port_name == "SIMULATOR":
+                return SimPort()
+            return open_real_port(port_name)
+
+        def _ensure_log_dir(self):
+            """G2: a stale/removed configured save folder (deleted dir, unplugged
+            USB) must never block connecting — fall back to the default with a note."""
+            probe = self.log_dir or config.DEFAULT_LOG_DIR
+            try:
+                os.makedirs(probe, exist_ok=True)
+                self.log_dir = probe
+            except OSError:
+                self._probe_log("[!] save folder %s is unavailable — using %s"
+                                % (probe, config.DEFAULT_LOG_DIR))
+                self.log_dir = config.DEFAULT_LOG_DIR
+                try:
+                    os.makedirs(self.log_dir, exist_ok=True)
+                except OSError:
+                    pass
+            self._refresh_save_label()
+
+        def _listen_only(self):
+            """STAGE 1: open the port and only LISTEN (never transmit in software),
+            so it proves RX wiring/baud with zero risk on any fixed cable."""
+            if self._busy:
+                messagebox.showinfo(APP_NAME, "Busy — wait for the current operation.")
+                return
+            if self.connected:
+                messagebox.showinfo(APP_NAME, "Already connected. Stage-1 listen is "
+                                    "for BEFORE connecting. Restart the app to run it.")
+                return
             port_name = self.port_var.get().strip()
             if not port_name:
                 messagebox.showerror(APP_NAME, "Pick a COM port (or run with --sim).")
                 return
+            is_simport = sim or port_name == "SIMULATOR"
+            self._ensure_log_dir()          # G2: fall back if the save folder died
 
             def job():
-                tag = "sim" if (sim or port_name == "SIMULATOR") else port_name.replace(":", "")
-                logger = SessionLogger(base_dir=self.log_dir, tag=tag)
-                if sim or port_name == "SIMULATOR":
-                    port = SimPort()
-                else:
-                    port = open_real_port(port_name)
-                tr = Transport(port, logger)
-                notes = []
-                notes.append("Session folder: %s" % logger.dir)
-                notes.append("Listening 3 s for unsolicited output...")
-                pre = tr.listen(3 if not getattr(port, "is_sim", False) else 0.3)
-                notes.append("  got %d bytes" % len(pre))
-                notes.append("Sending bare CR-LF, looking for prompt...")
-                resp = tr.send_raw_newline()
-                text = resp.decode("utf-8", errors="replace")
-                prompt = bool(PROMPT_RE.search(resp.strip()[-24:] if resp else b""))
-                notes.append("  response: %r" % text[-80:])
-                if not prompt and b">" in resp:
-                    prompt = True  # tolerant: any >-prompt counts, rev 41 may differ
-                if not prompt:
-                    raise RuntimeError(
-                        "No prompt detected.\n"
-                        "- Check COM port and that the key is ON.\n"
-                        "- Try newline CR only (terminal test) before rewiring.\n"
-                        "- Garbage characters at 38400 usually mean Tx/Rx swapped —\n"
-                        "  STOP and re-check wiring, do not guess.\n"
-                        "Raw bytes were logged to session_raw.log.")
-                ver = tr.exec_command("version", idle_timeout=1.5)
-                return logger, tr, notes, ver
+                port = self._make_port(port_name)
+                logger = SessionLogger(base_dir=self.log_dir, tag="listen")
+                try:
+                    data = Transport(port, logger).listen(2 if is_simport else 45)
+                finally:
+                    try:
+                        port.close()
+                    except Exception:
+                        pass
+                sigs = [s.decode() for s in (b"Zero Motorcycles MBB", b"Reset Source:",
+                        b"Checking EEPROM", b"ZERO MBB>") if s in data]
+                return len(data), sigs, logger.dir
 
             def done(result):
-                logger, tr, notes, ver = result
+                nbytes, sigs, folder = result
+                self._probe_log("\n=== STAGE-1 LISTEN (no transmit) -> %s ===" % folder)
+                self._probe_log("  received %d bytes" % nbytes)
+                if sigs:
+                    self._probe_log("  banner signatures seen: %s" % ", ".join(sigs))
+                    self._probe_log("  RX wiring + baud look GOOD — click "
+                                    "'Connect & Probe' to start the session.")
+                elif nbytes == 0:
+                    self._probe_log("  NOTHING received. Power the bike DURING the "
+                                    "listen window (key ON or plug in the charger); "
+                                    "check GND→pin 5 and the bike-Tx→FTDI-RXD wire.")
+                else:
+                    self._probe_log("  data received but no banner signature — if it "
+                                    "looks like garbage the baud is wrong or Tx/Rx "
+                                    "are swapped.")
+
+            self._run_bg(job, done)
+
+        def _connect(self):
+            # T3: honor the busy guard BEFORE the destructive reset. _reset_session_state
+            # closes the port + wipes the journal; running it ahead of the _busy check
+            # would yank the port out from under an in-flight write (between send and
+            # verify) and clear the revert list, only to then refuse the connect.
+            if self._busy:
+                messagebox.showinfo(APP_NAME, "Busy — wait for the current operation.")
+                return
+            port_name = self.port_var.get().strip()
+            if not port_name:
+                messagebox.showerror(APP_NAME, "Pick a COM port (or run with --sim).")
+                return
+            # D1: every connection re-earns its phases (drops any --sim rehearsal
+            # state and closes a previously-open port before reopening).
+            self._reset_session_state()
+            self._ensure_log_dir()          # G2: fall back if the save folder died
+            is_simport = sim or port_name == "SIMULATOR"
+
+            def job():
+                tag = "sim" if is_simport else port_name.replace(":", "")
+                logger = SessionLogger(base_dir=self.log_dir, tag=tag)
+                port = self._make_port(port_name)
+                tr = Transport(port, logger)
+                try:
+                    notes = ["Session folder: %s" % logger.dir]
+                    notes.append("Listening %s for unsolicited output..."
+                                 % ("0.3 s" if is_simport else "3 s"))
+                    pre = tr.listen(0.3 if is_simport else 3)
+                    notes.append("  got %d bytes" % len(pre))
+                    # C2: the real console needs one or two CR-LFs to wake — retry
+                    resp, prompt = b"", False
+                    for attempt in range(1, 4):
+                        notes.append("Wake %d: bare CR-LF, looking for prompt..." % attempt)
+                        resp = tr.send_raw_newline()
+                        if looks_like_prompt(pre + resp):
+                            prompt = True
+                            break
+                    blob = pre + resp
+                    notes.append("  response: %r"
+                                 % resp.decode("utf-8", errors="replace")[-80:])
+                    # C1: reject garbage — a bare '>' in noise no longer counts
+                    if not prompt:
+                        if nonprintable_ratio(blob) > 0.2:
+                            raise RuntimeError(
+                                "Received %d bytes of non-text data — wrong baud rate "
+                                "or Tx/Rx swapped. Do NOT proceed; re-check wiring. "
+                                "Raw bytes saved to session_raw.log." % len(blob))
+                        raise RuntimeError(
+                            "No prompt detected.\n"
+                            "- Check the COM port and that the bike is powered "
+                            "(key ON, or plug in the AC charger).\n"
+                            "- Run 'Listen only (Stage 1)' to prove RX wiring first.\n"
+                            "- Garbage at 38400 usually means Tx/Rx swapped — STOP.\n"
+                            "Raw bytes were logged to session_raw.log.")
+                    # C3: the version banner must actually parse (positive proof
+                    # this is a Gen2 MBB console) before we unlock Phase 1
+                    ver = tr.exec_command("version", idle_timeout=1.5)
+                    if not _looks_like_version(ver):
+                        raise RuntimeError(
+                            "Reached a prompt, but the 'version' banner was empty or "
+                            "unrecognized — not proceeding. Re-check the link (right "
+                            "baud? bike powered?). Raw output saved.")
+                    return logger, tr, notes, ver, _parse_fw_rev(ver)
+                except Exception:
+                    tr.close()            # C5: never leak the port on a failed probe
+                    raise
+
+            def done(result):
+                logger, tr, notes, ver, rev = result
                 self.logger, self.transport = logger, tr
                 self.connected = True
                 self.version_text = ver
@@ -521,8 +783,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self._probe_log(n)
                 self._probe_log("PROMPT OK — connected.\n")
                 self._probe_log(ver)
-                m = re.search(r"Firmware Rev\s*:?\s*(\w+)", ver)
-                self.lbl_ver.config(text="MBB firmware rev %s" % m.group(1) if m else "")
+                self.lbl_ver.config(text="MBB firmware rev %s"
+                                    % (rev if rev is not None else "?"))
+                known = ", ".join(str(r) for r in sorted(KNOWN_FIRMWARE_REVS))
+                if rev is None:
+                    self._probe_log("\n[!] Could not parse the firmware rev from the "
+                                    "banner — reads are fine; be cautious about writes.")
+                elif rev not in KNOWN_FIRMWARE_REVS:
+                    self._probe_log("\n[!] Firmware rev %s — OpenMBB's safety lists were "
+                                    "verified against rev %s ONLY. Reads are fine; be "
+                                    "very cautious about writes." % (rev, known))
+                    messagebox.showwarning(APP_NAME, "Firmware rev %s is not the verified "
+                                           "rev (%s). Safety lists/parsers were checked "
+                                           "against rev %s only — reads are fine, be "
+                                           "cautious about writes." % (rev, known, known))
                 self._refresh_save_label()
                 self._apply_gates()
                 self.nb.select(1)
@@ -536,7 +810,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
             btns = ttk.Frame(f)
             btns.pack(fill="x")
-            for i, cmd in enumerate(READ_COMMANDS + DUMP_COMMANDS):
+            quick = READ_COMMANDS + DUMP_COMMANDS
+            for i, cmd in enumerate(quick):
                 b = ttk.Button(btns, text=cmd, width=14,
                                command=lambda c=cmd: self._read_cmd(c))
                 b.grid(row=i // 7, column=i % 7, padx=2, pady=2, sticky="w")
@@ -549,6 +824,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.prg.grid(row=2, column=2, columnspan=3, padx=8, sticky="w")
             self.lbl_prog = ttk.Label(btns, text="")
             self.lbl_prog.grid(row=2, column=5, columnspan=2, sticky="w")
+            # A2: the heavy log dumps get their OWN row with a warning-colored label
+            # and go through a confirm dialog — they can make the BMS drop the
+            # drivetrain contactor, so they must never be run casually or in baseline.
+            hrow = ttk.Frame(f)
+            hrow.pack(fill="x", pady=(4, 0))
+            ttk.Label(hrow, text="Heavy (⚠ may open the contactor):",
+                      foreground=P["warn"]).pack(side="left", padx=(0, 6))
+            for cmd in HEAVY_COMMANDS:
+                ttk.Button(hrow, text=cmd, width=14,
+                           command=lambda c=cmd: self._read_heavy(c)).pack(side="left", padx=2)
 
             self.txt_out = self._console_text(f, 20)
             self.txt_out.pack(fill="both", expand=True, pady=(8, 4))
@@ -565,15 +850,34 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       text="  undocumented commands: read-only intent, at your own risk"
                       ).pack(side="left")
 
-        def _read_cmd(self, cmd, quiet=False, done_cb=None):
-            is_dump = cmd in DUMP_COMMANDS
+        def _read_heavy(self, cmd):
+            # A2: a heavy log dump can make the BMS open the drivetrain contactor
+            # (it starves the MBB's CAN servicing). Gate it behind an explicit
+            # warning + confirm — never let it run casually or in the baseline.
+            if not messagebox.askokcancel(APP_NAME,
+                    "'%s' reads the full log (~1 MB, several minutes at 38400 baud).\n\n"
+                    "On a keyed-on bike this can make the BMS briefly OPEN the "
+                    "drivetrain contactor — you'll hear a click and the dash will "
+                    "flash; it recovers when the read finishes. The bike must be "
+                    "SAFELY PARKED (never do this while riding).\n\nContinue?" % cmd):
+                return
+            self._read_cmd(cmd, idle_timeout=30.0)   # console pauses mid-dump
+
+        def _read_cmd(self, cmd, quiet=False, idle_timeout=None):
+            # A1/SAFE-2: classify by the lowercased FIRST TOKEN (like the transport),
+            # not an exact full-string match — so a raw-box variant such as
+            # "eventlogdump 5" or "Eventlogdump" still gets dump-class timeouts
+            # instead of a 60 s cut mid-stream.
+            head = (cmd.strip().split() or [""])[0].lower()
+            is_dump = head in LONG_COMMANDS
+            idle = idle_timeout if idle_timeout is not None else (15.0 if is_dump else 2.5)
 
             def job():
                 def prog(nbytes):
                     self._cbq.put(lambda: self.lbl_prog.config(
                         text="%s: %d KB" % (cmd, nbytes // 1024)))
                 out = self.transport.exec_command(
-                    cmd, idle_timeout=15.0 if is_dump else 2.5,
+                    cmd, idle_timeout=idle,
                     max_time=900.0 if is_dump else 60.0,
                     progress_cb=prog if is_dump else None)
                 return out, self.transport.last_saved_path
@@ -587,8 +891,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self._ingest_settings(out)
                 if cmd == "help" and not self.logged_in:
                     self.help_logged_out = out
-                if done_cb:
-                    done_cb(out)
+                # D3 (review SAFE-3): a raw-box `logout` de-escalates the console —
+                # drop the GUI's login state + master unlock and re-gate, so the
+                # Writes tab doesn't stay visibly unlocked against a level-0 console.
+                # Mirrors the reboot re-gate in _run_bg.
+                if head == "logout":
+                    self.logged_in = False
+                    if hasattr(self, "unlock_var"):
+                        self.unlock_var.set(False)
+                    self._apply_gates()
 
             self._run_bg(job, done)
 
@@ -596,51 +907,147 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             cmd = self.raw_var.get().strip()
             if not cmd:
                 return
+            toks = cmd.split()
+            head = toks[0].lower() if toks else ""
+            # A typed password must go through the Login tab: there it is masked
+            # and the login level is confirmed. From the raw box it would be
+            # logged in the clear AND elevate the console while the GUI still
+            # believes it is "not logged in".
+            if head == "login" and len(toks) >= 2:
+                messagebox.showwarning(APP_NAME, "Use the Login tab to enter a "
+                                       "password — it is masked there and the "
+                                       "login level is confirmed. The raw box "
+                                       "would record it in the clear.")
+                return
             reason = command_blocked(cmd)
             if reason:
                 messagebox.showwarning(APP_NAME, "REFUSED: %s" % reason)
                 return
+            # A1 (SAFE-1): a HEAVY log dump typed into the raw box must get the
+            # SAME contactor warning + confirm + long idle timeout as the Heavy
+            # buttons — otherwise `eventlogdump`/`dumpall` (or a variant like
+            # `eventlogdump 5`) would drop the drivetrain contactor with no
+            # warning and truncate under the short read timeout. Route by head.
+            if head in HEAVY_COMMANDS:
+                self._read_heavy(cmd)
+                return
+            # (T6: the 2-token `set <name>` form is now refused outright by
+            # command_blocked, so the old prompt-for-value snap-out is dead code.)
             self._read_cmd(cmd)
 
         def _baseline(self):
-            seq = READ_COMMANDS + ["set"] + DUMP_COMMANDS
+            # D4: run `obd` LAST — after `set` (the backup) and errorlogdump —
+            # because its output has never been captured live; if it stalls or
+            # returns nothing, the settings backup is already safely on disk first.
+            reads = [c for c in READ_COMMANDS if c != "obd"]
+            seq = reads + ["set"] + DUMP_COMMANDS + (["obd"] if "obd" in READ_COMMANDS else [])
 
             def job():
-                results = {}
+                results, errors = {}, {}
                 for i, cmd in enumerate(seq):
                     self._cbq.put(lambda c=cmd, i=i: (
                         self.lbl_prog.config(text="baseline: %s (%d/%d)"
                                              % (c, i + 1, len(seq))),
                         self.prg.config(maximum=len(seq), value=i)))
-                    is_dump = cmd in DUMP_COMMANDS
-                    out = self.transport.exec_command(
-                        cmd, idle_timeout=15.0 if is_dump else 2.5,
-                        max_time=900.0 if is_dump else 60.0)
-                    results[cmd] = out
-                stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-                self.logger.save_named("settings_baseline_%s.txt" % stamp,
-                                       results.get("set", ""))
-                return results
+                    is_dump = cmd in LONG_COMMANDS
+                    prog = None
+                    if is_dump:
+                        def prog(n, c=cmd):
+                            self._cbq.put(lambda: self.lbl_prog.config(
+                                text="baseline: %s (%d KB)" % (c, n // 1024)))
+                    # C6: each command tolerant — one failure doesn't discard the pass
+                    try:
+                        out = self.transport.exec_command(
+                            cmd, idle_timeout=15.0 if is_dump else 2.5,
+                            max_time=900.0 if is_dump else 60.0, progress_cb=prog)
+                        results[cmd] = out
+                        # persist the settings baseline the MOMENT `set` returns —
+                        # before the long dumps, so a later hiccup can't lose it
+                        if cmd == "set" and out.strip():
+                            stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                            self.logger.save_named("settings_baseline_%s.txt" % stamp, out)
+                    except ConsoleRebootError:
+                        # T4: a reboot must ABORT the pass and re-gate (via
+                        # _run_bg.finish), never be tallied as a per-command failure
+                        # that lets baseline still be declared complete.
+                        raise
+                    except Exception as e:
+                        errors[cmd] = str(e)
+                return results, errors
 
-            def done(results):
+            def done(result):
+                results, errors = result
                 self.prg.config(value=0)
-                self.lbl_prog.config(text="baseline complete")
-                self._out("\n=== FULL BASELINE captured -> %s ===" % self.logger.dir)
-                if "help" in results and not self.logged_in:
+                # C7: record power-state context (on-charger contaminates iso/SOC)
+                self._write_session_meta(results.get("status", ""))
+                for cmd in seq:
+                    if cmd in errors:
+                        self._out("  [FAILED] %s: %s" % (cmd, errors[cmd]))
+                if results.get("help") and not self.logged_in:
                     self.help_logged_out = results["help"]
                 self._ingest_settings(results.get("set", ""))
-                self.baseline_done = True
-                self._apply_gates()
-                self._out("Phase 2 (Login) unlocked.")
+                # C6/C17: unlock Phase 2 only if the ESSENTIAL reads succeeded and
+                # the settings dump actually parsed — not on empty/garbage captures
+                st_settings, _ = parse_settings_dump(results.get("set", ""))
+                missing = [c for c in ("version", "status", "stats")
+                           if not results.get(c, "").strip()]
+                if not st_settings:
+                    missing.append("set(parsed)")
+                if not missing:
+                    self.baseline_done = True
+                    self._apply_gates()
+                    self.lbl_prog.config(text="baseline complete")
+                    self._out("\n=== FULL BASELINE captured -> %s ===" % self.logger.dir)
+                    if errors:
+                        self._out("(%d command(s) failed; retry them with the read "
+                                  "buttons: %s)" % (len(errors), ", ".join(errors)))
+                    self._out("Phase 2 (Login) unlocked.")
+                else:
+                    self.lbl_prog.config(text="baseline incomplete")
+                    self._out("\n[!] BASELINE INCOMPLETE — essential reads missing/"
+                              "unparsed: %s. Phase 2 stays LOCKED; fix the link and "
+                              "re-run FULL BASELINE." % ", ".join(missing))
 
             self._run_bg(job, done)
 
+        def _write_session_meta(self, status_text):
+            """C7: stamp the session with power mode + firmware rev, and warn when
+            a baseline was captured on the charger (isolation/SOC then unreliable)."""
+            mode = ""
+            mm = re.search(r"Mode\s*:\s*(.+)", status_text or "")
+            if mm:
+                mode = mm.group(1).strip()
+            rev = _parse_fw_rev(self.version_text)
+            meta = ["OpenMBB session metadata",
+                    "time: %s" % _dt.datetime.now().isoformat(timespec="seconds"),
+                    "app_version: %s" % __version__,
+                    "firmware_rev: %s" % (rev if rev is not None else "?"),
+                    "power_mode: %s" % (mode or "?")]
+            if self.logger:
+                self.logger.save_named("session_meta.txt", "\n".join(meta) + "\n")
+            if mode and "charg" in mode.lower():
+                self._out("[note] baseline captured while CHARGING — the isolation "
+                          "reading and SOC context are NOT valid off-charger; "
+                          "re-read unplugged + dry before acting on them.")
+
         def _ingest_settings(self, dump_text):
             settings, order = parse_settings_dump(dump_text)
-            if settings:
-                self.settings, self.settings_order = settings, order
-                self._out("[parsed %d settings from live dump]" % len(settings))
-                self._refresh_write_rows()
+            if not settings:
+                # never silently keep a stale dict: say so when a non-empty dump
+                # parsed to nothing (firmware format the parser doesn't know yet)
+                if (dump_text or "").strip():
+                    self._out("[WARNING] the 'set' output was not recognized by the "
+                              "settings parser — the firmware format may differ. "
+                              "Writes stay unavailable until the parser is updated; "
+                              "the raw capture is saved.")
+                return
+            self.settings, self.settings_order = settings, order
+            self._out("[parsed %d settings from live dump]" % len(settings))
+            if len(settings) < 10:
+                self._out("[note] only %d settings parsed — this looks like a "
+                          "level-0 (identity-only) dump; the tunables "
+                          "(spfront/sprear/…) appear after login on rev 41." % len(settings))
+            self._refresh_write_rows()
 
         # -- Phase 2: Login ------------------------------------------------------
         def _build_login_tab(self):
@@ -696,25 +1103,37 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 attempts = []
                 success = False
                 used = None
+                level = 0
                 for pw in pws:
                     out = self.transport.exec_command(
                         "login %s" % pw, idle_timeout=2.0,
                         redact=pw if redact else None)
-                    attempts.append((pw, out))
-                    if re.search(r"logged in|level\s*[1-9]", out, re.I):
-                        success = True
-                        used = pw
+                    # D5: confirm elevation via the READ-ONLY level query — bare
+                    # `login` prints 'Login Level: N' (ground truth on this bike).
+                    # The attempt's own wording is unverified on rev 41, so it is
+                    # only a fast-path fallback, and explicit fail words veto it.
+                    lvl_out = self.transport.exec_command("login", idle_timeout=2.0)
+                    attempts.append((pw, out, lvl_out))
+                    definite_fail = re.search(r"fail|denied|invalid|incorrect", out, re.I)
+                    m = re.search(r"login\s*level\s*:?\s*(\d+)", lvl_out, re.I)
+                    lvl = int(m.group(1)) if m else None
+                    if lvl is not None and lvl >= 1 and not definite_fail:
+                        success, used, level = True, pw, lvl
+                        break
+                    if (lvl is None and not definite_fail and re.search(
+                            r"(?<!not )logged in|level\s*:?\s*[1-9]", out, re.I)):
+                        success, used = True, pw
                         break
                 post = {}
                 if success:
                     post["help"] = self.transport.exec_command("help", idle_timeout=2.5)
                     post["set"] = self.transport.exec_command("set", idle_timeout=4.0,
                                                               max_time=120.0)
-                return attempts, success, post, used
+                return attempts, success, post, used, level
 
             def done(result):
-                attempts, success, post, used = result
-                for pw, out in attempts:
+                attempts, success, post, used, level = result
+                for pw, out, _lvl_out in attempts:
                     masked = out.replace(pw, "****") if redact else out
                     self._login_log(">>> login %s\n%s\n" % (shown(pw), masked))
                 if not success:
@@ -722,13 +1141,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                     "are community-held; try another.)")
                     return
                 self.logged_in = True
+                lvl_txt = " (level %d)" % level if level else ""
                 if redact:
-                    self._login_log("LOGIN OK with your typed password. It was NOT "
+                    self._login_log("LOGIN OK%s with your typed password. It was NOT "
                                     "saved. To have it tried automatically next "
-                                    "time, add it to COMMUNITY_PASSWORDS in gui.py.")
+                                    "time, add it to COMMUNITY_PASSWORDS in gui.py."
+                                    % lvl_txt)
                 else:
-                    self._login_log("LOGIN OK (login %s). Re-captured help + settings."
-                                    % used)
+                    self._login_log("LOGIN OK%s (login %s). Re-captured help + settings."
+                                    % (lvl_txt, used))
                 if self.help_logged_out and post.get("help"):
                     diff = "\n".join(difflib.unified_diff(
                         self.help_logged_out.splitlines(),
@@ -737,6 +1158,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self._login_log("\n--- help diff (new commands revealed) ---\n"
                                     + (diff or "(no differences)"))
                 if post.get("set"):
+                    # D8: the post-login `set` is the first dump that shows the
+                    # tunables' pre-change values — save it as the authoritative
+                    # labeled baseline (the pre-login one is identity-only on rev 41)
+                    stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    self.logger.save_named("settings_baseline_postlogin_%s.txt" % stamp,
+                                           post["set"])
+                    self._login_log("post-login settings baseline saved — the "
+                                    "authoritative pre-change backup.")
                     self._ingest_settings(post["set"])
                 self._apply_gates()
                 self._login_log("\nPhase 3 (Writes) unlocked — writes still require the "
@@ -780,7 +1209,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Button(wrow, text="Write…", style=self.sty["danger"],
                        command=self._write).pack(side="left")
 
-            ttk.Label(f, text="Safety guards (read-only, never writable):",
+            ttk.Label(f, text="Safety guards (read-only; documented / Sevcon-side "
+                      "values that rev 41 does not expose via `set`):",
                       foreground=P["dim"]).pack(anchor="w", pady=(10, 2))
             self.txt_guards = self._console_text(f, 6, fg=P["warn"])
             self.txt_guards.pack(fill="x")
@@ -870,37 +1300,63 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 def job2():
                     stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
                     self.logger.save_named("settings_backup_%s.txt" % stamp, dump)
-                    self.transport.exec_command("set %s %s" % (name, new_val),
-                                                idle_timeout=2.5)
+                    # D4: journal INTENT before the write reaches the wire, so a
+                    # failure between send and verify still records that the bike
+                    # may have changed. Then, once the write is out, show a revert
+                    # entry immediately (before verify) so a verify error can't
+                    # lose it — the journal is the audit trail the design leans on.
+                    self.logger.journal_write(name, old_val, new_val, ok=None)  # PENDING
+                    self.transport.write_setting(name, new_val, idle_timeout=2.5)
+                    self._cbq.put(lambda: self._record_write(name, old_val, new_val))
                     verify = self.transport.exec_command("set", idle_timeout=4.0,
                                                          max_time=120.0)
                     live2, _ = parse_settings_dump(verify)
                     got = live2.get(name, {}).get("value", "")
                     verified = first_number(got) == first_number(new_val)
                     self.logger.journal_write(name, old_val, new_val, verified)
-                    return old_val, got, verified, verify
+                    return got, verified, verify
 
                 def done2(r2):
-                    old_val2, got, verified, verify_dump = r2
-                    self.journal_entries.append((name, old_val2, new_val))
-                    self.lst_journal.insert(
-                        "end", "%s: %s -> %s  [%s]" % (name, old_val2, new_val,
-                                                       "verified" if verified else
-                                                       "READBACK MISMATCH: %r" % got))
+                    got, verified, verify_dump = r2
+                    self._set_last_journal_status(got, verified)
                     self._ingest_settings(verify_dump)
                     if not verified:
-                        messagebox.showwarning(APP_NAME,
-                                               "Read-back mismatch for %s: bike reports %r. "
-                                               "Check the raw log." % (name, got))
+                        # F8: offer an immediate revert rather than only warning —
+                        # esp. important for booleans, whose accepted token on rev
+                        # 41 is unverified (a "Yes" might land as its opposite)
+                        if messagebox.askyesno(APP_NAME,
+                                "Read-back mismatch for %s: you wrote %r but the bike "
+                                "reports %r. Stage a revert to the previous value (%s) "
+                                "now?" % (name, new_val, got, old_val)):
+                            self._stage_revert(name, old_val)
                 self._run_bg(job2, done2)
 
             self._run_bg(job, confirm_and_send)
 
-        def _revert(self):
-            sel = self.lst_journal.curselection()
-            if not sel:
+        def _record_write(self, name, old, new):
+            """Add a revert entry the instant a write goes out (before verify)."""
+            self.journal_entries.append((name, old, new))
+            self.lst_journal.insert("end", "%s: %s -> %s  [pending verify]"
+                                    % (name, old, new))
+
+        def _set_last_journal_status(self, got, verified):
+            """Update the just-added entry's label after the read-back verify."""
+            if not self.journal_entries:
                 return
-            name, old, new = self.journal_entries[sel[0]]
+            idx = len(self.journal_entries) - 1
+            name, old, new = self.journal_entries[idx]
+            label = ("%s: %s -> %s  [%s]"
+                     % (name, old, new, "verified" if verified
+                        else "READBACK MISMATCH: %r" % got))
+            try:
+                self.lst_journal.delete(idx)
+                self.lst_journal.insert(idx, label)
+            except Exception:
+                pass
+
+        def _stage_revert(self, name, old):
+            """Stage a revert (select the row + fill the old value); the user then
+            presses Write to apply it through the normal confirm/backup flow."""
             self.newval_var.set(first_number(old))
             for iid in self.tree.get_children():
                 if iid == name:
@@ -908,6 +1364,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     break
             messagebox.showinfo(APP_NAME, "Revert staged: %s -> %s. Review and press "
                                 "Write… to apply (same confirm/backup flow)." % (name, old))
+
+        def _revert(self):
+            sel = self.lst_journal.curselection()
+            if not sel:
+                return
+            name, old, new = self.journal_entries[sel[0]]
+            self._stage_revert(name, old)
 
         # -- Analyze tab (Health / Rides / Compare / Gearing) ----------------
         def _build_analyze_tab(self):
@@ -947,15 +1410,21 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # Rides
             rf = ttk.Frame(sub, padding=8)
             sub.add(rf, text=" Rides ")
+            rbtns = ttk.Frame(rf)
+            rbtns.pack(fill="x")
+            ttk.Button(rbtns, text="Load ride log (.txt)…",
+                       command=self._load_ride_log).pack(side="left")
+            ttk.Label(rbtns, text="  (a zero-log-parser decoded .txt)",
+                      foreground=P["dim"]).pack(side="left")
             self.lbl_ride_totals = ttk.Label(rf, text="Load a session with a "
-                                             "dumplogs capture to analyze rides.",
-                                             foreground=P["dim"])
-            self.lbl_ride_totals.pack(anchor="w")
-            rcols = ("start", "km", "soc", "socpkm", "temp", "rpm")
+                                             "dumplogs capture (or a ride log file) "
+                                             "to analyze rides.", foreground=P["dim"])
+            self.lbl_ride_totals.pack(anchor="w", pady=(6, 0))
+            rcols = ("start", "km", "soc", "socpkm", "ptemp", "mtemp", "rpm")
             heads = ("Start", "Distance km", "SOC used %", "SOC%/km",
-                     "Max temp C", "Max rpm")
+                     "Max pack C", "Max motor C", "Max rpm")
             self.ride_tree = ttk.Treeview(rf, columns=rcols, show="headings", height=11)
-            for c, h, w in zip(rcols, heads, (150, 100, 90, 90, 90, 90)):
+            for c, h, w in zip(rcols, heads, (150, 95, 85, 80, 80, 85, 80)):
                 self.ride_tree.heading(c, text=h)
                 self.ride_tree.column(c, width=w, anchor="w")
             self.ride_tree.pack(fill="both", expand=True, pady=(6, 0))
@@ -1023,6 +1492,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 messagebox.showinfo(APP_NAME, "No live session yet — connect and "
                                     "capture first, or load a saved folder.")
                 return
+            if self._busy:      # D7: a capture is mid-write; files are partial
+                messagebox.showinfo(APP_NAME, "A capture is still running — wait for "
+                                    "it to finish before analyzing the current session.")
+                return
             self._analyze_set(sessions.load_session(self.logger.dir))
 
         def _render_health(self):
@@ -1043,28 +1516,54 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.lbl_health_note.config(text=note)
 
         def _render_rides(self):
+            # A1: rev-41 has no console command that streams ride telemetry as text
+            # (`dumplogs` doesn't exist). Ride analysis is sourced from an external
+            # zero-log-parser export via 'Load ride log (.txt)'. Old sessions that
+            # DID capture a `dumplogs` file still render for backward compatibility.
             self.ride_tree.delete(*self.ride_tree.get_children())
-            if not self.analyze_session:
-                self.lbl_ride_totals.config(text="Load a session with a dumplogs "
-                                            "capture to analyze rides.")
+            legacy = self.analyze_session.cmd("dumplogs") if self.analyze_session else ""
+            recs = parsers.parse_ride_log(legacy)
+            if recs:
+                self._render_ride_records(recs, "session dumplogs (legacy capture)")
                 return
-            recs = parsers.parse_ride_log(self.analyze_session.cmd("dumplogs"))
+            self.lbl_ride_totals.config(
+                text="Ride telemetry isn't a console command on this firmware — use "
+                     "'Load ride log (.txt)' above to analyze a zero-log-parser export.")
+
+        def _render_ride_records(self, recs, source):
+            self.ride_tree.delete(*self.ride_tree.get_children())
             summ = rides.summarize_rides(recs)
             t = summ["totals"]
             if not summ["rides"]:
-                self.lbl_ride_totals.config(text="No riding records found in this "
-                                            "session's dumplogs capture.")
+                self.lbl_ride_totals.config(text="No riding records found (%s)." % source)
                 return
             self.lbl_ride_totals.config(
-                text="%d rides · %.1f km · mean %s SOC%%/km · max temp %s C · %d samples"
-                % (t["ride_count"], t["total_km"], t["mean_soc_per_km"],
-                   t["max_temp_c"], t["samples"]))
+                text="%s: %d rides · %.1f km · mean %s SOC%%/km · max pack %s C / "
+                "motor %s C · %d samples"
+                % (source, t["ride_count"], t["total_km"], t["mean_soc_per_km"],
+                   t["max_pack_temp_c"], t["max_motor_temp_c"], t["samples"]))
             for r in summ["rides"]:
                 self.ride_tree.insert("", "end", values=(
                     r["start_ts"] or "?", r["distance_km"], r["soc_used_pct"],
                     r["soc_per_km"] if r["soc_per_km"] is not None else "n/a",
-                    r["max_temp_c"] if r["max_temp_c"] is not None else "n/a",
+                    r["max_pack_temp_c"] if r["max_pack_temp_c"] is not None else "n/a",
+                    r["max_motor_temp_c"] if r["max_motor_temp_c"] is not None else "n/a",
                     r["max_rpm"] if r["max_rpm"] is not None else "n/a"))
+
+        def _load_ride_log(self):
+            path = filedialog.askopenfilename(
+                title="Load a zero-log-parser decoded ride log (.txt)",
+                filetypes=[("Text log", "*.txt"), ("All files", "*.*")])
+            if not path:
+                return
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except OSError as e:
+                messagebox.showerror(APP_NAME, "Couldn't read file:\n%s" % e)
+                return
+            self._render_ride_records(parsers.parse_ride_log(text),
+                                      os.path.basename(path))
 
         def _compare_out(self, text):
             self.txt_compare.config(state="normal")
@@ -1081,6 +1580,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._render_compare()
 
         def _compare_add_current(self):
+            if self._busy and not self.analyze_session:   # D7: don't read a live
+                messagebox.showinfo(APP_NAME, "A capture is still running — wait for "  # capture mid-write
+                                    "it to finish before adding the current session.")
+                return
             s = self.analyze_session
             if not s and self.logger:
                 s = sessions.load_session(self.logger.dir)
@@ -1139,9 +1642,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             for n, cap in res["capacity_trend"]:
                 self._compare_out("  %-28s %s Ah" % (n, cap if cap is not None else "n/a"))
             self._compare_out("\nEFFECTIVE GEARING RATIO:")
-            for n, r in res["gearing_trend"]:
-                self._compare_out("  %-28s %s"
-                                  % (n, ("%.2f:1" % r) if r is not None else "n/a"))
+            for n, r, basis in res["gearing_trend"]:
+                self._compare_out("  %-28s %-9s [%s]"
+                                  % (n, ("%.2f:1" % r) if r is not None else "n/a",
+                                     basis or "?"))
 
         def _gearing_plan(self):
             try:

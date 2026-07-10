@@ -1,0 +1,351 @@
+﻿
+===== > login =====
+login
+Login Level: 0
+
+ZERO MBB> 
+===== > status =====
+status
+
+
+*************************************************************
+*                        Bike Status                        *
+*************************************************************
+
+***  Bike
+   - Mode                   : Charging
+     Test Mode              : Off
+
+***  Motor Controller
+   - On                     : Yes
+   - CAN connected          : Yes
+   - CAN Operational        : Yes
+   - In Operational Mode    : Yes
+   - Drive Mode             : Sport
+   - Motor Temp             :  30C - Normal
+   - Controller Temp        :  21C - Normal
+   - Enabled                :  No
+     - Kickstand Switch
+   - Number of Faults       :   0 
+
+***  ABS 
+   - ABS Powered            :  No
+   - ABS Enabled            : Yes
+
+***  Batteries
+   - Num Modules in System  :   1
+   - Num Registered Modules :   1
+   - Total SOC              : 100 %
+   - Total Capacity         :  52 AH
+   - Remaining Capacity     :  52 AH
+   - Total Energy Used      :  20 KWH
+   - Throttle En Wire       :  Enabled
+
+    -------------------------------------------------------------------------------------------------------------------------------------
+     Num  Node MY   Ver SOC  Cap(AH) Volts   SCVolts Bal(mV) Cur(A) HTemp LTemp ChgAtt Low Crit OvTmp UndTmp Cont IsoErr IsoResK IsoCell
+    +----+----+----+---+----+-------+-------+-------+-------+------+-----+-----+------+---+----+-----+------+----+------+-------+-------+
+     00     8  2017  48 100%  52     115.934 115.693    9      -5     25C   23C  -      -   -    -     -      +    -         53   00      
+
+***  Chargers
+     - Calex 720W           : Enabled
+     - Calex 1200W          : Enabled
+
+***  Info Messages
+ - INFO    : Kickstand switch is in DOWN position
+ - INFO    : MBB Charger Connected
+
+***  Warning Messages
+ - WARNING : BMS Isolation Resistance Is Low
+
+***  Error Messages
+ - No Errors
+
+
+
+ZERO MBB> 
+===== > set =====
+set
+
+*************************************************************
+*                       MBB Settings                        *
+*************************************************************
+  To change settings, type:
+    "set <setting name> <value1> <value2> ..."
+     0x preceding the value may be used to indicate a hex number
+
+
+
+ ************
+ Psudo Settings
+ ************
+  Variable        Description              Value
+ +---------------+------------------------+--------------------
+
+  runtime         Total Run Time           00000:03:01:02
+
+
+ **************
+ Settings
+ **************
+ NV writes: 5773
+
+ Setting Name         Setting Desc                            Value        Units
++--------------------+---------------------------------------+------------+-----
+ model_year           Model Year                                      2017
+ serial               MBB Serial Number                      REDACTEDMBB00 
+ vin                  Bike VIN                           REDACTEDVIN000000 
+ firmware_rev         Firmware Revision                                 41 
+ board_id             Board ID                                           7 
+ model                Bike Model                                       FXS 
+ region               Brake behavior region                           0x00 
+
+
+ZERO MBB> 
+===== > stats =====
+stats
+****************************************
+*               Statistics             *
+****************************************
+
+  - Board Revision            :  04
+  - Board ID                  :  07
+  - Firmware Revision         :  41
+
+  - Num Resets                :  37
+  - Num Watchdog Resets       :  1
+  - Num Abnormal Resets       :  0
+  - Num Sevcon SDO Errors     :  0
+
+  - EEPROM Write Cycles       :  7190
+
+  - System Time               :  06/21/2026 22:28:23
+  - This runtime              :  00000:00:00:52
+  - Longest runtime           :  00001:01:03:27
+  - Total on time             :  00004:14:24:04
+  - Total run time            :  00000:03:01:02
+  - Total charger time        :  00001:10:48:53
+  - Idle Time                 :  00000:00:00:48
+  - Charge Standby Time       :  00000:00:00:00
+
+  - Max Battery Temp          :  59 C
+  - Max Motor Temp            :  87 C
+  - Max Controller Temp       :  36 C
+
+  - Total Watt-Hours          :  0 WH
+  - Trip 0 Watt-Hours         :  0 WH
+  - Trip 1 Watt-Hours         :  13119 WH
+
+  - Time to Charge            :  0 minutes
+  - Estimated Range           :  57.13 km (35.48 mi)
+
+  - Instant Watt Hours Per Km :  0.00 WH/km (0.00 mi/kWh)
+  - Trip Watt Hours Per Km    :  0.00 WH/km (0.00 mi/kWh)
+  - Lifetime Watt Hours Per Km : 46.27 WH/km (0.13 mi/kWh)
+
+  - Odometer                  :  14260802 motor rev
+                              :  6249 km
+                              :  3883 miles
+  - Trip Odometer 0           :  0 motor rev
+                              :  0 km
+                              :  0 miles
+  - Trip Odometer 1           :  511961 motor rev
+                              :  224 km
+                              :  139 miles
+
+  - Top Speed                 :  144 KPH
+                              :  90 MPH
+  - Max Motor Speed           :  5489 RPM
+  - HPD Events                :  3
+  - Time of last HPD          :  00002:09:48:05
+  - Throttle Error Events     :  0
+  - Time of last Thr Error    :  00000:00:00:00
+  - dtcs : 
+                              :  255
+                              :  255
+                              :  255
+                              :  255
+                              :  255
+                              :  255
+                              :  255
+                              :  255
+                              :  255
+                              :  255
+                              :  255
+  - Freeze frame DTC          :  255
+  - freeze frame fields : 
+                             :  0
+                             :  -256
+                             :  -1
+                             :  -1
+                             :  -1
+  - km last clear             :  0
+  - km first mil              :  0
+  - key_cycle counters : 
+    - mil counter             :  0
+    - clear faults counter    :  -1
+
+ZERO MBB> 
+===== > bms =====
+bms
+****************************************
+*               BMS Data               *
+****************************************
+
+*************  BMS #0  ***************
+  - BMS Board Rev             :  03
+  - BMS Firmware Rev          :  48 (993 banka)
+  - BMS Firmware PN           :  75-08037
+  - BMS Serial Number         : redactedbms00
+  - Battery Serial Number     : REDBAT00
+  - CAN Rx in last second     :  132 
+
+  - Pack SOC                  :  100%
+  - Fuel Gauge                :  100%
+  - Age of SOC Data           :  71 ms
+
+  - Model Year                : 2017
+  - Pack Capacity             :  52 AH
+  - Pack Capacity Remaining   :  33 AH
+  - Total Energy Used         :  20 KWH
+  - Number Of Bricks          :   2
+
+  - Pack Discharge Current    :  -5 A
+  - Pack Sum Voltage          :  116.002 V
+  - Sag-Adj Pack Sum Voltage  :  115.740 V
+  - Bank Voltages             :     1    2    3    4    5    6    7    8    9   10   11   12   13   14   15   16   17   18   19   20   21   22   23   24   25   26   27   28 
+                              :  4149 4151 4149 4150 4154 4150 4150 4150 4154 4149 4153 4154 4150 4149 4150 4148 4153 4149 4153 4149 4151 4148 4156 4148 4155 4151 4152 4153 
+  - Lowest Cell Voltage       :  4148 mV ( Cell 16 )
+  - Highest Cell Voltage      :  4156 mV ( Cell 23 )
+  - Pack Balance              :  8 mV
+  - Lowest Cell mV            :  4148 mV
+  - Age of Bank Voltage Data  :  303 ms
+
+  - Isolation Resistance      :  32 KOhms (0x0020) 
+  - Least Isolated Cell       :  0 
+  - Instant Iso Resistance    :  0 KOhms (0x0000)
+  - Instant Least Iso Cell    :  0
+
+                              :      0     1     2     3     4     5     6     7 
+  - Pack Temps                :    24C   24C   23C   25C -100C -100C -100C -100C 
+  - Lowest Present Pack Temp  :  23 C
+  - Max Pack Temp This Ride   :  25 C
+  - Min Pack Temp This Ride   :  23 C
+  - Age of BMS Temp Data      :  152 ms
+
+  - Min Discharge Temp        :  -25 C
+  - Max Charge Temp           :  50 C
+  - Min Charge Temp           :  0 C
+  - Max Charge C-Rate         :  1.0
+  - Min Discharge C-Rate      : 10.0
+  - Discharge Scale Value     :   255/255
+
+  - Num Charge Cycles         :  32
+
+  - BMS Total Bike Run Time   :  00:00:03
+  - BMS Clock                 :  06/21/2026 22:28:27 ( 1782106107, 0x6A38C7FB )
+  - Age of BMS Time Data      :  264 ms
+
+  - Age of BMS Status Data    :  276 ms
+  - Discrete Throttle En      :  Enabled
+
+  CAN Status
+  - Charger Attached          :   No
+  - Batt Unbalanced           :   No
+  - Batt Low                  :   No
+  - Batt Full                 :  Yes
+  - Batt Critically Low       :   No
+  - Batt Temp High            :   No
+  - Batt Temp Critically High :   No
+  - Batt Temp Low             :   No
+  - Contactor Closed          :  Yes
+  - Isolation Fault           :   No
+  - BMS Internal Fault        :   No
+  - Cell Too High For Charge  :   No
+  - Cell Too Low For Charge   :   No
+  - Charge Halt               :   No
+  - BMS Internal Disable      :   No
+  - Long term Storage active :   No
+
+  CAN Commands
+  - Close Contactor           :   No
+  - Connect Module            :  Yes
+  - Key On                    :   No
+  - Charger Connected         :  Yes
+  - Expected Charger Current  :  6.0 A
+  - Time Since Cmds Last Sent : 1091 ms
+
+
+ZERO MBB> 
+===== > sevcon =====
+sevcon
+****************************************
+*             Sevcon Data              *
+****************************************
+
+  Received PDOs
+  - Motor speed               :     0 RPM
+  - Age of motor speed data   :    66 ms
+
+  - Throttle Input Voltage    :   558 mV
+  - Age of throttle data      :    88 ms
+
+  - Motor Temp                :    30 C
+  - Max Motor Temp This Ride  :    31 C
+  - Age of motor temp data    :   119 ms
+
+  - Controller Temp           :    21 C
+  - Max Ctrl Temp This Ride   :    21 C
+  - Age of ctrl temp data     :   151 ms
+
+  - Battery Voltage           :   115.312 V
+  - Battery Current           :     0.000 A
+  - Capacitor Voltage         :   116.062 V
+  - Contactor Coil Voltage    :   116.000 V
+  - Age of cap voltage data       :   208 ms
+
+  - Iq Target                 :     0 Amps
+  - Motor Torque              :     0 ft-lbs ( 0 Nm )
+  - Motor Power               :     0 Watts
+  - Motor Ud                  :     0 dn
+  - Motor Uq                  :     0 dn
+  - Motor voltage tan x 1000  :     0 
+  - Age of current data       :   288 ms
+
+  - Digital Inputs 1-8        :  0x00
+
+
+  Transmitted PDOs
+  --Drive Control--
+  - Max Batt Chg Current      :   -52 A
+  - Max Batt Dishg Current    :   520 A
+  - Time Since DrvCtrl Sent   :   331 ms
+
+  SDOs
+  - Access Level              :        4 
+  - Motor Temp Control Mode   :     0x01 
+  - Odometer Km               :  14843.0 
+  - Odometer Miles            :   9218.9 
+
+  - Key on Hours              :  1277 
+  - Key on Minutes            :    31 
+  - Traction on Hours         :   156 
+  - Traction on Minutes       :    11 
+
+  - Max Eco Speed             :    89 MPH ( 143 KPH ) ( 5445 RPM )
+  - Max Eco Torque            :   100 %
+  - Max Eco Regen Coast Tq    :     5 %
+  - Max Eco Regen Brake Tq    :     7 %
+
+  - Sevcon DCF Rev            : 153
+  - Sevcon Firmware Rev       : SN0066.23
+  - Sevcon Hardware Rev       : 0x010d0005
+  - Sevcon Serial num         : REDACTEDSEVCON
+
+  - In Operational Mode       : Yes
+
+  Active Sevcon Faults
+  - Number of Faults          :    0 
+
+
+
+ZERO MBB> 

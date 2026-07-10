@@ -141,10 +141,27 @@ def test_effective_ratio_roundtrip():
 def _make_session(tmp_path, tag):
     logger = SessionLogger(base_dir=str(tmp_path), tag=tag)
     tr = Transport(SimPort(), logger)
+    tr.exec_command("login tpsreport")     # reveal the full (login-gated) settings
     for cmd in READ_COMMANDS + ["set"] + DUMP_COMMANDS:
         tr.exec_command(cmd, idle_timeout=3.0, max_time=60.0)
     logger.save_named("settings_baseline_test.txt", tr.exec_command("set"))
     return sessions.load_session(logger.dir)
+
+
+def test_sim_dumplogs_is_invalid_like_the_real_bike(tmp_path):
+    # A1: `dumplogs` is not a real rev-41 command; the sim models that faithfully
+    tr = Transport(SimPort(), SessionLogger(base_dir=str(tmp_path), tag="dl"))
+    assert "invalid command" in tr.exec_command("dumplogs").lower()
+
+
+def test_sim_heavy_dump_uses_real_field_keys(tmp_path):
+    # E2: the heavy `dumpall` emits the real zero-log-parser DECODED field keys
+    tr = Transport(SimPort(), SessionLogger(base_dir=str(tmp_path), tag="da"))
+    dump = tr.exec_command("dumpall", idle_timeout=3.0, max_time=60.0)
+    assert "Riding" in dump and "PackTemp: h" in dump and "MotTemp:" in dump
+    recs = parsers.parse_ride_log(dump)
+    assert len(recs) > 100
+    assert all(r["soc"] is not None and r["odo_km"] is not None for r in recs)
 
 
 def test_load_session_from_sim(tmp_path):
@@ -165,8 +182,9 @@ def test_health_snapshot_from_sim(tmp_path):
 
 
 def test_rides_summary_from_sim(tmp_path):
-    s = _make_session(tmp_path, "a")
-    summ = rides.summarize_rides(parsers.parse_ride_log(s.cmd("dumplogs")))
+    # ride telemetry now comes from a heavy dump / external log, not the baseline
+    tr = Transport(SimPort(), SessionLogger(base_dir=str(tmp_path), tag="r"))
+    summ = rides.summarize_rides(parsers.parse_ride_log(tr.exec_command("dumpall")))
     assert summ["totals"]["ride_count"] >= 1
     assert summ["totals"]["samples"] > 100
     assert any(r["soc_per_km"] is not None for r in summ["rides"])
@@ -186,7 +204,9 @@ def test_compare_two_sessions(tmp_path):
     result = compare.compare_sessions([a, b])
     assert result["settings_diff"] == []          # identical sim data
     assert [c for _, c in result["capacity_trend"]] == [52, 52]
-    assert all(abs(r - 4.50) < 0.01 for _, r in result["gearing_trend"])
+    # identical sessions -> 0 km delta -> lifetime-avg basis, ~4.50
+    assert all(abs(r - 4.50) < 0.01 for _, r, _ in result["gearing_trend"])
+    assert all("lifetime" in basis for _, _, basis in result["gearing_trend"])
 
 
 def test_health_on_empty_session_does_not_crash(tmp_path):
@@ -218,3 +238,187 @@ def test_load_session_latest_wins_numerically(tmp_path):
     (d / "1000_bms.txt").write_text("# command: bms\nNEW\n", encoding="utf-8")
     s = sessions.load_session(str(d))
     assert s.cmd("bms").strip() == "NEW"
+
+
+# --- Phase F: analysis honesty ----------------------------------------------
+
+def test_gauge_note_drops_refuted_recalibration_claim():
+    assert "1.55" not in health.GAUGE_NOTE
+    assert "unchanged" in health.GAUGE_NOTE.lower()
+
+
+def test_first_val_keeps_zero():
+    assert parsers.first_val(None, 0, 5) == 0        # a real 0 is not "missing"
+    assert parsers.first_val(0.0, 9) == 0.0
+    assert parsers.first_val(None, None) is None
+
+
+def test_ride_log_splits_pack_and_motor_temp():
+    line = (" 00001 05/16/2026 08:12:33 Riding PackTemp: h 27C, l 26C, "
+            "PackSOC: 61%, Vpack: 106.4V, MotAmps: 100, MotRPM: 3100, "
+            "MotTemp: 41C, Odo: 6120km")
+    recs = parsers.parse_ride_log(line)
+    assert len(recs) == 1
+    assert recs[0]["pack_temp_c"] == 27          # the HIGH pack reading, not motor
+    assert recs[0]["motor_temp_c"] == 41
+    plain = parsers.parse_ride_log(" 1 Riding PackTemp: 24C, PackSOC: 5%, Odo: 10km")
+    assert plain[0]["pack_temp_c"] == 24         # plain 'PackTemp: 24C' also works
+
+
+def test_parse_bms_isolation():
+    b = parsers.parse_bms("  - Isolation Resistance : 32 KOhms (0x0020)\n"
+                          "  - Pack SOC : 100%")
+    assert b["isolation_kohm"] == 32
+
+
+def test_parse_status_warnings():
+    st = parsers.parse_status("***  Warning Messages\n"
+                              " - WARNING : BMS Isolation Resistance Is Low\n"
+                              "***  Error Messages\n - No Errors")
+    assert st["warnings"] == ["BMS Isolation Resistance Is Low"]
+
+
+def _iso_session(tmp_path, mode):
+    bms = ("  - Isolation Resistance : 32 KOhms\n  - Pack SOC : 100%\n"
+           "  - Pack Sum Voltage : 116.0 V\n  - Pack Balance : 8 mV\n"
+           "  - Pack Capacity : 52 AH\n  - Num Charge Cycles : 32")
+    status = "  - Mode : %s\n  - WARNING : BMS Isolation Resistance Is Low" % mode
+    return sessions.Session(str(tmp_path), {"bms": bms, "status": status}, "")
+
+
+def test_health_isolation_charging_softened_offcharger_alerts(tmp_path):
+    on = {m["label"]: m for m in health.health_snapshot(_iso_session(tmp_path, "Charging"))}
+    assert on["Isolation resistance"]["status"] == "watch"     # charger false-low
+    assert "charging" in on["Isolation resistance"]["note"].lower()
+    assert "Warning" in on                                     # live warning surfaced
+    off = {m["label"]: m for m in health.health_snapshot(_iso_session(tmp_path, "Standby"))}
+    assert off["Isolation resistance"]["status"] == "alert"    # off-charger = real
+
+
+def test_health_isolation_unknown_mode_is_watch(tmp_path):
+    # T12: an absent/unrecognized Mode must NOT be asserted as off-charger 'alert'
+    bms = "  - Isolation Resistance : 32 KOhms\n  - Pack SOC : 100%"
+    s = sessions.Session(str(tmp_path), {"bms": bms}, "")       # no status capture
+    m = {x["label"]: x for x in health.health_snapshot(s)}["Isolation resistance"]
+    assert m["status"] == "watch"                              # not 'alert'
+    assert "unknown" in m["note"].lower()
+
+
+def _iso_row(tmp_path, mode, iso_kohm):
+    bms = "  - Isolation Resistance : %d KOhms\n  - Pack SOC : 100%%" % iso_kohm
+    caps = {"bms": bms}
+    if mode is not None:
+        caps["status"] = "  - Mode : %s" % mode
+    s = sessions.Session(str(tmp_path), caps, "")
+    return {x["label"]: x for x in health.health_snapshot(s)}["Isolation resistance"]
+
+
+def test_health_isolation_known_off_mode_low_alerts(tmp_path):
+    # C2: the live session's Mode was 'Stopped' (a positively-off-charger mode);
+    # a low reading there is a real diagnostic, not a charger false-low.
+    m = _iso_row(tmp_path, "Stopped", 32)
+    assert m["status"] == "alert"
+    assert "off-charger" in m["note"].lower()
+
+
+def test_health_isolation_garbled_mode_is_watch_unknown(tmp_path):
+    # C2: an unrecognized Mode is NOT a confirmed off-charger reading -> watch
+    m = _iso_row(tmp_path, "Wobble", 32)
+    assert m["status"] == "watch"
+    assert "unknown" in m["note"].lower()
+
+
+def test_health_isolation_midband_off_charger_is_watch(tmp_path):
+    # C2: known-off but 500-999 kOhm is a mid-band 'watch', NOT 'alert'
+    m = _iso_row(tmp_path, "Stopped", 800)
+    assert m["status"] == "watch"
+    assert "500-999" in m["note"]
+    # and the boundary: 499 kOhm (below the band) is still an alert
+    assert _iso_row(tmp_path, "Stopped", 499)["status"] == "alert"
+
+
+def test_health_isolation_megohm_is_ok(tmp_path):
+    # C2 real check: the live 007_bms.txt read 32766 kOhm (healthy) -> ok,
+    # regardless of Mode.
+    assert _iso_row(tmp_path, "Stopped", 32766)["status"] == "ok"
+    assert _iso_row(tmp_path, "Charging", 32766)["status"] == "ok"
+
+
+def test_health_motor_temp_labels_documented_defaults(tmp_path):
+    # C3 (review FID-3): rev 41 doesn't expose motstage1/2 in `set`, so the cutback
+    # thresholds fall back to documented defaults — the note must SAY so, not print
+    # 100/145 in the same format as a live read of this bike.
+    no_stages = sessions.Session(str(tmp_path), {"stats": REAL_STATS}, "")
+    m = {x["label"]: x for x in health.health_snapshot(no_stages)}["Max motor temp"]
+    assert "documented defaults" in m["note"]
+    # when the dump DOES carry them, the disclaimer is absent and the real values show
+    settings_text = ("motstage1 - Motor temp warn : 110\n"
+                     "motstage2 - Motor temp cutback : 150")
+    with_stages = sessions.Session(str(tmp_path), {"stats": REAL_STATS}, settings_text)
+    m2 = {x["label"]: x for x in health.health_snapshot(with_stages)}["Max motor temp"]
+    assert "documented defaults" not in m2["note"]
+    assert "110" in m2["note"] and "150" in m2["note"]
+
+
+def test_no_refuted_gauge_claim_in_safety_text():
+    # T11: the refuted "~1.55x" claim must not ship on the Writes tab either
+    from openmbb import safety
+    assert "1.55" not in safety.WRITE_WHITELIST["fuelgaugepes"][1]
+    assert "1.55" not in safety.WRITE_PANEL_CONTEXT
+
+
+def test_first_val_keeps_zero_in_parse_stats():
+    # T20/F6: the two converted or-chains must let a legitimate 0 through
+    s = parsers.parse_stats("  - Lifetime Watt Hours Per Km : 0 WH/km\n"
+                            "  - Max Motor Speed : 0 RPM")
+    assert s["lifetime_wh_km"] == 0        # not None (0 is real data)
+    assert s["max_motor_rpm"] == 0
+
+
+def test_parse_ride_log_from_zero_log_parser_text():
+    # T20/F4: rides can be sourced from a decoded zero-log-parser .txt
+    text = "\n".join(
+        " %05d 05/16/2026 08:%02d:00 Riding PackTemp: h 27C, l 26C, PackSOC: %d%%, "
+        "MotRPM: 3100, MotTemp: 41C, Odo: 61%02dkm" % (i, i, 90 - i, 10 + i)
+        for i in range(8))
+    recs = parsers.parse_ride_log(text)
+    assert len(recs) == 8
+    assert rides.summarize_rides(recs)["totals"]["ride_count"] >= 1
+
+
+def test_describe_plan_uses_ref_ratio():
+    p = gearing.gearing_plan(14, 56, ref_ratio=4.00)
+    assert p["ref_ratio"] == 4.00
+    assert "4.00:1" in gearing.describe_plan(p)
+
+
+def test_gearing_from_delta_reflects_regear(tmp_path):
+    circ = gearing.DEFAULT_CIRC_MM
+
+    def sess(name, motor_rev, km):
+        stats = "  - Odometer : %d motor rev\n              : %d km" % (motor_rev, km)
+        return sessions.Session(str(tmp_path / name), {"stats": stats}, "")
+
+    a_rev, a_km = 14304861, 6249                 # ~4.50 lifetime
+    delta_rev = round(4.00 * 1e6 / circ * 1000)  # 1000 km ridden at 4.00
+    res = compare.compare_sessions([sess("a", a_rev, a_km),
+                                    sess("b", a_rev + delta_rev, a_km + 1000)])
+    (n0, r0, b0), (n1, r1, b1) = res["gearing_trend"]
+    assert abs(r0 - 4.50) < 0.02 and "lifetime" in b0   # first: lifetime average
+    assert abs(r1 - 4.00) < 0.02 and "delta" in b1      # second: delta = the re-gear
+
+
+def test_gearing_delta_needs_minimum_distance(tmp_path):
+    # T10: a too-short delta (integer-km quantization noise) must fall back to
+    # the lifetime average, labeled — never present a bogus "current" ratio
+    def sess(name, motor_rev, km):
+        stats = "  - Odometer : %d motor rev\n              : %d km" % (motor_rev, km)
+        return sessions.Session(str(tmp_path / name), {"stats": stats}, "")
+
+    a_rev, a_km = 14304861, 6249
+    # 1 km apart, but the motor revs imply an absurd 8:1 over that 1 km
+    res = compare.compare_sessions([sess("a", a_rev, a_km),
+                                    sess("b", a_rev + 4068, a_km + 1)])
+    _, r1, b1 = res["gearing_trend"][1]
+    assert "lifetime" in b1                    # fell back (delta too short)
+    assert abs(r1 - 4.50) < 0.05               # not the bogus 8:1 the 1-km delta implies

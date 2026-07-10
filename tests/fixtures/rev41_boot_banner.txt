@@ -1,0 +1,13 @@
+*              Zero Motorcycles MBB
+*             Board Name : MBB PCB ASSY 17MY IMPL
+*               Board PN : 40-08064          Board Rev : 04
+*          Firmware Name : FIRMWARE MBB 17MY IMPL
+*            Firmware PN : 75-08036          Firmware Rev : 41
+*                  Build : 2024-11-17_140732 993     banka
+Reset Source: Power-On
+ - Checking 5V Supply ......... Okay
+ - Checking 3.3V Supply ....... Okay
+ - Checking EEPROM ............ Okay
+ - Checking CANbus ............ NOT YET IMPLEMENTED
+ - Checking Accelerometer ..... Selftest Passed
+ - Checking Tipover Detection . Okay

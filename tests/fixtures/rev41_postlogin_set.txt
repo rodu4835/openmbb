@@ -1,0 +1,52 @@
+# command: set
+# time: 12:53:12.610
+
+*************************************************************
+*                       MBB Settings                        *
+*************************************************************
+  To change settings, type:
+    "set <setting name> <value1> <value2> ..."
+     0x preceding the value may be used to indicate a hex number
+
+
+
+ ************
+ Psudo Settings
+ ************
+  Variable        Description              Value
+ +---------------+------------------------+--------------------
+
+  runtime         Total Run Time           00000:10:22:56
+
+
+
+ **************
+ Settings
+ **************
+ NV writes: 5773
+
+ Setting Name         Setting Desc                            Value        Units
++--------------------+---------------------------------------+------------+-----
+ model_year           Model Year                                      2017
+ serial               MBB Serial Number                      REDACTEDMBB00 
+ vin                  Bike VIN                           REDACTEDVIN000000 
+ firmware_rev         Firmware Revision                                 41 
+ board_id             Board ID                                           7 
+ model                Bike Model                                       FXS 
+ spfront              Sprocket Teeth Front                              20 
+ sprear               Sprocket Teeth Rear                               90 
+ rwhcirc              Rear Wheel Circum                               1972 mm
+ kill                 Kill Switch Polarity                               1 
+ secidle              Seconds Idle Before Turn Off                    3600 S
+ drive_mode           Pres Drv Mode 123 norm 456 overide                 1 
+ maxcustsprpm         Max Custom Speed                                5445 RPM
+ maxcustspmph         Max Custom Speed                                  89 MPH
+ maxcustspkph         Max Custom Speed                                 143 KPH
+ maxcusttqx10         Max Custom Torque x10                           1000 %x10
+ maxcusttq_allowed    Max Custom Torque Percent of Allowed             100 %
+ maxcustregcotqx10    Max Custom Regen Coast Torque x10                 50 %x10
+ maxcustregcotq_allow Max Cust Regen Coast Torque % of Allowe           55 %
+ maxcustregbrtqx10    Max Custom Regen Brake Torque x10                 70 %x10
+ maxcustregbrtq_allow Max Cust Regen Brake Torque % of Allowe           77 %
+ is_dnr_board         Is D&R board                                       0 
+ region               Brake behavior region                           0x00 

@@ -9,11 +9,23 @@ Everything degrades gracefully: a field the capture didn't include shows "n/a".
 """
 
 from . import gearing, rides
-from .parsers import parse_bms, parse_stats, parse_status
+from .parsers import first_val, parse_bms, parse_stats, parse_status
 from .transport import first_number, parse_settings_dump
 
-GAUGE_NOTE = ("Post-2026-06-13 firmware reads SOC ~1.55x steeper than older "
-              "firmware; ~100.8 V at rest now shows ~20% (was ~38%).")
+# F1: the matched before/after firmware log analysis (MBB 12 vs 41, ~1100
+# samples) REFUTED the "gauge reads ~1.55x steeper" theory — the SoC-vs-voltage
+# curve and the 100% top voltage were unchanged. Read displayed SOC as-is.
+GAUGE_NOTE = ("Matched before/after firmware analysis (MBB 12 vs 41) found the "
+              "SoC-vs-voltage curve UNCHANGED (+/-1%) and 100% top voltage "
+              "unchanged (116.9 V). Read displayed SOC as-is — do NOT mentally "
+              "inflate a low reading.")
+
+
+# T12: Modes that POSITIVELY mean "not on the charger" (seen in real rev-41
+# captures — the live session's Mode was `Stopped`). Anything else — a blank
+# Mode, or an unrecognized/garbled one — leaves the charge state UNKNOWN, which
+# must NOT be treated as a confirmed off-charger reading.
+KNOWN_OFF_MODES = ("stopped", "standby", "run", "running", "riding", "idle")
 
 
 def _metric(label, value, status="info", note=""):
@@ -75,18 +87,61 @@ def health_snapshot(session):
         s1 = _setting_num(settings, "motstage1", 100)
         s2 = _setting_num(settings, "motstage2", 145)
         st = "ok" if mot_t < s1 else ("watch" if mot_t < s2 else "alert")
+        # C3: on rev 41 these thresholds are NOT in the `set` dump, so we fall back
+        # to documented defaults — label them so the note isn't mistaken for a live
+        # read of this bike's actual cutback points.
+        from_bike = "motstage1" in settings and "motstage2" in settings
+        src = "" if from_bike else " (documented defaults — not read from this bike)"
         out.append(_metric("Max motor temp", "%g C" % mot_t, st,
-                           "cutback stages at %g / %g C" % (s1, s2)))
-    batt_t = stats.get("max_batt_temp_c") or bms.get("pack_max_temp_c")
+                           "cutback stages at %g / %g C%s" % (s1, s2, src)))
+    batt_t = first_val(stats.get("max_batt_temp_c"), bms.get("pack_max_temp_c"))
     if batt_t is not None:
         st = "ok" if batt_t < 50 else ("watch" if batt_t < 60 else "alert")
         out.append(_metric("Max battery temp", "%g C" % batt_t, st,
                            "charge tapers ~43-50 C, operation stop ~50-60 C"))
 
+    # F5: isolation resistance — healthy is megohms (>1000 kΩ). A low reading on
+    # the charger is a documented false-positive, so soften the flag when the
+    # status Mode is Charging and say why.
+    iso = bms.get("isolation_kohm")
+    if iso is not None:
+        # T12: charge state is THREE-valued. Charging is the owner's normal power
+        # setup and the #1 false-low condition; 'not charging' is only KNOWN when
+        # Mode positively says so (KNOWN_OFF_MODES) — an absent/unrecognized Mode
+        # must NOT be asserted as off-charger. Threshold aligns with the note:
+        # >=1000 kOhm ok; 500-999 kOhm is a mid-band (watch, not alert).
+        mode = (status.get("mode") or "").lower()
+        mode_word = (mode.replace(",", " ").split() or [""])[0]
+        charging = mode_word.startswith("charg")
+        known_off = mode_word in KNOWN_OFF_MODES
+        if iso >= 1000:
+            st, ctx = "ok", ""
+        elif charging:
+            st, ctx = "watch", ("Read while CHARGING — known false-low; re-read "
+                                "unplugged + dry before acting.")
+        elif known_off and iso >= 500:
+            st, ctx = "watch", ("Mildly low (500-999 kOhm) off-charger — keep an "
+                                "eye on it; re-read unplugged + dry to confirm.")
+        elif known_off:
+            st, ctx = "alert", "Low off-charger is a real diagnostic; investigate."
+        else:
+            st, ctx = "watch", ("Charge state unknown — a low reading on the charger "
+                                "is a documented false-low; re-read unplugged + dry "
+                                "before acting.")
+        out.append(_metric("Isolation resistance", "%g kOhm" % iso, st,
+                           ("healthy is megohms (>1000 kOhm). " + ctx).strip()))
+
+    # F5: surface any live console warning as its own row
+    for w in (status.get("warnings") or []):
+        out.append(_metric("Warning", w, "watch", "live console warning message"))
+
     circ = _setting_num(settings, "rwhcirc", gearing.DEFAULT_CIRC_MM)
     ratio, rpk, desc = rides.gearing_from_stats(stats, circ)
     if ratio is not None:
+        # F2: this is the LIFETIME-average ratio from the cumulative odometer —
+        # it lags a recent re-gear for thousands of km. Say so in the note.
         out.append(_metric("Effective gearing", "%.2f:1" % ratio, "info",
-                           "%s (%.0f motor-rev/km @ %g mm)"
+                           "LIFETIME-average ratio (lags a recent re-gear for "
+                           "thousands of km) — %s (%.0f motor-rev/km @ %g mm)"
                            % (desc or "?", rpk, circ)))
     return out

@@ -24,6 +24,15 @@ def all_nums(s):
     return [float(x) for x in _NUM.findall(str(s))] if s is not None else []
 
 
+def first_val(*vals):
+    """First value that is not None. Unlike `a or b`, a legitimate 0 / 0.0 is
+    kept — so a pack at 0% SOC or a 0 C temperature is read as data, not missing."""
+    for v in vals:
+        if v is not None:
+            return v
+    return None
+
+
 def parse_kv(text):
     """Parse 'label : value' (or 'label - value') lines into {label_lower: value}.
 
@@ -90,24 +99,28 @@ def parse_bms(text):
     kv = parse_kv(text)
     def g(*n):
         return find(kv, *n)
-    temps = all_nums(g("pack", "temp"))
-    cap_raw = g("capacity") or g("pack", "capacity")
+    # only the real-sensor pack temps, not the -100C unused-sensor placeholders
+    temps = [t for t in all_nums(g("pack", "temp")) if t > -50]
+    cap_raw = first_val(g("capacity"), g("pack", "capacity"))
     caps = all_nums(cap_raw)
     remaining = None
     if len(caps) > 1 and "remain" in (cap_raw or "").lower():
         remaining = caps[1]
     return {
-        "soc_pct": num(g("pack", "soc")) or num(g("soc")),
+        "soc_pct": first_val(num(g("pack", "soc")), num(g("soc"))),
         "fuel_pct": num(g("fuel")),
-        "pack_v": num(g("pack", "voltage")) or num(g("voltage")),
-        "low_cell_mv": num(g("lowest", "cell")) or num(g("low", "cell")),
-        "high_cell_mv": num(g("highest", "cell")) or num(g("high", "cell")),
+        "pack_v": first_val(num(g("pack", "voltage")), num(g("voltage"))),
+        "low_cell_mv": first_val(num(g("lowest", "cell")), num(g("low", "cell"))),
+        "high_cell_mv": first_val(num(g("highest", "cell")), num(g("high", "cell"))),
         "balance_mv": num(g("balance")),
         "capacity_ah": caps[0] if caps else None,
         "remaining_ah": remaining,
         "cycles": num(g("cycle")),
         "pack_max_temp_c": max(temps) if temps else None,
-        "bms_fw_rev": g("bms", "firmware", "rev") or g("firmware", "rev"),
+        # F5: isolation resistance (healthy = megohms; low can be an on-charger
+        # false-positive). First 'isolation' key is the steady reading.
+        "isolation_kohm": num(g("isolation")),
+        "bms_fw_rev": first_val(g("bms", "firmware", "rev"), g("firmware", "rev")),
     }
 
 
@@ -124,11 +137,24 @@ def parse_stats(text):
         "max_batt_temp_c": num(g("max", "battery", "temp")),
         "max_motor_temp_c": num(g("max", "motor", "temp")),
         "max_ctrl_temp_c": num(g("max", "controller", "temp")),
-        "lifetime_wh_km": num(g("lifetime")) or num(g("efficiency")),
+        "lifetime_wh_km": first_val(num(g("lifetime")), num(g("efficiency"))),
         "top_speed_mph": (all_nums(g("top", "speed"))[-1]
                           if all_nums(g("top", "speed")) else None),
-        "max_motor_rpm": num(g("max", "motor", "speed")) or num(g("max", "rpm")),
+        "max_motor_rpm": first_val(num(g("max", "motor", "speed")), num(g("max", "rpm"))),
     }
+
+
+def warning_lines(text):
+    """Every 'WARNING : ...' message from a status block (its own section on the
+    real bike). Returns a list of the messages, without the 'WARNING' prefix."""
+    out = []
+    for line in (text or "").splitlines():
+        s = re.sub(r"^[\s\-\*]+", "", line.strip())
+        # require the colon so the "Warning Messages" section HEADER is not matched
+        m = re.match(r"WARNING\s*:\s*(.+)", s, re.I)
+        if m and "no warning" not in m.group(1).lower():
+            out.append(m.group(1).strip())
+    return out
 
 
 def parse_status(text):
@@ -140,19 +166,19 @@ def parse_status(text):
     caps = all_nums(cap_raw)
     return {
         "mode": g("mode"),
-        "soc_pct": num(g("soc")) or num(g("battery", "soc")),
+        "soc_pct": first_val(num(g("soc")), num(g("battery", "soc"))),
         "motor_temp_c": num(g("motor", "temp")),
         "ctrl_temp_c": num(g("controller", "temp")),
         "capacity_ah": caps[0] if caps else None,
         "remaining_ah": (caps[1] if len(caps) > 1 else None),
-        "faults": g("number", "faults") or g("faults"),
+        "faults": first_val(g("number", "faults"), g("faults")),
+        "warnings": warning_lines(text),
     }
 
 
 _RIDE_FIELDS = {
     "soc": r"soc",
     "vpack": r"vpack",
-    "temp_c": r"packtemp|pack temp|mottemp",
     "motrpm": r"motrpm|mot rpm",
     "motamps": r"motamps|mot amps",
     "odo_km": r"odo",
@@ -165,12 +191,20 @@ def _ride_field(line, pattern):
     return float(m.group(1)) if m else None
 
 
+def _pack_temp(line):
+    # F3: 'PackTemp: h 27C, l 26C' -> the high reading (27); also plain 'PackTemp: 24C'.
+    # Pack temp is safety-relevant (60 C = BMS cutback); motor temp at 60 C is benign.
+    m = re.search(r"pack\s*temp\s*:?\s*(?:h\s*)?(-?\d+)", line, re.I)
+    return float(m.group(1)) if m else None
+
+
 def parse_ride_log(text):
     """Extract riding records from a dumplogs/eventlog block.
 
-    Returns a list of dicts (ts, soc, vpack, temp_c, motrpm, motamps, odo_km);
-    only lines that mention "riding" and yield at least an soc and an odometer
-    are kept, so charging/boot lines are ignored.
+    Returns a list of dicts (ts, soc, vpack, pack_temp_c, motor_temp_c, motrpm,
+    motamps, odo_km); only lines that mention "riding" and yield at least an soc
+    and an odometer are kept, so charging/boot lines are ignored. Pack and motor
+    temperature are separate fields — conflating them hides a real thermal alert.
     """
     records = []
     for line in (text or "").splitlines():
@@ -179,6 +213,8 @@ def parse_ride_log(text):
         rec = {name: _ride_field(line, pat) for name, pat in _RIDE_FIELDS.items()}
         if rec["soc"] is None or rec["odo_km"] is None:
             continue
+        rec["pack_temp_c"] = _pack_temp(line)
+        rec["motor_temp_c"] = _ride_field(line, r"mottemp|motor temp")
         ts = _TS_RE.search(line)
         rec["ts"] = ts.group(0) if ts else None
         records.append(rec)

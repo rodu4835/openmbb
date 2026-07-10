@@ -55,7 +55,8 @@ def gearing_plan(front, rear, circ_mm=DEFAULT_CIRC_MM, ref_ratio=STOCK_RATIO):
         "spfront": int(front),
         "sprear": int(rear),
         "rwhcirc": int(round(circ_mm)),
-        "vs_ref_pct": change,                 # +taller/-shorter vs ref
+        "ref_ratio": ref_ratio,
+        "vs_ref_pct": change,                 # vs ref: negative = taller (lower ratio)
         "taller_than_ref": r < ref_ratio,
         "top_speed_factor": ref_ratio / r,    # >1 = higher top speed than ref
         "revs_per_km": revs_per_km(r, circ_mm),
@@ -70,5 +71,5 @@ def describe_plan(plan):
     return ("%dT/%dT = %.3f:1 — %+.1f%% vs %.2f:1, %s. "
             "Write spfront=%d, sprear=%d, rwhcirc=%d mm."
             % (plan["front"], plan["rear"], plan["ratio"], plan["vs_ref_pct"],
-               STOCK_RATIO, direction, plan["spfront"], plan["sprear"],
-               plan["rwhcirc"]))
+               plan.get("ref_ratio", STOCK_RATIO), direction, plan["spfront"],
+               plan["sprear"], plan["rwhcirc"]))

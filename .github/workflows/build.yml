@@ -47,6 +47,17 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m pytest -q; \
           else python -m pytest -q; fi
 
+      # G8: on a tag build, the tag must match openmbb.__version__ so the
+      # installer/About/Apps-list version can't silently disagree with the release
+      - name: Check tag matches version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          ver=$(python -c "import openmbb; print(openmbb.__version__)")
+          if [ "v$ver" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} != v$ver (openmbb.__version__)"; exit 1
+          fi
+
       - name: Build single-file binary
         run: python packaging/build.py
 
@@ -62,6 +73,9 @@ jobs:
         run: |
           $p = Start-Process -FilePath dist\openmbb.exe -ArgumentList '--selftest' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "frozen --selftest failed ($($p.ExitCode))" }
+          # G3: also exercise the frozen GUI/pyserial bundle on Windows
+          $p2 = Start-Process -FilePath dist\openmbb.exe -ArgumentList '--smoketest' -Wait -PassThru
+          if ($p2.ExitCode -ne 0) { throw "frozen --smoketest failed ($($p2.ExitCode))" }
 
       # Installer wraps the already-verified portable exe: Start menu entry,
       # optional desktop icon, per-user (no admin), uninstaller.

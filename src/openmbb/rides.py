@@ -37,7 +37,8 @@ def _span(seg, key):
 
 def segment_summary(seg):
     socs, odos = _span(seg, "soc"), _span(seg, "odo_km")
-    temps, rpms = _span(seg, "temp_c"), _span(seg, "motrpm")
+    p_temps, m_temps = _span(seg, "pack_temp_c"), _span(seg, "motor_temp_c")
+    rpms = _span(seg, "motrpm")
     dist = (max(odos) - min(odos)) if len(odos) >= 2 else 0.0
     dsoc = (max(socs) - min(socs)) if len(socs) >= 2 else 0.0
     return {
@@ -46,7 +47,8 @@ def segment_summary(seg):
         "distance_km": round(dist, 1),
         "soc_used_pct": round(dsoc, 1),
         "soc_per_km": round(dsoc / dist, 2) if dist > 0 else None,
-        "max_temp_c": max(temps) if temps else None,
+        "max_pack_temp_c": max(p_temps) if p_temps else None,
+        "max_motor_temp_c": max(m_temps) if m_temps else None,
         "max_rpm": max(rpms) if rpms else None,
     }
 
@@ -57,14 +59,16 @@ def summarize_rides(records):
     rides = [segment_summary(s) for s in segs]
     dist = sum(r["distance_km"] for r in rides)
     rated = [r["soc_per_km"] for r in rides if r["soc_per_km"] is not None]
-    temps = [r["max_temp_c"] for r in rides if r["max_temp_c"] is not None]
+    p_temps = [r["max_pack_temp_c"] for r in rides if r["max_pack_temp_c"] is not None]
+    m_temps = [r["max_motor_temp_c"] for r in rides if r["max_motor_temp_c"] is not None]
     return {
         "rides": rides,
         "totals": {
             "ride_count": len(rides),
             "total_km": round(dist, 1),
             "mean_soc_per_km": round(sum(rated) / len(rated), 2) if rated else None,
-            "max_temp_c": max(temps) if temps else None,
+            "max_pack_temp_c": max(p_temps) if p_temps else None,
+            "max_motor_temp_c": max(m_temps) if m_temps else None,
             "samples": len(records),
         },
     }
