@@ -246,6 +246,28 @@ def test_dashboard_layout(app):
     assert "CONNECTED" in str(app.dash_header.cget("text"))
 
 
+def test_safe_quit_gated_while_busy(app):
+    # T3: the global safe-quit + "done" affordances exist and are DISABLED during
+    # any op unsafe to interrupt (busy); safe-quit refuses (doesn't close) if busy.
+    assert hasattr(app, "btn_safequit") and hasattr(app, "btn_done")
+    app._set_busy(True)
+    assert str(app.btn_safequit.cget("state")) == "disabled"
+    assert str(app.btn_done.cget("state")) == "disabled"
+    app._safe_quit()                      # must refuse while busy
+    assert app.winfo_exists()
+    app._set_busy(False)
+    assert str(app.btn_safequit.cget("state")) == "normal"
+    assert str(app.btn_done.cget("state")) == "normal"
+
+
+def test_done_dialog_routes_to_analyze(app, monkeypatch):
+    # T3: the "are you done?" hub routes to the chosen destination.
+    from openmbb import dialogs
+    monkeypatch.setattr(dialogs, "_dialog", lambda *a, **k: "analyze")
+    app._show_done_dialog()
+    assert "analyze" in str(app.nb.tab(app.nb.select(), "text")).lower()
+
+
 def test_menu_dialogs_open(app):
     app._connect()
     assert _pump(app, lambda: app.connected)

@@ -228,6 +228,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.protocol("WM_DELETE_WINDOW", self._on_close)
             self._build_menubar()
             self._build_statusbar()
+            self._build_bottom_bar()   # T3: global safe-quit + "done" hub
             self.nb = ttk.Notebook(self)
             self.nb.pack(fill="both", expand=True, padx=6, pady=(0, 6))
             # C7: a click on a locked tab is silently ignored by Tk — intercept it
@@ -949,11 +950,95 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 pass
             self.destroy()
 
+        # -- global safe-quit + completion hub (T3) -------------------------
+        def _build_bottom_bar(self):
+            bar = ttk.Frame(self, padding=(8, 6))
+            bar.pack(side="bottom", fill="x")
+            self.btn_safequit = ttk.Button(bar, text="Safely disconnect & quit",
+                                            command=self._safe_quit)
+            self.btn_safequit.pack(side="right")
+            self.btn_done = ttk.Button(bar, text="Done — what's next?",
+                                       style=self.sty["accent"],
+                                       command=self._show_done_dialog)
+            self.btn_done.pack(side="right", padx=(0, 8))
+            ttk.Label(bar, text="Safe to disconnect whenever nothing is running.",
+                      foreground=P["dim"]).pack(side="left")
+
+        def _set_busy(self, flag):
+            """Single busy toggle. Also disables the safe-quit / done affordances
+            while an op runs that would be unsafe to interrupt (write, heavy dump,
+            baseline) — the owner's 'unclickable during a damaging process' rule."""
+            self._busy = flag
+            state = "disabled" if flag else "normal"
+            for name in ("btn_safequit", "btn_done"):
+                b = getattr(self, name, None)
+                if b is not None:
+                    try:
+                        b.config(state=state)
+                    except Exception:
+                        pass
+
+        def _select_tab(self, needle):
+            if getattr(self, "landing", None) is not None \
+                    and self.landing.winfo_manager() == "pack":
+                self._leave_landing()
+            for tid in self.nb.tabs():
+                if needle.lower() in str(self.nb.tab(tid, "text")).lower():
+                    self.nb.select(tid)
+                    return
+
+        def _safe_quit(self):
+            """Global 'safely disconnect & quit' — never mid-operation. Release the
+            port, tell the user it's safe to unplug/power off, then close."""
+            if self._busy:
+                messagebox.showinfo(APP_NAME, "An operation is still running — "
+                                    "wait for it to finish before disconnecting.")
+                return
+            where = self.logger.dir if self.logger else None
+            try:
+                if self.transport:
+                    self.transport.close()
+            except Exception:
+                pass
+            self.transport = None
+            self.connected = False
+            self._apply_gates()
+            messagebox.showinfo("Disconnected — safe to unplug",
+                                "Disconnected from the bike.\n\nIt is now safe to "
+                                "unplug the cable and power off the motorcycle."
+                                + (("\n\nSession saved to:\n%s" % where)
+                                   if where else ""))
+            self.destroy()
+
+        def _show_done_dialog(self):
+            """The 'are you done?' hub: review in Analyze, log in for Writes, or
+            save & disconnect. Reachable any time it's safe."""
+            if self._busy:
+                messagebox.showinfo(APP_NAME, "An operation is still running — "
+                                    "wait for it to finish.")
+                return
+            msg = ("What would you like to do next?\n\n"
+                   "•  Review the data you pulled — Analyze\n"
+                   "•  Log in for more access — unlocks Writes\n"
+                   "•  Save, disconnect and quit — safe to unplug after")
+            choice = messagebox._dialog(
+                "Are you done?", msg, "ask",
+                [("Review in Analyze", "analyze", False),
+                 ("Log in for Writes", "login", False),
+                 ("Save & disconnect", "quit", True)],
+                default="stay")
+            if choice == "analyze":
+                self._select_tab("Analyze")
+            elif choice == "login":
+                self._select_tab("Login")
+            elif choice == "quit":
+                self._safe_quit()
+
         def _run_bg(self, fn, done=None):
             if self._busy:
                 messagebox.showinfo(APP_NAME, "Busy — wait for the current operation.")
                 return
-            self._busy = True
+            self._set_busy(True)
 
             def worker():
                 try:
@@ -963,7 +1048,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     result, err = None, e
 
                 def finish():
-                    self._busy = False
+                    self._set_busy(False)
                     if err is not None:
                         # D6: a mid-session reboot invalidates the login/baseline
                         # state — re-gate before surfacing the error
