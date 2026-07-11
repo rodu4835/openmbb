@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenMBB — Info</title><style>
+<title>OpenMBB — Info</title><!--TABINJECT--><style>
   :root{--pink:#ff5fd2;--cyan:#22d3ee;--mint:#5cffb1;--yellow:#fff59d;--red:#ff6b6b;
     --ink:#e8e6f0;--muted:#9a93b8;--edge:#3a2d6e;--panel:rgba(23,15,56,.72);
     --ui:'Segoe UI',system-ui,sans-serif;--mono:'Cascadia Mono','Consolas',monospace;}
@@ -260,7 +260,7 @@ every command.</p>
     var b=e.target.closest('.tabbtn'); if(!b)return;
     var t=b.getAttribute('data-t'); history.replaceState(null,'','#'+t); show(t);});
   window.addEventListener('hashchange',function(){show((location.hash||'#').slice(1));});
-  show((location.hash||'#instructions').slice(1));
+  show(window.OPENMBB_TAB || (location.hash?location.hash.slice(1):'instructions'));
 
   // reference search + danger filter
   var q=document.getElementById('q'),none=document.getElementById('none');

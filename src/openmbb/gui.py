@@ -1033,10 +1033,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             try:
                 import webbrowser, tempfile, os, pathlib
                 from importlib.resources import files
-                data = (files("openmbb") / "assets" / filename).read_bytes()
-                tmp = os.path.join(tempfile.gettempdir(), "openmbb_" + filename)
-                with open(tmp, "wb") as fh:
-                    fh.write(data)
+                text = (files("openmbb") / "assets" / filename).read_text(encoding="utf-8")
+                name = "openmbb_" + filename
+                if anchor:
+                    # bake the target tab into a per-tab temp file so it doesn't rely
+                    # on the browser honouring a #fragment when it reuses an open tab.
+                    text = text.replace(
+                        "<!--TABINJECT-->",
+                        "<script>window.OPENMBB_TAB=%r;</script>" % anchor)
+                    stem, _, ext = filename.rpartition(".")
+                    name = "openmbb_%s_%s.%s" % (stem or filename, anchor, ext or "html")
+                tmp = os.path.join(tempfile.gettempdir(), name)
+                with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+                    fh.write(text)
                 uri = pathlib.Path(tmp).as_uri() + (("#" + anchor) if anchor else "")
                 if webbrowser.open(uri):
                     return
