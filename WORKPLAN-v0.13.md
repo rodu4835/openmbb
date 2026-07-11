@@ -12,25 +12,21 @@ tier (local, not pushed).
 
 ---
 
-## Design language (decided defaults — owner can push further)
-Vaporwave as an **accent layer on the existing readable dark base**, NOT a
-readability-killing full re-theme. The showcase/landing + headers + primary
-buttons get the neon treatment; body text and the serial console keep the calm
-dark base for legibility.
+## Design language (REVISED 2026-07-10 after live preview)
+First attempt was a full-neon "vaporwave" Tk theme. The owner previewed it live
+and it was **too vibrant / not modern / hard on the eyes**. It is **reverted**.
 
-**Accent palette (added to theme.py as PALETTE keys):**
-- `vw_pink`   #ff5fd2   (primary neon / headings, "hot" actions)
-- `vw_purple` #b06bff   (secondary accent, gradients)
-- `vw_cyan`   #22d3ee   (links, the blue "Pull full database" action)
-- `vw_mint`   #5cffb1   (success / connected / safe)
-- `vw_yellow` #fff59d   (caution highlight)
-- `vw_bg0`    #120a24 / `vw_bg1` #1c1440 / `vw_bg2` #0a0f2e  (showcase gradient)
-- `vw_grid`   #2a2350   (grid / scanline lines)
+**DECISION:** keep the clean, modern **Sun Valley (sv-ttk) dark** theme the owner
+already liked in v0.12 — low saturation, easy on the eyes — with only **restrained
+accent colours** for headings/status: calm blue `#5aa8ff`, calm green `#57c07b`
+(theme.py `ACCENT_BLUE` / `ACCENT_GREEN`, plus Title/Heading/Subtitle/Accent/Good
+label styles). **No neon.** The "showcase" feel must come from good layout,
+spacing and typography — not loud colour.
 
-Fonts: system only, **no external CDNs** (the app is used in a garage, possibly
-offline). Headers "Segoe UI Semibold", body "Segoe UI", mono "Cascadia Mono" /
-"Consolas". All generated HTML must be fully self-contained (inline CSS, embedded
-SVG, zero network requests).
+Fonts: system only, **no external CDNs** (garage use, possibly offline). All
+generated HTML stays fully self-contained (inline CSS, embedded SVG, no network).
+OPEN: the HTML help pages (instructions/wiring) are still on the brighter palette
+— decide whether to tone them down to match the calmer app.
 
 ---
 
