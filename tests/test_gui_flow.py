@@ -208,6 +208,32 @@ def test_themed_dialog_builds_and_centers(app):
     assert not [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)]
 
 
+def test_landing_is_front_door(app):
+    # T1: a landing 'front door' shows first (notebook hidden) with a blurb and
+    # the two entry actions; leaving it reveals the notebook on the Connect tab.
+    import tkinter.ttk as ttk
+    assert hasattr(app, "landing")
+    assert app.landing.winfo_manager() == "pack"     # landing is visible
+    assert app.nb.winfo_manager() != "pack"          # notebook hidden behind it
+
+    labels = set()
+
+    def walk(w):
+        for c in w.winfo_children():
+            if isinstance(c, ttk.Button):
+                labels.add(str(c.cget("text")))
+            walk(c)
+
+    walk(app.landing)
+    assert "Test your cable" in labels
+    assert any("Connect" in t for t in labels)
+
+    app._leave_landing()
+    assert app.nb.winfo_manager() == "pack"           # notebook now shown
+    assert app.landing.winfo_manager() != "pack"
+    assert app.nb.index(app.nb.select()) == 0          # on the Connect tab
+
+
 def test_menu_dialogs_open(app):
     app._connect()
     assert _pump(app, lambda: app.connected)

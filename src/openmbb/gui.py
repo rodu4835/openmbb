@@ -240,6 +240,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._build_analyze_tab()
             self._apply_gates()
             self._refresh_save_label()
+            self._build_landing()      # T1: guided front door over the notebook
+            self._show_landing()
 
         # -- helpers ---------------------------------------------------------
         def _set_window_icon(self):
@@ -274,6 +276,68 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         break
             except Exception as exc:         # cosmetic only — never block launch
                 print("dark title bar unavailable: %s" % exc)
+
+        # -- landing / front door (T1) --------------------------------------
+        def _build_landing(self):
+            """A guided 'front door' shown over the notebook at startup: a short
+            blurb + the two entry actions (verify the cable, or connect & read).
+            Calm/modern; hands off into the existing Connect flow."""
+            lf = ttk.Frame(self)
+            self.landing = lf
+            if sim:
+                ttk.Label(lf, text="SIMULATOR MODE  —  no bike connected",
+                          style="Accent.TLabel").place(relx=0.5, rely=0.06,
+                                                        anchor="center")
+            inner = ttk.Frame(lf)
+            inner.place(relx=0.5, rely=0.44, anchor="center")
+            ttk.Label(inner, text=APP_NAME, style="Title.TLabel").pack()
+            ttk.Label(inner, text="v%s   ·   Zero MBB console (Gen2)" % __version__,
+                      style="Subtitle.TLabel").pack(pady=(2, 0))
+            blurb = ("A read-first diagnostics console for Gen2 Zero motorcycles "
+                     "(2013-2019).\nIt reads your bike's health, settings and logs "
+                     "over a serial cable — and always\nmakes a backup before it "
+                     "changes anything.")
+            ttk.Label(inner, text=blurb, style="Subtitle.TLabel",
+                      justify="center").pack(pady=(18, 28))
+
+            brow = ttk.Frame(inner)
+            brow.pack()
+            ttk.Button(brow, text="Test your cable", width=22,
+                       command=lambda: self._leave_landing(self._listen_only)
+                       ).pack(side="left", padx=10, ipady=8)
+            ttk.Button(brow, text="Connect & read", width=22,
+                       style=self.sty["accent"],
+                       command=lambda: self._leave_landing(self._connect)
+                       ).pack(side="left", padx=10, ipady=8)
+
+            cap = ttk.Frame(inner)
+            cap.pack(pady=(10, 0))
+            ttk.Label(cap, text="check the link is healthy first", width=26,
+                      anchor="center", style="Muted.TLabel").pack(side="left", padx=10)
+            ttk.Label(cap, text="connect + probe, then read", width=26,
+                      anchor="center", style="Muted.TLabel").pack(side="left", padx=10)
+
+            ttk.Button(inner, text="What is this?  —  Instructions",
+                       command=self._show_instructions).pack(pady=(30, 0))
+
+            ttk.Label(lf, text="Work PARKED · key on · kill switch off · "
+                      "never while riding", style="Muted.TLabel").place(
+                          relx=0.5, rely=0.93, anchor="center")
+
+        def _show_landing(self):
+            self.nb.pack_forget()
+            self.landing.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+
+        def _leave_landing(self, action=None):
+            self.landing.pack_forget()
+            self.nb.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+            try:
+                self.nb.select(0)                 # Connect tab
+            except Exception:
+                pass
+            self.update_idletasks()
+            if action:
+                action()
 
         def _console_text(self, parent, height, fg=None):
             t = tk.Text(parent, height=height, state="disabled",
