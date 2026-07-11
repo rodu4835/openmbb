@@ -234,6 +234,25 @@ def test_landing_is_front_door(app):
     assert app.nb.index(app.nb.select()) == 0          # on the Connect tab
 
 
+def test_landing_test_cable_runs_listen(app):
+    # request: clicking "Test your cable" on the landing actually RUNS the cable
+    # test (leaves the landing + starts the listen), here in simulator mode.
+    import tkinter.ttk as ttk
+    hit = []
+
+    def walk(w):
+        for c in w.winfo_children():
+            if isinstance(c, ttk.Button) and str(c.cget("text")) == "Test your cable":
+                hit.append(c)
+            walk(c)
+
+    walk(app.landing)
+    assert hit, "landing should have a 'Test your cable' button"
+    hit[0].invoke()
+    assert app.landing.winfo_manager() != "pack"       # left the landing
+    assert _pump(app, lambda: "Listening" in app.txt_probe.get("1.0", "end"))
+
+
 def test_dashboard_layout(app):
     # T2: the connected view has a status header + the primary "Pull full
     # database" accent action, and the header tracks connection state.
@@ -646,10 +665,10 @@ def test_connect_narrates_probe_steps_live(app):
     assert "prompt" in log and "connected" in log
 
 
-def test_simulator_offered_in_real_mode(monkeypatch):
-    # A1/A5: SIMULATOR must be in the port dropdown even in REAL (non-sim) mode so a
-    # downloaded-exe owner can explore without a bike; and the Connect button reads
-    # "Connect & Probe" (not the literal "&&").
+def test_simulator_is_a_menu_toggle(monkeypatch):
+    # v0.13: simulator is a Tools-menu toggle (sim_var), NOT a port-dropdown entry.
+    # Off in real mode; flipping it on makes connect/verify use the simulator. The
+    # Connect button reads "Connect & Probe" (not the literal "&&").
     import tempfile
     tk = pytest.importorskip("tkinter")
     from openmbb.gui import build_gui, SIM_CHOICE, CONNECT_LABEL
@@ -659,8 +678,9 @@ def test_simulator_offered_in_real_mode(monkeypatch):
     except tk.TclError:
         pytest.skip("no display available for Tk")
     try:
-        assert SIM_CHOICE in app.cbo_port.cget("values")     # offered in real mode
-        assert isinstance(app._make_port(SIM_CHOICE), SimPort)   # maps to the sim
+        assert hasattr(app, "sim_var") and app.sim_var.get() is False  # off in real mode
+        assert SIM_CHOICE not in app.cbo_port.cget("values")           # not a port entry
+        assert isinstance(app._make_port("", True), SimPort)           # sim -> SimPort
         assert app.btn_connect.cget("text") == CONNECT_LABEL      # "2 · Connect & Probe"
     finally:
         app.destroy()
@@ -668,26 +688,27 @@ def test_simulator_offered_in_real_mode(monkeypatch):
 
 def test_refresh_ports_reports_when_none_found(app, monkeypatch):
     # A2: a refresh that finds no COM ports must give feedback (not a silent blank
-    # list); SIMULATOR stays offered so the list is never truly empty.
-    from openmbb.gui import SIM_CHOICE
+    # list) and point to the Tools-menu simulator toggle.
     monkeypatch.setattr("openmbb.gui.list_serial_ports", lambda: [])
     app._refresh_ports()
     app.update()
     log = app.txt_probe.get("1.0", "end")
     assert "No COM ports found" in log and "Device Manager" in log
-    assert SIM_CHOICE in app.cbo_port.cget("values")
+    assert "Simulator mode" in log and "Tools menu" in log
 
 
 def test_no_port_selected_error_points_to_simulator(app, monkeypatch):
-    # A3: the no-port error speaks GUI-language (Refresh + SIMULATOR), never "--sim".
+    # A3: with simulator OFF and no port, the no-port error speaks GUI-language
+    # (Refresh + the Tools-menu simulator), never "--sim".
     from openmbb import dialogs as mb
     errs = []
     monkeypatch.setattr(mb, "showerror", lambda *a, **k: errs.append(a))
+    app.sim_var.set(False)          # real mode
     app.port_var.set("")
     app._connect()
     app.update()
     assert errs and "explore without a bike" in str(errs[0])
-    assert "--sim" not in str(errs[0])
+    assert "Simulator mode" in str(errs[0]) and "--sim" not in str(errs[0])
 
 
 def test_listen_only_announces_and_counts_down(app):

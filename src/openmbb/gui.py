@@ -226,6 +226,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # closing the window must release the serial port (and, once writes
             # exist, guard an in-flight write) — route X and Exit through _on_close
             self.protocol("WM_DELETE_WINDOW", self._on_close)
+            # simulator mode is a Tools-menu toggle (not a port-dropdown entry);
+            # starts on when launched with --sim.
+            self.sim_var = tk.BooleanVar(value=sim)
             self._build_menubar()
             self._build_statusbar()
             self._build_bottom_bar()   # T3: global safe-quit + "done" hub
@@ -285,7 +288,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             Calm/modern; hands off into the existing Connect flow."""
             lf = ttk.Frame(self)
             self.landing = lf
-            if sim:
+            if self.sim_var.get():
                 ttk.Label(lf, text="SIMULATOR MODE  —  no bike connected",
                           style="Accent.TLabel").place(relx=0.5, rely=0.06,
                                                         anchor="center")
@@ -547,6 +550,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 sess.add_command(label="Exit", command=self._on_close)
 
             def build_bike(bike):
+                bike.add_checkbutton(label="Simulator mode (no bike)",
+                                     variable=self.sim_var,
+                                     command=self._on_sim_toggle)
+                bike.add_separator()
                 bike.add_command(label="Bike info…", command=self._show_bike_info)
                 bike.add_command(label="Write options (read-only)…",
                                  command=self._show_write_options)
@@ -896,7 +903,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             for i, st in enumerate(states):
                 self.nb.tab(i, state=st)
             self.lbl_conn.config(
-                text="● CONNECTED (%s)" % ("SIMULATOR" if sim else self.port_var.get())
+                text="● CONNECTED (%s)" % ("SIMULATOR" if self.sim_var.get()
+                                           else self.port_var.get())
                 if self.connected else "● DISCONNECTED",
                 foreground=P["green"] if self.connected else P["danger"])
             self.lbl_login.config(
@@ -1123,19 +1131,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             row = ttk.Frame(f)
             row.pack(fill="x")
             ttk.Label(row, text="Port:").pack(side="left")
-            # SIMULATOR is ALWAYS offered (real mode too) so anyone can explore the
-            # tool with no bike/cable — the Instructions' "(or SIMULATOR)" is true and
-            # no separate --sim build/shortcut is needed. A real port is preselected
-            # when one exists; otherwise SIMULATOR, so first launch lands somewhere.
+            # The port list is real COM ports only. Exploring without a bike is the
+            # "Simulator mode (no bike)" toggle in the Tools menu (not a port entry).
             real_ports = list_serial_ports()
-            ports = [SIM_CHOICE] + real_ports
-            if sim:
-                default = SIM_CHOICE
-            else:
-                default = preselect_port or (real_ports[0] if real_ports else SIM_CHOICE)
+            default = preselect_port or (real_ports[0] if real_ports else "")
             self.port_var = tk.StringVar(value=default)
             self.cbo_port = ttk.Combobox(row, textvariable=self.port_var,
-                                         values=ports, width=22)
+                                         values=real_ports, width=22)
             self.cbo_port.pack(side="left", padx=6)
             ttk.Button(row, text="Refresh", command=self._refresh_ports).pack(side="left")
             self.btn_listen = ttk.Button(row, text=VERIFY_LABEL,
@@ -1154,8 +1156,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 "the bike during the ~45 s window — key ON, or just plug in the AC "
                 "charger (the bike shows Mode: Charging).\n"
                 "  STEP 2 — click '2 · Connect & Probe' to open the live session.\n"
-                "  No bike yet? Pick 'SIMULATOR (no bike)' in the Port list to explore "
-                "everything at the desk.\n"
+                "  No bike yet? Turn on 'Simulator mode (no bike)' in the Tools menu "
+                "to explore everything at the desk.\n"
                 "  Cable wiring + pinout: Help → Wiring diagram. Isolation-resistance "
                 "reads are only valid OFF the charger."),
                 justify="left", padding=(0, 10),
@@ -1166,7 +1168,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _refresh_ports(self):
             real_ports = list_serial_ports()
-            self.cbo_port.config(values=[SIM_CHOICE] + real_ports)
+            self.cbo_port.config(values=real_ports)
             if not hasattr(self, "txt_probe"):
                 return
             # A2: give Refresh visible feedback — a blank list otherwise looks broken
@@ -1176,8 +1178,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._probe_log(
                     "No COM ports found. Plug in the FTDI cable and click Refresh; if "
                     "it still doesn't appear, install the FTDI VCP driver (Windows: "
-                    "Device Manager -> Ports). Meanwhile you can pick '%s' to explore "
-                    "the tool without a bike." % SIM_CHOICE)
+                    "Device Manager -> Ports). Meanwhile you can turn on 'Simulator "
+                    "mode (no bike)' in the Tools menu to explore without a bike.")
+
+        def _on_sim_toggle(self):
+            """Tools-menu simulator toggle: affects the NEXT Verify/Connect."""
+            on = self.sim_var.get()
+            if hasattr(self, "txt_probe"):
+                self._probe_log("Simulator mode %s." % (
+                    "ON — no bike/cable needed; Verify & Connect use the simulator"
+                    if on else "OFF — using the selected COM port"))
+            self._refresh_dash_header()
 
         def _probe_log(self, text):
             self.txt_probe.config(state="normal")
@@ -1185,9 +1196,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_probe.see("end")
             self.txt_probe.config(state="disabled")
 
-        def _make_port(self, port_name):
-            """Open a SimPort or a real serial port for `port_name`."""
-            if sim or port_name == SIM_CHOICE:
+        def _make_port(self, port_name, is_sim):
+            """Open a SimPort (simulator mode) or a real serial port. `is_sim` is
+            resolved on the MAIN thread and passed in — never read a Tk var from a
+            worker thread (Tcl is not thread-safe)."""
+            if is_sim:
                 return SimPort()
             return open_real_port(port_name)
 
@@ -1219,12 +1232,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                     "for BEFORE connecting. Restart the app to run it.")
                 return
             port_name = self.port_var.get().strip()
-            if not port_name:
+            if not self.sim_var.get() and not port_name:
                 messagebox.showerror(APP_NAME, "No port selected. Pick your COM port "
                                      "(click Refresh after plugging in the cable), or "
-                                     "choose '%s' to explore without a bike." % SIM_CHOICE)
+                                     "turn on 'Simulator mode (no bike)' in the Tools "
+                                     "menu to explore without a bike.")
                 return
-            is_simport = sim or port_name == SIM_CHOICE
+            is_simport = self.sim_var.get()
             self._ensure_log_dir()          # G2: fall back if the save folder died
 
             # A4: the listen window is silent for up to 45 s — say so up front + run
@@ -1236,7 +1250,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.btn_connect.config(state="disabled")
 
             def job():
-                port = self._make_port(port_name)
+                port = self._make_port(port_name, is_simport)
                 logger = SessionLogger(base_dir=self.log_dir, tag="listen")
                 try:
                     data = Transport(port, logger).listen(secs)
@@ -1300,16 +1314,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 messagebox.showinfo(APP_NAME, "Busy — wait for the current operation.")
                 return
             port_name = self.port_var.get().strip()
-            if not port_name:
+            if not self.sim_var.get() and not port_name:
                 messagebox.showerror(APP_NAME, "No port selected. Pick your COM port "
                                      "(click Refresh after plugging in the cable), or "
-                                     "choose '%s' to explore without a bike." % SIM_CHOICE)
+                                     "turn on 'Simulator mode (no bike)' in the Tools "
+                                     "menu to explore without a bike.")
                 return
             # D1: every connection re-earns its phases (drops any --sim rehearsal
             # state and closes a previously-open port before reopening).
             self._reset_session_state()
             self._ensure_log_dir()          # G2: fall back if the save folder died
-            is_simport = sim or port_name == SIM_CHOICE
+            is_simport = self.sim_var.get()
 
             def job():
                 # B3: narrate each step into the connect console AS IT HAPPENS (the
@@ -1321,7 +1336,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 tag = "sim" if is_simport else port_name.replace(":", "")
                 logger = SessionLogger(base_dir=self.log_dir, tag=tag)
                 log("Session folder: %s" % logger.dir)
-                port = self._make_port(port_name)
+                port = self._make_port(port_name, is_simport)
                 tr = Transport(port, logger)
                 try:
                     log("Listening %s for unsolicited output…"
@@ -1526,7 +1541,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 lbl.config(text="○ Not connected — connect on the Connect tab",
                            style="Muted.TLabel")
                 return
-            where = "SIMULATOR" if sim else self.port_var.get()
+            where = "SIMULATOR" if self.sim_var.get() else self.port_var.get()
             bits = ["● CONNECTED (%s)" % where]
             mm = re.search(r"Firmware Rev\s*:?\s*(\w+)", self.version_text or "")
             if mm:
