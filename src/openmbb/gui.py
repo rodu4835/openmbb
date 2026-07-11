@@ -885,7 +885,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 text="logged in (level shown in Login tab)" if self.logged_in
                 else "not logged in",
                 foreground=P["green"] if self.logged_in else P["dim"])
-            self._refresh_dash_header()   # T2: keep the dashboard banner in sync
+            self._refresh_dash_header()      # T2: keep the dashboard banner in sync
+            self._refresh_action_buttons()   # T3: gate the action bar on connect/busy
 
         def _tab_unlock_hint(self, idx):
             # C7: plain-language "here's how to unlock this phase" for a locked tab.
@@ -980,15 +981,21 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                        style=self.sty["accent"],
                                        command=self._show_done_dialog)
             self.btn_done.pack(side="right", padx=(0, 8))
-            ttk.Label(bar, text="Safe to disconnect whenever nothing is running.",
-                      foreground=P["dim"]).pack(side="left")
+            ttk.Label(bar, text="Available once connected — and only when nothing "
+                      "is running.", foreground=P["dim"]).pack(side="left")
+            self._refresh_action_buttons()   # disabled until connected
 
         def _set_busy(self, flag):
-            """Single busy toggle. Also disables the safe-quit / done affordances
-            while an op runs that would be unsafe to interrupt (write, heavy dump,
-            baseline) — the owner's 'unclickable during a damaging process' rule."""
+            """Single busy toggle; refresh the action-bar button states."""
             self._busy = flag
-            state = "disabled" if flag else "normal"
+            self._refresh_action_buttons()
+
+        def _refresh_action_buttons(self):
+            """The safe-quit / done affordances are usable only when CONNECTED and
+            not mid-operation — nothing to be 'done' with or to safely disconnect
+            from until you connect, and 'unclickable during a process that would
+            cause damage' (write / heavy dump / baseline)."""
+            state = "normal" if (self.connected and not self._busy) else "disabled"
             for name in ("btn_safequit", "btn_done"):
                 b = getattr(self, name, None)
                 if b is not None:
