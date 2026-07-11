@@ -1,8 +1,11 @@
 # OpenMBB
 
-Phase-gated GUI for the **MBB serial console** on Gen2 Zero electric
-motorcycles (OBD-II / C3 port). Windows-11-native look (Sun Valley theme),
-read-first, whitelist-only writes.
+**Read your Gen2 Zero motorcycle's own diagnostics** over the service port —
+battery health, motor controller, error logs, settings — back them up, and make
+sense of them offline. A safe, **read-first** desktop app for the **MBB serial
+console** (OBD-II / C3 port); any writes are whitelist-only and gated. Try the
+whole thing with the built-in **simulator** — no bike needed. Windows-11-native
+look (Sun Valley theme).
 
 > Personal diagnostic tool for **your own** vehicle. Not affiliated with Zero
 > Motorcycles. No warranty — see LICENSE. Changing settings may affect your

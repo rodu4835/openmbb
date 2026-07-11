@@ -6,14 +6,15 @@ circumference in mm). Setting spfront/sprear to the physically installed teeth
 keeps speed/odometer correct after a re-gear; rwhcirc is trimmed against GPS.
 """
 
-# Known setups for this platform, ratio -> description.
+# Reference setups for this platform, ratio -> description (examples, not targets).
 KNOWN_SETUPS = {
-    4.50: "stock 20T/90T belt",
-    4.09: "22T front / stock 90T (needs ~159T belt)",
-    4.00: "re-gear target (22T/88T belt or 14T/56T chain)",
+    4.50: "FX/FXS factory (20T front / 90T rear, belt)",
+    4.09: "22T front / 90T rear (taller top end)",
+    4.00: "common re-gear (e.g. 22T/88T belt or 14T/56T chain)",
 }
 
-DEFAULT_CIRC_MM = 1966   # effective rear-wheel circumference from the ride logs
+DEFAULT_CIRC_MM = 1966   # typical FX/FXS rear-wheel rolling circumference (mm);
+                         # trim against GPS for your tire
 STOCK_RATIO = 4.50
 
 

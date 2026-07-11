@@ -39,6 +39,27 @@ from .transport import (DUMP_COMMANDS, HEAVY_COMMANDS, LONG_COMMANDS,
 # cable needed). Selecting it makes _make_port hand back a SimPort.
 SIM_CHOICE = "SIMULATOR (no bike)"
 
+# Plain-language description of each read command, shown as a hover tooltip so the
+# bare firmware button names aren't a wall of jargon to a first-timer.
+READ_TIPS = {
+    "version": "Firmware + board revision.",
+    "help": "The console's own command menu.",
+    "status": "Overall bike status right now (mode, temps, SOC, faults).",
+    "stats": "Lifetime statistics: odometer, top speed, all-time max temps.",
+    "runtime": "Total run time and total charge time.",
+    "bms": "Battery pack: cell voltages, balance, capacity, isolation, cycles.",
+    "sevcon": "Motor controller (Sevcon) data.",
+    "chargers": "Onboard charger port status.",
+    "inputs": "Raw sensor inputs (rail voltages, kill switch, kickstand…).",
+    "outputs": "Output states (DC/DC, warning light, contactor enable…).",
+    "dash": "Instrument-cluster data (clock, odometer, CAN age).",
+    "obd": "OBD summary (protocol, DTCs).",
+    "errorlogdump": "The small error log (~1 KB, safe).",
+    "eventlogdump": "The FULL event log (~1 MB, minutes) — can briefly OPEN the "
+                    "drivetrain contactor. Park the bike first.",
+    "dumpall": "Everything incl. logs (~1 MB, minutes) — same contactor caveat.",
+}
+
 
 # MBB console login passwords tried by the "Try known passwords" button, in
 # order. These are community-reported guesses (unverified per firmware). When a
@@ -69,9 +90,13 @@ The app is phase-gated — each phase unlocks the next. You can stop after any
 phase; closing the window never loses data (everything is saved as you go).
 
 PHASE 0 — CONNECT
-  Pick the COM port (or SIMULATOR) and click "Connect & Probe". The app looks
-  for the console prompt and reads the firmware version. Garbage output at
-  38400 baud usually means the Tx/Rx wires are swapped — stop and recheck.
+  Pick your COM port from the dropdown — or pick "SIMULATOR (no bike)" to explore
+  the whole tool with no bike or cable attached. On a home-built cable, click
+  "Listen only (Stage 1)" first: it never transmits, so it safely proves your RX
+  wiring + baud (power the bike during the ~45 s listen window to catch the boot
+  banner). Then "Connect & Probe" wakes the console prompt and reads the firmware
+  version. Garbage output at 38400 baud usually means the Tx/Rx wires are swapped
+  — stop and recheck.
 
 PHASE 1 — READ
   Click any command button for a one-off read. To advance, click the blue
@@ -87,8 +112,9 @@ PHASE 2 — LOGIN
   Explicit. "Try known passwords" attempts the community-known ones in order;
   or type a specific password and "Try this password" (it is masked in the logs
   and never saved to disk). Both failing is fine — the tool stays read-only.
-  Success unlocks Writes. A confirmed password can be baked into the built-in
-  list (COMMUNITY_PASSWORDS in gui.py) so it is tried automatically thereafter.
+  Success unlocks Writes. A password is masked in the logs and never written to
+  disk unless YOU ask the app to remember it (Session menu → Remember login
+  password) — nothing to hand-edit.
 
 PHASE 3 — WRITES
   Triple-gated: logged in + the master UNLOCK WRITES switch + a per-write
@@ -121,8 +147,11 @@ WIRING — FTDI TTL-232R-3V3  ->  OBD-II / C3 port (under the seat)
 
   Serial: 38400 baud, 8-N-1, no flow control, newline CR-LF.
 
-Before connecting: bike PARKED on stand, key ON, kill switch OFF. Confirm the
+Before connecting: bike PARKED on stand, kill switch OFF. Power the console
+either by turning the key ON, OR simply plug in the AC charger (it wakes the MBB
+and the console is live for reads — the bike shows Mode: Charging). Confirm the
 FTDI Orange line idles ~3.3 V vs Black and the Red lead is taped off.
+Note: isolation-resistance reads are only valid OFF the charger.
 Never stream the console while riding.
 """
 
@@ -616,17 +645,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
             ttk.Label(f, text=(
                 "Staged bring-up (safe on any cable — Listen never transmits):\n"
-                "  1. Power: key ON, OR simply plug in the AC charger (wakes the "
+                "  1. Wiring: FTDI Red (+5 V) to NOTHING; Orange idles ~3.3 V vs "
+                "Black. GND→pin 5, FTDI RXD←pin 8 (bike Tx), FTDI TXD→pin 9 (bike "
+                "Rx). The port is under the seat; 38400 8-N-1, CR-LF.\n"
+                "  2. Power: key ON, OR simply plug in the AC charger (wakes the "
                 "MBB; console is live for reads — bike shows Mode: Charging).\n"
-                "  2. STAGE 1 — click 'Listen only': it never transmits in software, "
-                "so it proves RX wiring/baud safely on a fixed 3-wire cable (physically "
-                "unplugging TX is an optional extra, not required). Power the bike "
-                "DURING the listen window to catch the boot banner.\n"
-                "  3. STAGE 2 — click 'Connect & Probe' to start the session.\n"
-                "  4. FTDI Red (+5 V) to NOTHING; Orange idles ~3.3 V vs Black. "
-                "GND→pin 5, FTDI RXD←pin 8 (bike Tx), FTDI TXD→pin 9 (bike Rx).\n"
-                "  5. Port is under the seat. 38400 8-N-1, CR-LF. Garbage = Tx/Rx "
-                "swap — STOP.\n"
+                "  3. STAGE 1 — click 'Listen only': it never transmits in software, "
+                "so it proves RX wiring/baud safely (power the bike DURING the listen "
+                "window to catch the boot banner).\n"
+                "  4. STAGE 2 — click 'Connect & Probe' to start the session. Garbage "
+                "= Tx/Rx swap — STOP.\n"
+                "  No bike yet? Pick 'SIMULATOR (no bike)' in the Port list to explore "
+                "everything at the desk.\n"
                 "  Note: isolation-resistance reads are only valid OFF the charger."),
                 justify="left", padding=(0, 10),
                 foreground=P["warn"]).pack(anchor="w")
@@ -859,10 +889,44 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._run_bg(job, done)
 
         # -- Phase 1: Read -----------------------------------------------------
+        def _add_tooltip(self, widget, text):
+            """Show `text` in a small popup while the pointer hovers `widget`."""
+            if not text:
+                return
+            state = {"win": None}
+
+            def show(_e=None):
+                if state["win"] is not None:
+                    return
+                x = widget.winfo_rootx() + 14
+                y = widget.winfo_rooty() + widget.winfo_height() + 4
+                win = tk.Toplevel(widget)
+                win.wm_overrideredirect(True)
+                win.wm_geometry("+%d+%d" % (x, y))
+                tk.Label(win, text=text, background="#ffffe0", foreground="#222",
+                         relief="solid", borderwidth=1, justify="left",
+                         wraplength=340, padx=6, pady=3,
+                         font=(self.sty["mono"], 8)).pack()
+                state["win"] = win
+
+            def hide(_e=None):
+                if state["win"] is not None:
+                    state["win"].destroy()
+                    state["win"] = None
+
+            widget.bind("<Enter>", show)
+            widget.bind("<Leave>", hide)
+            widget.bind("<Destroy>", hide)
+
         def _build_read_tab(self):
             f = ttk.Frame(self.nb, padding=10)
             self.nb.add(f, text=" 1 · Read ")
 
+            ttk.Label(f, text="One-shot reads — each grabs a snapshot of the bike's "
+                      "own data. Hover a button for what it shows; interpret the "
+                      "numbers on the Analyze tab. Or run ★ FULL BASELINE to capture "
+                      "everything at once.", foreground=P["dim"], wraplength=940,
+                      justify="left").pack(anchor="w", pady=(0, 6))
             btns = ttk.Frame(f)
             btns.pack(fill="x")
             quick = READ_COMMANDS + DUMP_COMMANDS
@@ -870,6 +934,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 b = ttk.Button(btns, text=cmd, width=14,
                                command=lambda c=cmd: self._read_cmd(c))
                 b.grid(row=i // 7, column=i % 7, padx=2, pady=2, sticky="w")
+                self._add_tooltip(b, READ_TIPS.get(cmd, ""))
             self.btn_baseline = ttk.Button(
                 btns, text="★ FULL BASELINE", width=18,
                 style=self.sty["accent"], command=self._baseline)
@@ -887,8 +952,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Label(hrow, text="Heavy (⚠ may open the contactor):",
                       foreground=P["warn"]).pack(side="left", padx=(0, 6))
             for cmd in HEAVY_COMMANDS:
-                ttk.Button(hrow, text=cmd, width=14,
-                           command=lambda c=cmd: self._read_heavy(c)).pack(side="left", padx=2)
+                hb = ttk.Button(hrow, text=cmd, width=14,
+                                command=lambda c=cmd: self._read_heavy(c))
+                hb.pack(side="left", padx=2)
+                self._add_tooltip(hb, READ_TIPS.get(cmd, ""))
 
             self.txt_out = self._console_text(f, 20)
             self.txt_out.pack(fill="both", expand=True, pady=(8, 4))
@@ -1471,9 +1538,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                        command=self._load_ride_log).pack(side="left")
             ttk.Label(rbtns, text="  (a zero-log-parser decoded .txt)",
                       foreground=P["dim"]).pack(side="left")
-            self.lbl_ride_totals = ttk.Label(rf, text="Load a session with a "
-                                             "dumplogs capture (or a ride log file) "
-                                             "to analyze rides.", foreground=P["dim"])
+            self.lbl_ride_totals = ttk.Label(
+                rf, text="No ride log loaded. Rev 41 doesn't stream ride data as "
+                "console text, so click 'Load ride log (.txt)' above — that file is a "
+                "DECODED log from the community zero-log-parser tool (it converts a raw "
+                "MBB/BMS log into readable lines). OpenMBB's own eventlogdump / "
+                "errorlogdump are NOT that input.",
+                foreground=P["dim"], wraplength=920, justify="left")
             self.lbl_ride_totals.pack(anchor="w", pady=(6, 0))
             rcols = ("start", "km", "soc", "socpkm", "ptemp", "mtemp", "rpm")
             heads = ("Start", "Distance km", "SOC used %", "SOC%/km",
@@ -1503,8 +1574,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             sub.add(gf, text=" Gearing ")
             grow = ttk.Frame(gf)
             grow.pack(fill="x")
-            self.gear_front = tk.StringVar(value="22")
-            self.gear_rear = tk.StringVar(value="88")
+            # B5: default to FX/FXS factory gearing (20/90), not any one owner's
+            # re-gear — this is a generic calculator, seed it with stock.
+            self.gear_front = tk.StringVar(value="20")
+            self.gear_rear = tk.StringVar(value="90")
             self.gear_circ = tk.StringVar(value=str(gearing_mod.DEFAULT_CIRC_MM))
             for label, var, w in (("Front teeth", self.gear_front, 6),
                                   ("Rear teeth", self.gear_rear, 6),

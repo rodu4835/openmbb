@@ -267,6 +267,17 @@ def test_listen_only_reports_without_connecting(app):
     assert "ZERO MBB>" in app.txt_probe.get("1.0", "end")   # sim greet detected
 
 
+def test_read_tab_has_legend_and_tooltips(app):
+    # B6: the bare firmware command buttons get a plain-language legend + a hover
+    # tip for every read, so a first-timer isn't facing a wall of jargon.
+    from openmbb.gui import READ_TIPS
+    from openmbb.transport import READ_COMMANDS, DUMP_COMMANDS, HEAVY_COMMANDS
+    labels = " ".join(_all_label_text(app)).lower()
+    assert "one-shot reads" in labels and "hover a button" in labels
+    for cmd in READ_COMMANDS + DUMP_COMMANDS + HEAVY_COMMANDS:
+        assert READ_TIPS.get(cmd), "no tooltip for read button %r" % cmd
+
+
 def test_simulator_offered_in_real_mode(monkeypatch):
     # A1/A5: SIMULATOR must be in the port dropdown even in REAL (non-sim) mode so a
     # downloaded-exe owner can explore without a bike; and the Connect button reads

@@ -98,19 +98,19 @@ WRITE_WHITELIST = {
     "spfront": (
         "Sprocket teeth, front",
         "Input to speedometer/odometer calculation ONLY. Set to the physically "
-        "installed tooth count (stock 20; belt re-gear 22; chain fallback 14).",
+        "installed front sprocket tooth count (FX/FXS factory is 20).",
         "SAFE - display math only. Wrong values skew speed/odo/Wh-per-km.",
         _v_int_range(10, 40), None),
     "sprear": (
         "Sprocket teeth, rear",
         "Input to speedometer/odometer calculation ONLY. Set to the physically "
-        "installed tooth count (stock 90; belt re-gear 88; chain fallback 56).",
+        "installed rear sprocket tooth count (FX/FXS factory is 90).",
         "SAFE - display math only.",
         _v_int_range(30, 150), None),
     "rwhcirc": (
         "Rear wheel circumference (mm)",
-        "Input to speedometer calculation. Trim so speedo matches GPS "
-        "(effective value from ride logs was ~1966 mm).",
+        "Input to speedometer calculation. Trim so the speedo matches GPS; the "
+        "right value depends on your tire (typically ~1900-2000 mm).",
         "SAFE - display math only.",
         _v_int_range(1500, 2400), None),
     # Custom-mode keys use the REAL rev-41 setting names (confirmed live 2026-07-10;
@@ -161,8 +161,8 @@ WRITE_WHITELIST = {
     "reserve_sw": (
         "Use SOC reserve partition",
         "Treats part of the battery as a 'fuel reserve' partition.",
-        "CAUTION - changes what the gauge withholds, not real capacity. Pack is "
-        "~65-70% SoH; don't reduce your margin.",
+        "CAUTION - changes what the gauge withholds, not real capacity. On an "
+        "aged pack, don't reduce your reserve margin.",
         _v_yes_no, None),
     "reserve_pct": (
         "Reserve partition size (%)",
@@ -171,9 +171,8 @@ WRITE_WHITELIST = {
         _v_int_range(0, 50), None),
     "fuelgaugepes": (
         "Fuel gauge pessimism (%)",
-        "SoC display buffer (default 5%). NOTE: the matched before/after firmware "
-        "log analysis found the SoC-vs-voltage curve UNCHANGED - read displayed "
-        "SOC as-is.",
+        "SoC display buffer (default 5%). This only shifts the DISPLAYED "
+        "percentage; it doesn't change the actual pack charge.",
         "CAUTION - reducing it removes low-SOC margin on an aged pack.",
         _v_int_range(0, 20),
         lambda v: ("Lowering pessimism removes displayed-SOC safety margin."
@@ -187,10 +186,9 @@ WRITE_WHITELIST = {
 }
 
 WRITE_PANEL_CONTEXT = (
-    "Context: the matched before/after firmware analysis found the SOC-vs-voltage "
-    "curve unchanged - do NOT mentally inflate a low reading. Gauge-related "
-    "settings only change what the gauge shows, not real capacity. Change ONE "
-    "thing at a time."
+    "Context: gauge-related settings (reserve, fuel-gauge pessimism) change what "
+    "the gauge SHOWS, not real capacity — they add zero real Ah. Change ONE thing "
+    "at a time and re-read to verify."
 )
 
 

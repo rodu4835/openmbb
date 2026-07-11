@@ -32,20 +32,20 @@ item; GUI tests standalone. Never open a real COM port. Commit per tier.
 
 ## Tier B — text/label honesty & consistency  [OB-04/05/06/07, obs-4/6, A5/A6, OB-08]
 
-- [ ] **B1 Reconcile F1 Instructions with the Connect tab**: add Stage-1 Listen to Phase 0;
+- [x] **B1 Reconcile F1 Instructions with the Connect tab**: add Stage-1 Listen to Phase 0;
   mention SIMULATOR is in the dropdown; drop the impossible "bake into COMMUNITY_PASSWORDS in
   gui.py" advice (replaced by Tier E in-app save). Reframe the README opener to the user pitch.
-- [ ] **B2 Wiring dialog power line**: mirror the Connect tab's "key ON OR plug in the AC
+- [x] **B2 Wiring dialog power line**: mirror the Connect tab's "key ON OR plug in the AC
   charger" + the off-charger isolation caveat (currently demands key ON).
-- [ ] **B3 Connect checklist order**: physical prerequisites (wiring, port location) before the
+- [x] **B3 Connect checklist order**: physical prerequisites (wiring, port location) before the
   click-steps.
-- [ ] **B4 Kill the last `dumplogs` reference** in the Rides pre-session text (command doesn't
+- [x] **B4 Kill the last `dumplogs` reference** in the Rides pre-session text (command doesn't
   exist on rev 41).
-- [ ] **B5 De-personalize the developer's bike data** (aligns with the generic-tool direction):
+- [x] **B5 De-personalize the developer's bike data** (aligns with the generic-tool direction):
   attribute model-specific / measured numbers as examples, not universal fact — spfront/sprear/
   rwhcirc effect text, the WRITE_PANEL_CONTEXT SoC sentence, reserve_sw SoH claim, and the
   Gearing tab defaults (start at detected/stock, not the author's 14/56 re-gear).
-- [ ] **B6 Read-tab affordance**: the bare command buttons + jargon (MBB/rev 41/Sevcon/
+- [x] **B6 Read-tab affordance**: the bare command buttons + jargon (MBB/rev 41/Sevcon/
   isolation) get a one-line legend / short descriptions so a first-timer knows what each does.
 
 ## Tier C — numbers with meaning  [obs-3, A2/A3/A4/A7/A8, obs-5, guards-pane]
@@ -105,4 +105,11 @@ item; GUI tests standalone. Never open a real COM port. Commit per tier.
 - A3: no-port-selected error rewritten to GUI-speak (Refresh + SIMULATOR), never '--sim'.
 - A4: listen window announces itself immediately + a live 'Listening… Ns' button countdown + disabled buttons; recovers on success OR error. Reworded start line so it doesn't collide with the existing STAGE-1 result marker.
 - Tests: real-mode dropdown + button text, refresh-empty feedback, no-port error wording, listen announce/countdown/recover. A1 discrimination verified.
+### Tier B — text honesty & consistency (complete)
+- B1: Instructions Phase 0 now covers SIMULATOR + Stage-1 Listen; Phase 2 drops the 'edit gui.py' password advice (points at Session -> Remember login password, added in E5); README opener reframed to the user pitch (read your bike / simulator).
+- B2: Wiring dialog mirrors 'key ON OR plug in the AC charger' + the off-charger isolation caveat.
+- B3: Connect checklist reordered — wiring + port location first, then power, then the click-steps; adds a 'no bike yet? pick SIMULATOR' hint.
+- B4/C5: Rides guidance drops the phantom 'dumplogs' and names the real source (community zero-log-parser, decoded .txt; OpenMBB's own dumps are NOT that input).
+- B5: de-personalized the developer's bike data — spfront/sprear/rwhcirc/reserve_sw/fuelgaugepes effect text + WRITE_PANEL_CONTEXT are now generic; gearing defaults seed FX/FXS factory 20/90 (not the author's 22/88 re-gear); KNOWN_SETUPS labels generic. Two gearing tests updated to the new labels.
+- B6: Read tab gains a plain-language legend + a hover tooltip (READ_TIPS) for every read/heavy button.
 (append per item)

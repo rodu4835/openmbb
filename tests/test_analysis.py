@@ -122,7 +122,7 @@ def test_gearing_plan_regear():
     assert p["vs_ref_pct"] == pytest.approx(-11.11, abs=0.1)
     assert p["top_speed_factor"] == pytest.approx(1.125)
     assert p["revs_per_km"] == pytest.approx(4.00 * 1e6 / 1966, rel=1e-6)
-    assert "target" in p["nearest"]
+    assert "re-gear" in p["nearest"]        # B5: generic label (was "target")
 
 
 def test_gearing_plan_stock_is_reference():
@@ -195,7 +195,7 @@ def test_gearing_from_stats_sim(tmp_path):
     st = parsers.parse_stats(s.cmd("stats"))
     ratio, rpk, desc = rides.gearing_from_stats(st, 1966)
     assert ratio == pytest.approx(4.50, abs=0.01)
-    assert "stock" in desc
+    assert "factory" in desc                # B5: generic label (was "stock")
 
 
 def test_compare_two_sessions(tmp_path):
