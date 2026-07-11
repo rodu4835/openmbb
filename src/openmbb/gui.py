@@ -288,10 +288,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             Calm/modern; hands off into the existing Connect flow."""
             lf = ttk.Frame(self)
             self.landing = lf
-            if self.sim_var.get():
-                ttk.Label(lf, text="SIMULATOR MODE  —  no bike connected",
-                          style="Accent.TLabel").place(relx=0.5, rely=0.06,
-                                                        anchor="center")
+            # persistent badge (place()d/forgotten by _refresh_sim_badge) so it
+            # tracks the Tools-menu simulator toggle, not just the startup state.
+            self._sim_badge = ttk.Label(
+                lf, text="SIMULATOR MODE  —  no bike connected",
+                style="Accent.TLabel")
+            self._refresh_sim_badge()
             inner = ttk.Frame(lf)
             inner.place(relx=0.5, rely=0.44, anchor="center")
             ttk.Label(inner, text=APP_NAME, style="Title.TLabel").pack()
@@ -469,6 +471,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.lbl_login = ttk.Label(bar, text="not logged in",
                                        foreground=P["dim"])
             self.lbl_login.pack(side="left", padx=16)
+            self.lbl_sim = ttk.Label(bar, text="", style="Accent.TLabel")
+            self.lbl_sim.pack(side="left", padx=16)
             self.lbl_sess = ttk.Label(bar, text="session: (none yet)",
                                       foreground=P["dim"], cursor="hand2")
             self.lbl_sess.pack(side="right")
@@ -1190,11 +1194,26 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _on_sim_toggle(self):
             """Tools-menu simulator toggle: affects the NEXT Verify/Connect."""
             on = self.sim_var.get()
+            self._refresh_sim_badge()
             if hasattr(self, "txt_probe"):
                 self._probe_log("Simulator mode %s." % (
                     "ON — no bike/cable needed; Verify & Connect use the simulator"
                     if on else "OFF — using the selected COM port"))
             self._refresh_dash_header()
+
+        def _refresh_sim_badge(self):
+            """Reflect the simulator state everywhere it's visible: the landing
+            badge and a persistent status-bar indicator."""
+            on = self.sim_var.get()
+            badge = getattr(self, "_sim_badge", None)
+            if badge is not None:
+                if on:
+                    badge.place(relx=0.5, rely=0.06, anchor="center")
+                else:
+                    badge.place_forget()
+            lbl = getattr(self, "lbl_sim", None)
+            if lbl is not None:
+                lbl.config(text="◆ SIMULATOR MODE" if on else "")
 
         def _probe_log(self, text):
             self.txt_probe.config(state="normal")

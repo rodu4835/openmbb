@@ -253,6 +253,19 @@ def test_landing_test_cable_runs_listen(app):
     assert _pump(app, lambda: "Listening" in app.txt_probe.get("1.0", "end"))
 
 
+def test_sim_toggle_shows_indicator(app):
+    # toggling simulator mode is NOT silent — it updates the status-bar indicator
+    # and the landing badge (owner: clicked it and "nothing happened").
+    app.sim_var.set(False)
+    app._on_sim_toggle()
+    assert str(app.lbl_sim.cget("text")) == ""
+    assert app._sim_badge.winfo_manager() == ""        # badge hidden
+    app.sim_var.set(True)
+    app._on_sim_toggle()
+    assert "SIMULATOR" in str(app.lbl_sim.cget("text"))
+    assert app._sim_badge.winfo_manager() == "place"   # badge shown
+
+
 def test_dashboard_layout(app):
     # T2: the connected view has a status header + the primary "Pull full
     # database" accent action, and the header tracks connection state.
