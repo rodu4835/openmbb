@@ -267,6 +267,62 @@ def test_listen_only_reports_without_connecting(app):
     assert "ZERO MBB>" in app.txt_probe.get("1.0", "end")   # sim greet detected
 
 
+def test_simulator_offered_in_real_mode(monkeypatch):
+    # A1/A5: SIMULATOR must be in the port dropdown even in REAL (non-sim) mode so a
+    # downloaded-exe owner can explore without a bike; and the Connect button reads
+    # "Connect & Probe" (not the literal "&&").
+    import tempfile
+    tk = pytest.importorskip("tkinter")
+    from openmbb.gui import build_gui, SIM_CHOICE
+    from openmbb.sim import SimPort
+    try:
+        app = build_gui(sim=False, log_dir=tempfile.mkdtemp(prefix="a1_"))
+    except tk.TclError:
+        pytest.skip("no display available for Tk")
+    try:
+        assert SIM_CHOICE in app.cbo_port.cget("values")     # offered in real mode
+        assert isinstance(app._make_port(SIM_CHOICE), SimPort)   # maps to the sim
+        assert app.btn_connect.cget("text") == "Connect & Probe"  # not "&&"
+    finally:
+        app.destroy()
+
+
+def test_refresh_ports_reports_when_none_found(app, monkeypatch):
+    # A2: a refresh that finds no COM ports must give feedback (not a silent blank
+    # list); SIMULATOR stays offered so the list is never truly empty.
+    from openmbb.gui import SIM_CHOICE
+    monkeypatch.setattr("openmbb.gui.list_serial_ports", lambda: [])
+    app._refresh_ports()
+    app.update()
+    log = app.txt_probe.get("1.0", "end")
+    assert "No COM ports found" in log and "Device Manager" in log
+    assert SIM_CHOICE in app.cbo_port.cget("values")
+
+
+def test_no_port_selected_error_points_to_simulator(app, monkeypatch):
+    # A3: the no-port error speaks GUI-language (Refresh + SIMULATOR), never "--sim".
+    import tkinter.messagebox as mb
+    errs = []
+    monkeypatch.setattr(mb, "showerror", lambda *a, **k: errs.append(a))
+    app.port_var.set("")
+    app._connect()
+    app.update()
+    assert errs and "explore without a bike" in str(errs[0])
+    assert "--sim" not in str(errs[0])
+
+
+def test_listen_only_announces_and_counts_down(app):
+    # A4: the listen window announces itself immediately (not silent) and the button
+    # shows it's working, so the wait can't be mistaken for a hang.
+    app._listen_only()
+    app.update()
+    assert "Listening (Stage 1" in app.txt_probe.get("1.0", "end")   # announced up front
+    assert str(app.btn_listen.cget("state")) == "disabled"     # busy signal
+    # ...and it recovers to a normal, clickable button once the window closes
+    assert _pump(app, lambda: str(app.btn_listen.cget("state")) == "normal")
+    assert app.btn_listen.cget("text") == "Listen only (Stage 1)"
+
+
 def _all_label_text(widget):
     out = []
     try:

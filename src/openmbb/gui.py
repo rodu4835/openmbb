@@ -35,6 +35,10 @@ from .transport import (DUMP_COMMANDS, HEAVY_COMMANDS, LONG_COMMANDS,
                         first_number, list_serial_ports, looks_like_prompt,
                         nonprintable_ratio, open_real_port, parse_settings_dump)
 
+# The always-present dropdown choice that runs the built-in simulator (no bike /
+# cable needed). Selecting it makes _make_port hand back a SimPort.
+SIM_CHOICE = "SIMULATOR (no bike)"
+
 
 # MBB console login passwords tried by the "Try known passwords" button, in
 # order. These are community-reported guesses (unverified per firmware). When a
@@ -587,20 +591,25 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             row = ttk.Frame(f)
             row.pack(fill="x")
             ttk.Label(row, text="Port:").pack(side="left")
-            ports = (["SIMULATOR"] if sim else []) + list_serial_ports()
+            # SIMULATOR is ALWAYS offered (real mode too) so anyone can explore the
+            # tool with no bike/cable — the Instructions' "(or SIMULATOR)" is true and
+            # no separate --sim build/shortcut is needed. A real port is preselected
+            # when one exists; otherwise SIMULATOR, so first launch lands somewhere.
+            real_ports = list_serial_ports()
+            ports = [SIM_CHOICE] + real_ports
             if sim:
-                default = "SIMULATOR"
+                default = SIM_CHOICE
             else:
-                default = preselect_port or (ports[0] if ports else "")
+                default = preselect_port or (real_ports[0] if real_ports else SIM_CHOICE)
             self.port_var = tk.StringVar(value=default)
             self.cbo_port = ttk.Combobox(row, textvariable=self.port_var,
-                                         values=ports, width=18)
+                                         values=ports, width=22)
             self.cbo_port.pack(side="left", padx=6)
             ttk.Button(row, text="Refresh", command=self._refresh_ports).pack(side="left")
             self.btn_listen = ttk.Button(row, text="Listen only (Stage 1)",
                                          command=self._listen_only)
             self.btn_listen.pack(side="left", padx=(12, 0))
-            self.btn_connect = ttk.Button(row, text="Connect && Probe",
+            self.btn_connect = ttk.Button(row, text="Connect & Probe",
                                           style=self.sty["accent"],
                                           command=self._connect)
             self.btn_connect.pack(side="left", padx=12)
@@ -626,8 +635,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_probe.pack(fill="both", expand=True)
 
         def _refresh_ports(self):
-            ports = (["SIMULATOR"] if sim else []) + list_serial_ports()
-            self.cbo_port.config(values=ports)
+            real_ports = list_serial_ports()
+            self.cbo_port.config(values=[SIM_CHOICE] + real_ports)
+            if not hasattr(self, "txt_probe"):
+                return
+            # A2: give Refresh visible feedback — a blank list otherwise looks broken
+            if real_ports:
+                self._probe_log("COM ports found: %s" % ", ".join(real_ports))
+            else:
+                self._probe_log(
+                    "No COM ports found. Plug in the FTDI cable and click Refresh; if "
+                    "it still doesn't appear, install the FTDI VCP driver (Windows: "
+                    "Device Manager -> Ports). Meanwhile you can pick '%s' to explore "
+                    "the tool without a bike." % SIM_CHOICE)
 
         def _probe_log(self, text):
             self.txt_probe.config(state="normal")
@@ -637,7 +657,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _make_port(self, port_name):
             """Open a SimPort or a real serial port for `port_name`."""
-            if sim or port_name == "SIMULATOR":
+            if sim or port_name == SIM_CHOICE:
                 return SimPort()
             return open_real_port(port_name)
 
@@ -670,16 +690,26 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 return
             port_name = self.port_var.get().strip()
             if not port_name:
-                messagebox.showerror(APP_NAME, "Pick a COM port (or run with --sim).")
+                messagebox.showerror(APP_NAME, "No port selected. Pick your COM port "
+                                     "(click Refresh after plugging in the cable), or "
+                                     "choose '%s' to explore without a bike." % SIM_CHOICE)
                 return
-            is_simport = sim or port_name == "SIMULATOR"
+            is_simport = sim or port_name == SIM_CHOICE
             self._ensure_log_dir()          # G2: fall back if the save folder died
+
+            # A4: the listen window is silent for up to 45 s — say so up front + run
+            # a countdown on the button so it never looks like a hang.
+            secs = 2 if is_simport else 45
+            self._probe_log("\n=== Listening (Stage 1, no transmit) — power the bike "
+                            "NOW (key ON or plug in the AC charger); ~%d s… ===" % secs)
+            self.btn_listen.config(state="disabled")
+            self.btn_connect.config(state="disabled")
 
             def job():
                 port = self._make_port(port_name)
                 logger = SessionLogger(base_dir=self.log_dir, tag="listen")
                 try:
-                    data = Transport(port, logger).listen(2 if is_simport else 45)
+                    data = Transport(port, logger).listen(secs)
                 finally:
                     try:
                         port.close()
@@ -707,6 +737,28 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                     "are swapped.")
 
             self._run_bg(job, done)
+            self._listen_countdown(secs)
+
+        def _listen_countdown(self, remaining):
+            # A4: tick the Listen button while the (silent) listen window is open;
+            # restore both buttons the moment the job finishes — success OR error
+            # (done() only fires on success, so this also covers the error path).
+            if not self._busy:
+                for b in (self.btn_listen, self.btn_connect):
+                    try:
+                        b.config(state="normal")
+                    except Exception:
+                        pass
+                try:
+                    self.btn_listen.config(text="Listen only (Stage 1)")
+                except Exception:
+                    pass
+                return
+            try:
+                self.btn_listen.config(text="Listening… %d s" % max(0, remaining))
+            except Exception:
+                pass
+            self.after(1000, lambda: self._listen_countdown(remaining - 1))
 
         def _connect(self):
             # T3: honor the busy guard BEFORE the destructive reset. _reset_session_state
@@ -718,13 +770,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 return
             port_name = self.port_var.get().strip()
             if not port_name:
-                messagebox.showerror(APP_NAME, "Pick a COM port (or run with --sim).")
+                messagebox.showerror(APP_NAME, "No port selected. Pick your COM port "
+                                     "(click Refresh after plugging in the cable), or "
+                                     "choose '%s' to explore without a bike." % SIM_CHOICE)
                 return
             # D1: every connection re-earns its phases (drops any --sim rehearsal
             # state and closes a previously-open port before reopening).
             self._reset_session_state()
             self._ensure_log_dir()          # G2: fall back if the save folder died
-            is_simport = sim or port_name == "SIMULATOR"
+            is_simport = sim or port_name == SIM_CHOICE
 
             def job():
                 tag = "sim" if is_simport else port_name.replace(":", "")
