@@ -340,6 +340,24 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if action:
                 action()
 
+        # -- consistent page scaffold (owner: make tab pages match the landing) --
+        def _tab_header(self, parent, title, subtitle=""):
+            """Every page opens with the landing's clean titled header — a heading
+            + optional muted subtitle — so the tabs match the first page."""
+            ttk.Label(parent, text=title, style="Heading.TLabel").pack(anchor="w")
+            if subtitle:
+                ttk.Label(parent, text=subtitle, style="Muted.TLabel").pack(
+                    anchor="w", pady=(1, 14))
+            else:
+                ttk.Frame(parent, height=10).pack(anchor="w")
+
+        def _new_tab(self, tab_label, title, subtitle=""):
+            """A notebook tab with generous padding + a consistent titled header."""
+            f = ttk.Frame(self.nb, padding=18)
+            self.nb.add(f, text=tab_label)
+            self._tab_header(f, title, subtitle)
+            return f
+
         def _console_text(self, parent, height, fg=None):
             t = tk.Text(parent, height=height, state="disabled",
                         font=(self.sty["mono"], 9), bg=P["console"],
@@ -1100,8 +1118,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         # -- Phase 0: Connect --------------------------------------------------
         def _build_connect_tab(self):
-            f = ttk.Frame(self.nb, padding=12)
-            self.nb.add(f, text=" 0 · Connect ")
+            f = self._new_tab(" 0 · Connect ", "Connect to your bike",
+                              "verify the cable, then connect & probe")
             row = ttk.Frame(f)
             row.pack(fill="x")
             ttk.Label(row, text="Port:").pack(side="left")
@@ -1407,8 +1425,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             widget.bind("<Destroy>", hide)
 
         def _build_read_tab(self):
-            f = ttk.Frame(self.nb, padding=10)
-            self.nb.add(f, text=" 1 · Read ")
+            f = self._new_tab(" 1 · Read ", "Read the bike",
+                              "pull the data, then review it in Analyze")
 
             # T2 dashboard: a connected/identity header, then a two-column body —
             # LEFT the output/status console, RIGHT the action column (primary
@@ -1762,8 +1780,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         # -- Phase 2: Login ------------------------------------------------------
         def _build_login_tab(self):
-            f = ttk.Frame(self.nb, padding=12)
-            self.nb.add(f, text=" 2 · Login ")
+            f = self._new_tab(" 2 · Login ", "Log in for more access",
+                              "read-only — reveals the tunable settings")
             ttk.Label(f, text=(
                 "Logging in is READ-ONLY — it reveals the tuning settings the console "
                 "hides and unlocks the Writes tab. It changes nothing on the bike, and "
@@ -1921,7 +1939,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             canvas.configure(yscrollcommand=vsb.set)
             vsb.pack(side="right", fill="y")
             canvas.pack(side="left", fill="both", expand=True)
-            f = ttk.Frame(canvas, padding=10)
+            f = ttk.Frame(canvas, padding=18)
             win = canvas.create_window((0, 0), window=f, anchor="nw")
             f.bind("<Configure>",
                    lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
@@ -1938,9 +1956,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         # -- Phase 3: Writes -------------------------------------------------------
         def _build_write_tab(self):
             f = self._scrollable_tab(" 3 · Writes ")     # D3: visible scrollbar
-
-            ttk.Label(f, text="Change a setting (advanced)",
-                      style="Heading.TLabel").pack(anchor="w", pady=(0, 6))
+            self._tab_header(f, "Change a setting",
+                             "advanced — whitelisted, backed up, reversible")
             self.unlock_var = tk.BooleanVar(value=False)
             ttk.Checkbutton(f, text="UNLOCK WRITES (master gate)",
                             style=self.sty["toggle"],
@@ -2193,8 +2210,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         # -- Analyze tab (Health / Rides / Compare / Gearing) ----------------
         def _build_analyze_tab(self):
-            f = ttk.Frame(self.nb, padding=10)
-            self.nb.add(f, text=" 4 · Analyze ")
+            f = self._new_tab(" 4 · Analyze ", "Analyze the data",
+                              "health, rides, and comparisons")
 
             top = ttk.Frame(f)
             top.pack(fill="x")

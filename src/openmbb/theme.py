@@ -87,6 +87,10 @@ def apply_theme(root):
                   background=[("active", DANGER_RED_ACTIVE),
                               ("pressed", DANGER_RED_ACTIVE)])
         style.configure("Treeview", rowheight=28)
+        # Flatter tab bar to match the flat landing surface (owner: make the tab
+        # pages match the first page's styling).
+        style.configure("TNotebook", borderwidth=0)
+        style.configure("TNotebook.Tab", padding=(14, 8))
         out = {"backend": "sv-ttk", "accent": "Accent.TButton",
                "danger": "Danger.TButton", "toggle": "Switch.TCheckbutton"}
     except Exception:
