@@ -361,6 +361,43 @@ def test_read_command_line_clears_and_history(app):
     assert app.raw_var.get() == ""
 
 
+def test_dangerous_command_needs_typed_confirm(app, monkeypatch):
+    # F: a blocklisted command is no longer hard-refused from the raw box — it
+    # routes through the type-"confirm" gate, and is dropped if not confirmed.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    seen = []
+    monkeypatch.setattr(app, "_confirm_dangerous",
+                        lambda cmd, reason: seen.append(cmd) or False)
+    app.raw_var.set("dtc_clear")
+    app._raw_send()
+    assert seen == ["dtc_clear"]                    # the confirm gate was shown
+
+
+def test_confirm_bypasses_transport_block(tmp_path):
+    # transport: confirmed=True lets a blocklisted command through; control chars
+    # (multi-line smuggling) are still refused regardless of confirm.
+    from openmbb.transport import Transport, SessionLogger
+    from openmbb.sim import SimPort
+    from openmbb.safety import BlockedCommandError
+    tr = Transport(SimPort(), SessionLogger(base_dir=str(tmp_path), tag="c"))
+    with pytest.raises(BlockedCommandError):
+        tr.exec_command("dtc_clear", idle_timeout=0.5)        # blocked w/o confirm
+    out = tr.exec_command("dtc_clear", confirmed=True, idle_timeout=0.5)
+    assert isinstance(out, str)                                # sent with confirm
+    with pytest.raises(BlockedCommandError):
+        tr.exec_command("a\nsettingsrst", confirmed=True)     # newline still refused
+
+
+def test_command_reference_opens_html(app, monkeypatch):
+    # G: Help -> Command reference opens the stylized HTML reference page.
+    import webbrowser
+    opened = []
+    monkeypatch.setattr(webbrowser, "open", lambda *a, **k: opened.append(a) or True)
+    app._show_command_reference()
+    assert opened
+
+
 def test_analyze_help_enriches_notes(app):
     # T4: the novice explanations (analyze_help.json) load and enrich a health
     # metric's row note with what-it-is / how-it-fits / healthy context.

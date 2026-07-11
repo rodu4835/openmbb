@@ -164,21 +164,26 @@ Never stream the console while riding.
 SAFETY_TEXT = """\
 SAFETY MODEL
 
-Read-first, whitelist-only writes. The transport layer refuses dangerous
-commands from EVERY path (buttons and the raw box), including:
-  format/erase eeprom (bare eeprom is an allowed read; eeprom with arguments
-  is refused), settingsrst, statsrst, log clears/adds, reset, exit_to_bl,
-  dtc_clear, force_all_storage_mode, blcmds, burn, test, wdt, timing, can,
-  charger, sevcon preop, and any "set" of a protected value (abs_disable,
-  bypass_bms, ov_* overrides, motstage*/ctrlstage* thermal limits,
-  sevnoregspeed/sevmaxregv/sevnoregfull regen guards, model/vin/serial identity).
+Read-first, with a strong informed-consent gate for anything destructive. Nothing
+is hard-blocked — it's your bike — but a dangerous command typed into the raw
+command line makes you read what it does, what could happen, and how to recover,
+then type "confirm" before it is sent. Commands that go through that gate include:
+  format/erase eeprom (bare eeprom is an allowed read; eeprom with arguments is
+  gated), settingsrst, statsrst, log clears/adds, reset, exit_to_bl, dtc_clear,
+  force_all_storage_mode, blcmds, burn, test, wdt, timing, can, charger,
+  sevcon preop, and any "set" of a protected value (abs_disable, bypass_bms,
+  ov_* overrides, motstage*/ctrlstage* thermal limits, sevnoregspeed/sevmaxregv/
+  sevnoregfull regen guards, model/vin/serial identity).
 
-Those regen and thermal guards are shown READ-ONLY in the Writes tab so you can
-see them without being able to change them.
+Input hygiene stays absolute: control characters and multi-line / pasted input
+are ALWAYS refused (they could smuggle a second command). See Help → Command
+reference for what every command does and its consequences.
 
-Writable settings are limited to speedo/gearing, custom-mode speed/torque/
-regen, and a few gauge/charge options — each with an effect + risk note and
-value limits. Coast regen of exactly 0 is refused (fishtail risk).
+The regen and thermal guards are shown READ-ONLY in the Writes tab. Writable
+settings there are limited to speedo/gearing, custom-mode speed/torque/regen, and
+a few gauge/charge options — each with an effect + risk note and value limits, and
+the guided path backs up, verifies and journals every change. Coast regen of
+exactly 0 is refused (fishtail risk).
 """
 
 
@@ -719,12 +724,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
             def build_bike(bike):
                 bike.add_command(label="Bike info…", command=self._show_bike_info)
-                bike.add_command(label="Write options (read-only)…",
-                                 command=self._show_write_options)
 
             def build_help(hlp):
                 hlp.add_command(label="Instructions   (F1)",
                                 command=self._show_instructions)
+                hlp.add_command(label="Command reference",
+                                command=self._show_command_reference)
                 hlp.add_command(label="Wiring diagram", command=self._show_wiring)
                 hlp.add_command(label="Safety notes", command=self._show_safety)
                 hlp.add_separator()
@@ -1757,7 +1762,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             bits.append("logged in" if self.logged_in else "read-only")
             lbl.config(text="   ·   ".join(bits), style="Good.TLabel")
 
-        def _read_heavy(self, cmd):
+        def _read_heavy(self, cmd, confirmed=False):
             # A2: a heavy log dump can make the BMS open the drivetrain contactor
             # (it starves the MBB's CAN servicing). Gate it behind an explicit
             # warning + confirm — never let it run casually or in the baseline.
@@ -1768,7 +1773,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     "flash; it recovers when the read finishes. The bike must be "
                     "SAFELY PARKED (never do this while riding).\n\nContinue?" % cmd):
                 return
-            self._read_cmd(cmd, idle_timeout=30.0)   # console pauses mid-dump
+            self._read_cmd(cmd, idle_timeout=30.0, confirmed=confirmed)
 
         def _toggle_watch(self):
             # E1: start/stop the repeat-read timer.
@@ -1799,7 +1804,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 secs = 5
             self.after(secs * 1000, self._watch_tick)
 
-        def _read_cmd(self, cmd, quiet=False, idle_timeout=None):
+        def _read_cmd(self, cmd, quiet=False, idle_timeout=None, confirmed=False):
             # A1/SAFE-2: classify by the lowercased FIRST TOKEN (like the transport),
             # not an exact full-string match — so a raw-box variant such as
             # "eventlogdump 5" or "Eventlogdump" still gets dump-class timeouts
@@ -1815,7 +1820,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 out = self.transport.exec_command(
                     cmd, idle_timeout=idle,
                     max_time=900.0 if is_dump else 60.0,
-                    progress_cb=prog if is_dump else None)
+                    progress_cb=prog if is_dump else None, confirmed=confirmed)
                 return out, self.transport.last_saved_path
 
             def done(result):
@@ -1889,20 +1894,143 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                        "would record it in the clear.")
                 return
             reason = command_blocked(cmd)
+            confirmed = False
             if reason:
-                messagebox.showwarning(APP_NAME, "REFUSED: %s" % reason)
-                return
-            # A1 (SAFE-1): a HEAVY log dump typed into the raw box must get the
-            # SAME contactor warning + confirm + long idle timeout as the Heavy
-            # buttons — otherwise `eventlogdump`/`dumpall` (or a variant like
-            # `eventlogdump 5`) would drop the drivetrain contactor with no
-            # warning and truncate under the short read timeout. Route by head.
+                # No hard wall (owner's own bike): show what it does / what could
+                # happen / how to recover, and require typing "confirm" first.
+                if not self._confirm_dangerous(cmd, reason):
+                    return
+                confirmed = True
+            # A HEAVY log dump gets the contactor warning + long idle timeout; it is
+            # not blocklisted, so it takes the normal (confirmed=False) path here.
             if head in HEAVY_COMMANDS:
-                self._read_heavy(cmd)
+                self._read_heavy(cmd, confirmed=confirmed)
                 return
-            # (T6: the 2-token `set <name>` form is now refused outright by
-            # command_blocked, so the old prompt-for-value snap-out is dead code.)
-            self._read_cmd(cmd)
+            self._read_cmd(cmd, confirmed=confirmed)
+
+        def _load_cmd_ref(self):
+            """Lazy-load assets/command_reference.json, keyed for confirm lookups."""
+            cached = getattr(self, "_cmd_ref_cache", None)
+            if cached is not None:
+                return cached
+            d = {}
+            try:
+                import json
+                from importlib.resources import files
+                raw = (files("openmbb") / "assets" / "command_reference.json"
+                       ).read_text(encoding="utf-8")
+                for it in json.loads(raw):
+                    toks = str(it.get("name", "")).strip().lower().split()
+                    if not toks:
+                        continue
+                    if toks[0] == "set" and len(toks) >= 2:
+                        d.setdefault("set:" + toks[1], it)
+                    elif toks[0].startswith("ov_"):
+                        d.setdefault("ov_*", it)
+                    elif len(toks) >= 2 and not toks[1].startswith(("<", "(")):
+                        d.setdefault(toks[0] + " " + toks[1], it)
+                        d.setdefault(toks[0], it)
+                    else:
+                        d.setdefault(toks[0], it)
+            except Exception:
+                d = {}
+            self._cmd_ref_cache = d
+            return d
+
+        def _cmd_ref_lookup(self, cmd):
+            ref = self._load_cmd_ref()
+            toks = str(cmd).strip().split()
+            if not toks:
+                return None
+            head = toks[0].lower()
+            if head == "set" and len(toks) >= 2:
+                hit = ref.get("set:" + toks[1].lower())
+                if hit:
+                    return hit
+            if head.startswith("ov_") and "ov_*" in ref:
+                return ref["ov_*"]
+            if len(toks) >= 2:
+                two = ref.get(head + " " + toks[1].lower())
+                if two:
+                    return two
+            return ref.get(head)
+
+        def _confirm_dangerous(self, cmd, reason):
+            """Informed-consent gate for a destructive command: show what it does /
+            what could happen / how to recover, and require typing 'confirm'. No
+            hard block — returns True only if the owner deliberately confirms."""
+            from . import dialogs
+            ref = self._cmd_ref_lookup(cmd) or {}
+            surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
+            win = tk.Toplevel(self)
+            win.title("Dangerous command")
+            win.configure(bg=surface)
+            win.resizable(False, False)
+            win.transient(self)
+            result = {"ok": False}
+
+            body = ttk.Frame(win, padding=22)
+            body.pack(fill="both", expand=True)
+            danger = ref.get("danger", "dangerous")
+            ttk.Label(body, text=("☢  CATASTROPHIC command" if danger == "catastrophic"
+                                  else "⚠  Dangerous command"), style="Heading.TLabel",
+                      foreground=P["danger"]).pack(anchor="w")
+            ttk.Label(body, text=cmd, font=(self.sty["mono"], 12, "bold"),
+                      foreground=P["warn"]).pack(anchor="w", pady=(2, 10))
+
+            def line(label, text, color=None):
+                if not text:
+                    return
+                row = ttk.Frame(body)
+                row.pack(fill="x", pady=(0, 6))
+                ttk.Label(row, text=label, style="Muted.TLabel", width=17,
+                          anchor="nw").pack(side="left", anchor="n")
+                ttk.Label(row, text=text, wraplength=430, justify="left",
+                          foreground=color or P["fg"]).pack(side="left", fill="x",
+                                                             expand=True)
+            if ref:
+                line("What it does", ref.get("what_it_does"))
+                line("What could happen", ref.get("what_could_happen"), P["warn"])
+                line("Reversible?", ref.get("reversible"))
+                line("How to recover", ref.get("recovery"))
+            else:
+                line("Why flagged", reason, P["warn"])
+                line("More", "See Help → Command reference for the details.")
+
+            ttk.Separator(body).pack(fill="x", pady=(6, 10))
+            ttk.Label(body, text="Type  confirm  to send this command:").pack(anchor="w")
+            cvar = tk.StringVar()
+            cent = ttk.Entry(body, textvariable=cvar)
+            cent.pack(fill="x", pady=(4, 12))
+            btns = ttk.Frame(body)
+            btns.pack(fill="x")
+
+            def do_send():
+                if cvar.get().strip().lower() == "confirm":
+                    result["ok"] = True
+                    win.destroy()
+
+            def do_cancel():
+                win.destroy()
+            ttk.Button(btns, text="Send", style=self.sty["danger"],
+                       command=do_send).pack(side="right")
+            ttk.Button(btns, text="Cancel", command=do_cancel).pack(side="right",
+                                                                    padx=(0, 8))
+            cent.bind("<Return>", lambda e: do_send())
+            win.protocol("WM_DELETE_WINDOW", do_cancel)
+            dialogs._dark_titlebar(win)
+            dialogs._center(win, self)
+            try:
+                win.grab_set()
+            except Exception:
+                pass
+            cent.focus_set()
+            win.wait_window()
+            return result["ok"]
+
+        def _show_command_reference(self):
+            self._open_html_help("command_reference.html", "Command reference",
+                                 "Command reference (see the repo for the full page).")
 
         def _baseline(self):
             # D4: run `obd` LAST — after `set` (the backup) and errorlogdump —

@@ -196,7 +196,7 @@ class Transport:
             self.logger.raw("RX", buf)
 
     def exec_command(self, cmd, idle_timeout=2.0, max_time=30.0, progress_cb=None,
-                     redact=None, _write_ok=False):
+                     redact=None, _write_ok=False, confirmed=False):
         """Send `cmd`, return the response text. Refuses control characters and
         anything the blocklist bans. If `redact` is given, that substring (e.g. a
         typed password) is registered with the session logger and masked in
@@ -220,9 +220,16 @@ class Transport:
                 raise BlockedCommandError(
                     "command contains a non-ASCII character (U+%04X) - refused; "
                     "the console is 7-bit ASCII." % o)
-        reason = command_blocked(cmd, allow_write=_write_ok)
-        if reason:
-            raise BlockedCommandError(reason)
+        # The control-character / non-ASCII hygiene above ALWAYS applies (it stops
+        # multi-line smuggling + corrupt bytes on the wire). The command blocklist,
+        # though, is an informed-consent BACKSTOP: the GUI sets confirmed=True only
+        # after the owner reads the danger explainer and types "confirm", so a
+        # deliberate destructive command CAN be sent (owner's own bike). Nothing
+        # sends confirmed=True without that gate.
+        if not confirmed:
+            reason = command_blocked(cmd, allow_write=_write_ok)
+            if reason:
+                raise BlockedCommandError(reason)
         if redact:
             self.logger.add_redaction(redact)
 

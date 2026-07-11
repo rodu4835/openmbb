@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenMBB &mdash; Command Reference</title>
+<style>
+  :root{
+    --pink:#ff5fd2; --purple:#b06bff; --cyan:#22d3ee; --mint:#5cffb1; --yellow:#fff59d;
+    --grid:#2a2350; --ink:#e8e6f0; --muted:#9a93b8;
+    --panel:rgba(28,20,64,.62); --panel2:rgba(18,10,36,.72);
+    --edge:rgba(176,107,255,.28);
+    --danger:#ff6b8a; --red:#ff4d5e;
+    --mono:'Cascadia Mono','Consolas',ui-monospace,monospace;
+    --ui:'Segoe UI',system-ui,sans-serif;
+    --uih:'Segoe UI Semibold','Segoe UI',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; color:var(--ink);
+    font-family:var(--ui); font-size:16px; line-height:1.6;
+    background:linear-gradient(180deg,#120a24 0%, #1c1440 48%, #0a0f2e 100%) fixed;
+    -webkit-font-smoothing:antialiased;
+  }
+  body::before{
+    content:""; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.5;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size:44px 44px;
+    -webkit-mask-image:radial-gradient(ellipse 120% 90% at 50% 0%, #000 30%, transparent 92%);
+            mask-image:radial-gradient(ellipse 120% 90% at 50% 0%, #000 30%, transparent 92%);
+  }
+  body::after{
+    content:""; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.35;
+    background:repeating-linear-gradient(0deg, rgba(42,35,80,.35) 0px, rgba(42,35,80,.35) 1px, transparent 2px, transparent 4px);
+  }
+  .wrap{position:relative; z-index:1; max-width:1060px; margin:0 auto; padding:0 22px 90px}
+  a{color:var(--cyan); text-decoration:none; border-bottom:1px dotted rgba(34,211,238,.5)}
+  a:hover{color:var(--mint); border-bottom-color:var(--mint)}
+
+  /* ---- HERO ---- */
+  header.hero{position:relative; text-align:center; padding:60px 20px 30px}
+  .badge{
+    display:inline-block; font-family:var(--mono); font-size:12px; letter-spacing:.28em;
+    text-transform:uppercase; color:var(--cyan);
+    border:1px solid var(--edge); border-radius:999px; padding:6px 16px; margin-bottom:22px;
+    background:var(--panel2); box-shadow:0 0 18px rgba(34,211,238,.15) inset;
+  }
+  .logo{display:flex; align-items:center; justify-content:center; gap:16px; margin-bottom:6px}
+  h1{
+    font-family:var(--uih); font-weight:600; margin:0;
+    font-size:clamp(34px,7vw,64px); letter-spacing:.02em; line-height:1;
+    background:linear-gradient(92deg, var(--pink), var(--purple) 45%, var(--cyan));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    text-shadow:0 0 30px rgba(255,95,210,.35);
+    filter:drop-shadow(0 0 22px rgba(176,107,255,.28));
+  }
+  .tag{color:var(--muted); font-size:clamp(15px,2.4vw,19px); margin:14px auto 0; max-width:720px}
+  .tag b{color:var(--mint); font-weight:600}
+  .verstrip{
+    margin-top:20px; font-family:var(--mono); font-size:12.5px; color:var(--muted);
+    display:flex; gap:10px 22px; flex-wrap:wrap; justify-content:center;
+  }
+  .verstrip span{white-space:nowrap}
+  .verstrip b{color:var(--yellow); font-weight:400}
+
+  /* ---- INTRO CARD ---- */
+  .intro{
+    background:var(--panel); border:1px solid var(--edge); border-radius:16px;
+    padding:22px 26px; margin:26px 0 8px;
+    box-shadow:0 12px 40px rgba(6,3,20,.5), 0 0 0 1px rgba(176,107,255,.06) inset;
+  }
+  .intro p{margin:0 0 12px}
+  .intro p:last-child{margin-bottom:0}
+  .intro b.mint{color:var(--mint)}
+  .intro b.yel{color:var(--yellow)}
+  .intro b.pk{color:var(--pink)}
+
+  /* ---- LEGEND ---- */
+  .legend{display:flex; flex-wrap:wrap; gap:10px; margin:16px 0 4px; justify-content:center}
+  .legchip{
+    font-family:var(--mono); font-size:12px; border-radius:999px; padding:5px 14px;
+    border:1px solid var(--edge); background:var(--panel2); display:flex; align-items:center; gap:8px;
+  }
+  .legchip .dot{width:11px; height:11px; border-radius:50%; box-shadow:0 0 10px currentColor}
+  .legchip.safe{color:var(--mint); border-color:rgba(92,255,177,.45)}
+  .legchip.caution{color:var(--yellow); border-color:rgba(255,245,157,.45)}
+  .legchip.dangerous{color:var(--pink); border-color:rgba(255,95,210,.45)}
+  .legchip.catastrophic{color:var(--red); border-color:rgba(255,77,94,.55)}
+
+  /* ---- SECTION ---- */
+  section{margin:46px 0 0; scroll-margin-top:14px}
+  h2{
+    font-family:var(--uih); font-weight:600; font-size:clamp(22px,4vw,30px);
+    margin:0 0 6px; letter-spacing:.01em;
+    display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;
+  }
+  h2 .n{
+    font-family:var(--mono); font-size:.6em; color:var(--cyan);
+    text-shadow:0 0 14px rgba(34,211,238,.5);
+    border:1px solid var(--edge); border-radius:8px; padding:2px 10px;
+  }
+  h2 .cnt{font-family:var(--mono); font-size:.5em; color:var(--muted); border:none; padding:0}
+  h2.mint{color:var(--mint); text-shadow:0 0 20px rgba(92,255,177,.4)}
+  h2.yel{color:var(--yellow); text-shadow:0 0 20px rgba(255,245,157,.35)}
+  h2.pink{color:var(--pink); text-shadow:0 0 20px rgba(255,95,210,.4)}
+  h2.cyan{color:var(--cyan); text-shadow:0 0 20px rgba(34,211,238,.4)}
+  .lead{color:var(--muted); max-width:900px; margin:0 0 18px}
+  h3.sub{font-family:var(--uih); font-weight:600; color:var(--yellow); font-size:17px;
+     margin:22px 0 10px; text-shadow:0 0 14px rgba(255,245,157,.22);
+     letter-spacing:.02em; text-transform:uppercase; font-size:14px}
+
+  /* ---- CALLOUT ---- */
+  .note{border-left:3px solid var(--cyan); background:rgba(34,211,238,.07);
+    padding:14px 18px; border-radius:0 12px 12px 0; margin:14px 0}
+  .note.warn{border-left-color:var(--yellow); background:rgba(255,245,157,.07)}
+  .note.danger{border-left-color:var(--danger); background:rgba(255,107,138,.09)}
+  .note .k{font-family:var(--uih); font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+     font-size:12px; display:block; margin-bottom:4px; color:var(--cyan)}
+  .note.warn .k{color:var(--yellow)}
+  .note.danger .k{color:var(--danger)}
+  .note b{color:var(--yellow)}
+  .note.danger b{color:var(--danger)}
+
+  /* ---- COMMAND GRID ---- */
+  .grid{display:grid; grid-template-columns:1fr; gap:16px; margin-top:6px}
+  @media(min-width:760px){.grid.two{grid-template-columns:1fr 1fr}}
+
+  .cmd{
+    position:relative; background:var(--panel); border:1px solid var(--edge);
+    border-radius:14px; padding:18px 20px 18px 22px; overflow:hidden;
+    box-shadow:0 10px 30px rgba(6,3,20,.42);
+  }
+  .cmd::before{content:""; position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:14px 0 0 14px}
+  .cmd.safe::before{background:linear-gradient(180deg,var(--mint),rgba(92,255,177,.25)); box-shadow:0 0 14px rgba(92,255,177,.5)}
+  .cmd.caution::before{background:linear-gradient(180deg,var(--yellow),rgba(255,245,157,.25)); box-shadow:0 0 14px rgba(255,245,157,.45)}
+  .cmd.dangerous::before{background:linear-gradient(180deg,var(--pink),rgba(255,95,210,.25)); box-shadow:0 0 14px rgba(255,95,210,.5)}
+  .cmd.catastrophic::before{background:linear-gradient(180deg,var(--red),rgba(255,77,94,.3)); box-shadow:0 0 16px rgba(255,77,94,.6)}
+  .cmd.catastrophic{border-color:rgba(255,77,94,.4)}
+  .cmd.dangerous{border-color:rgba(255,95,210,.32)}
+
+  .cmdhead{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px}
+  .cname{
+    font-family:var(--mono); font-size:15px; font-weight:600;
+    background:rgba(10,15,46,.72); border:1px solid var(--edge); border-radius:7px;
+    padding:3px 10px; color:var(--cyan); white-space:normal; word-break:break-word;
+  }
+  .cmd.safe .cname{color:var(--mint)}
+  .tag{
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.14em; font-weight:600;
+    padding:3px 10px; border-radius:999px; border:1px solid; white-space:nowrap; margin-left:auto;
+  }
+  .tag.safe{color:var(--mint); border-color:rgba(92,255,177,.5); background:rgba(92,255,177,.08)}
+  .tag.caution{color:var(--yellow); border-color:rgba(255,245,157,.5); background:rgba(255,245,157,.08)}
+  .tag.dangerous{color:var(--pink); border-color:rgba(255,95,210,.55); background:rgba(255,95,210,.1)}
+  .tag.catastrophic{color:var(--red); border-color:rgba(255,77,94,.6); background:rgba(255,77,94,.12);
+     text-shadow:0 0 10px rgba(255,77,94,.5)}
+
+  .cmd .one{margin:0 0 10px; color:var(--ink); font-weight:600; font-family:var(--uih); font-size:15.5px}
+  .cmd .what{margin:0; color:var(--muted); font-size:14px; line-height:1.55}
+  .lbl{
+    display:inline-block; font-family:var(--mono); font-size:10px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--cyan); margin-right:8px; vertical-align:1px;
+    border:1px solid var(--edge); border-radius:5px; padding:1px 6px;
+  }
+
+  .detail{margin-top:14px; display:grid; gap:9px; padding-top:13px;
+     border-top:1px dashed rgba(176,107,255,.22)}
+  .dr{display:grid; grid-template-columns:1fr; gap:2px}
+  .drk{font-family:var(--uih); font-weight:600; font-size:11.5px; letter-spacing:.05em;
+     text-transform:uppercase}
+  .drv{font-size:13.5px; color:var(--ink); line-height:1.5}
+  .dr.happen{background:rgba(255,77,94,.08); border:1px solid rgba(255,77,94,.28);
+     border-radius:9px; padding:9px 12px}
+  .dr.happen .drk{color:var(--red)}
+  .dr.rev{background:rgba(255,245,157,.05); border-radius:9px; padding:9px 12px;
+     border:1px solid rgba(255,245,157,.18)}
+  .dr.rev .drk{color:var(--yellow)}
+  .dr.recov{background:rgba(34,211,238,.06); border-radius:9px; padding:9px 12px;
+     border:1px solid rgba(34,211,238,.2)}
+  .dr.recov .drk{color:var(--cyan)}
+
+  /* ---- TOC ---- */
+  .toc{display:flex; flex-wrap:wrap; gap:9px; justify-content:center; margin:22px 0 6px}
+  .toc a{
+    font-family:var(--mono); font-size:12.5px; border:1px solid var(--edge);
+    border-radius:999px; padding:6px 15px; background:var(--panel2); border-bottom:1px solid var(--edge);
+  }
+  .toc a:hover{border-color:var(--cyan); color:var(--cyan)}
+
+  footer{margin-top:60px; padding-top:24px; border-top:1px solid var(--edge);
+     color:var(--muted); font-size:13px; text-align:center}
+  footer b{color:var(--purple)}
+  .disc{max-width:800px; margin:12px auto 0; font-size:12px; line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="badge">Gen2 MBB &middot; Serial Console &middot; Command Reference</div>
+    <div class="logo">
+      <svg width="64" height="64" viewBox="0 0 76 76" role="img" aria-label="OpenMBB mark">
+        <defs>
+          <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#ff5fd2"/><stop offset="1" stop-color="#22d3ee"/>
+          </linearGradient>
+          <radialGradient id="g2" cx="50%" cy="42%" r="60%">
+            <stop offset="0" stop-color="#5cffb1" stop-opacity=".5"/>
+            <stop offset="1" stop-color="#5cffb1" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <circle cx="38" cy="38" r="34" fill="none" stroke="url(#g1)" stroke-width="3"/>
+        <circle cx="38" cy="38" r="34" fill="url(#g2)"/>
+        <path d="M20 46 A22 22 0 0 1 56 46" fill="none" stroke="#b06bff" stroke-width="2.4" stroke-linecap="round" opacity=".8"/>
+        <path d="M41 20 L27 41 L37 41 L34 56 L50 33 L40 33 Z" fill="url(#g1)"
+              stroke="#fff59d" stroke-width="1" stroke-linejoin="round"/>
+      </svg>
+      <h1>OpenMBB</h1>
+    </div>
+    <p class="tag">Every command the MBB serial console understands, grouped by what it does and colour-coded by how much it can hurt &mdash; from harmless <b>reads</b> to firmware-<b>catastrophic</b> writes.</p>
+    <div class="verstrip">
+      <span>Console <b>38400 baud &middot; 8-N-1</b></span>
+      <span>Verified <b>2017 FXS &middot; MBB rev 41</b></span>
+      <span><b>85</b> commands documented</span>
+    </div>
+  </header>
+  <div class="intro">
+    <p><b class="pk">OpenMBB no longer hard-blocks anything.</b> Every command below &mdash; including the destructive ones that used to sit on a permanent blocklist &mdash; is now <b class="mint">sendable</b>. Nothing is silently refused by the transport.</p>
+    <p>Instead, the dangerous commands are gated behind <b class="yel">understanding</b>: before one goes out, OpenMBB shows you exactly what it does, what could happen, whether it is reversible, and how (or whether) you can recover &mdash; and then makes you type <code style="font-family:var(--mono); color:var(--yellow)">confirm</code> to send it. Read the consequences, then decide. The colour of each card tells you how carefully to read.</p>
+    <p style="color:var(--muted); font-size:14px; margin-bottom:0">Reads are still the point. Writes are still the exception. The difference is that the guard rails are now <em>informed consent</em>, not a locked door.</p>
+  </div>
+  <div class="legend">
+    <span class="legchip safe"><span class="dot" style="background:var(--mint)"></span>SAFE &mdash; read or display-math only</span>
+    <span class="legchip caution"><span class="dot" style="background:var(--yellow)"></span>CAUTION &mdash; changes feel/behaviour, reversible</span>
+    <span class="legchip dangerous"><span class="dot" style="background:var(--pink)"></span>DANGEROUS &mdash; destructive / state-changing</span>
+    <span class="legchip catastrophic"><span class="dot" style="background:var(--red)"></span>CATASTROPHIC &mdash; brick / EEPROM / interlock class</span>
+  </div>
+  <nav class="toc">
+    <a href="#reads">Read commands</a>
+    <a href="#heavy">Heavy reads &#9888;</a>
+    <a href="#writes">Writes</a>
+    <a href="#dangerous">Dangerous / destructive</a>
+  </nav>
+  <section id="reads">
+    <h2 class="mint"><span class="n">01</span> Read commands <span class="cnt">14 &middot; all SAFE</span></h2>
+    <p class="lead">One-shot snapshots. They ask the bike a question and print the answer &mdash; nothing is changed, toggled, or written. These are the whole point of a diagnostics session, and every one is safe to auto-run in the baseline.</p>
+    <div class="grid two">
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">version</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show firmware and board revision.</p>
+    <p class="what"><span class="lbl">What it does</span>Prints the MBB firmware + board revision banner (READ_TIPS: 'Firmware + board revision.'). Rev-41 version reply also ends with a 'Reset Source:' line reporting the last reset cause; that is normal, not a reboot.</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">help</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show the console's own command menu.</p>
+    <p class="what"><span class="lbl">What it does</span>Prints the console's built-in command menu (READ_TIPS: 'The console's own command menu.'). Verified live: logged in, 'help' shows the real menu; the menu differs by login level (003_help.txt pre-login / 019_help.txt post-login).</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">status</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show current bike status.</p>
+    <p class="what"><span class="lbl">What it does</span>Overall bike status right now: mode, temps, SOC, faults (READ_TIPS).</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">stats</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show lifetime statistics.</p>
+    <p class="what"><span class="lbl">What it does</span>Lifetime statistics: odometer, top speed, all-time max temps (READ_TIPS).</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">runtime</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show total run and charge time.</p>
+    <p class="what"><span class="lbl">What it does</span>Total run time and total charge time (READ_TIPS).</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">bms</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show battery pack data.</p>
+    <p class="what"><span class="lbl">What it does</span>Battery pack: cell voltages, balance, capacity, isolation, cycles (READ_TIPS).</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">sevcon</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show motor controller (Sevcon) data.</p>
+    <p class="what"><span class="lbl">What it does</span>Motor controller (Sevcon) data (READ_TIPS). Bare 'sevcon' is a read; 'sevcon preop' is separately blocked as a write.</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">chargers</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show onboard charger status.</p>
+    <p class="what"><span class="lbl">What it does</span>Onboard charger port status (READ_TIPS).</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">inputs</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show raw sensor inputs.</p>
+    <p class="what"><span class="lbl">What it does</span>Raw sensor inputs: rail voltages, kill switch, kickstand, etc. (READ_TIPS).</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">outputs</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show output states.</p>
+    <p class="what"><span class="lbl">What it does</span>Output states: DC/DC, warning light, contactor enable, etc. (READ_TIPS). Read-only reporting of output state; does not toggle outputs.</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">dash</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show instrument-cluster data.</p>
+    <p class="what"><span class="lbl">What it does</span>Instrument-cluster data: clock, odometer, CAN age (READ_TIPS).</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">obd</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show OBD summary (protocol, DTCs).</p>
+    <p class="what"><span class="lbl">What it does</span>OBD summary: protocol, DTCs (READ_TIPS: 'Show all obd info'). Menu-verified at both login levels but its live OUTPUT has not been captured yet, so the full baseline runs it LAST; an empty reply is treated as possibly command-specific, not necessarily a sleeping console. It is a read only.</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">eeprom</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Show EEPROM usage summary (bare form only).</p>
+    <p class="what"><span class="lbl">What it does</span>Bare 'eeprom' with no arguments is a READ on rev 41 - 'Show EEPROM usage' (a usage summary). Only the bare form is permitted; 'eeprom' WITH arguments is refused because it can read/modify raw EEPROM (see 'eeprom set' / 'format eeprom' entries).</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">errorlogdump</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Dump the small error log (~1 KB, safe).</p>
+    <p class="what"><span class="lbl">What it does</span>Reads the error log (READ_TIPS: 'The small error log (~1 KB, safe).'). This is the only dump-class command safe to auto-run in the full baseline. Note: 'dumplogs' does NOT exist on rev 41 (bike replies 'invalid command'); errorlogdump is the real small-log read.</p>
+  </article>
+    </div>
+  </section>
+  <section id="heavy">
+    <h2 class="yel"><span class="n">02</span> Heavy reads <span class="cnt">2 &middot; &#9888; contactor risk</span></h2>
+    <p class="lead">Still read-only &mdash; they change no data &mdash; but they stream ~1&nbsp;MB for minutes at 38400&nbsp;baud and monopolize the MBB. While the console is tied up, the BMS can protectively <b>open the drivetrain contactor</b> (audible click, flashing dash). Park the bike first; these are never auto-run.</p>
+    <div class="note danger">
+      <span class="k">&#9888; Park before running</span>
+      A long dump can starve the MBB&#39;s CAN servicing enough that the drivetrain contactor briefly opens. If the bike were moving, the drivetrain would drop out. Observed-live behaviour, not theoretical &mdash; run these stationary only.
+    </div>
+    <div class="grid">
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">eventlogdump</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Dump the full event log (~1 MB, minutes) - can briefly open the contactor.</p>
+    <p class="what"><span class="lbl">What it does</span>Reads the entire event log (~8600 entries / ~1 MB). At 38400 baud it streams for MINUTES and monopolizes the MBB long enough that it stops servicing the Sevcon/CAN bus. READ_TIPS: 'can briefly OPEN the drivetrain contactor. Park the bike first.' It is a read - it does not modify anything - and is never auto-run; the GUI gates it behind an explicit confirm dialog.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">The BMS protectively OPENS the drivetrain contactor while the console is monopolized (observed live: audible click + flashing dash). If the bike were moving, the drivetrain would drop out. It also ties up the console for minutes.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - no data is changed; the contactor re-closes on its own once the read finishes. It is a read-only side effect, not a persistent state change.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Wait for the dump to complete; the bike re-closes the contactor automatically and the dash returns to normal. Park the bike before running so a mid-ride contactor open is not a hazard.</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">dumpall</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Dump everything incl. logs (~1 MB, minutes) - same contactor caveat.</p>
+    <p class="what"><span class="lbl">What it does</span>Dumps everything including the event logs (READ_TIPS: 'Everything incl. logs (~1 MB, minutes) - same contactor caveat.'). Because it includes the full event log it carries the same heavy/monopolize-the-console behavior as eventlogdump. Read-only content, never auto-run, GUI-gated behind a confirm dialog.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Same as eventlogdump: while the console is monopolized for minutes the BMS can protectively OPEN the drivetrain contactor (audible click + flashing dash).</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - it reads data only; the contactor re-closes itself once the dump finishes. No persistent change.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Let the dump finish; the bike re-closes the contactor automatically. Park the bike first.</span></div>
+    </div>
+  </article>
+    </div>
+  </section>
+  <section id="writes">
+    <h2 class="cyan"><span class="n">03</span> Writes <span class="cnt">14 &middot; whitelist, gated flow</span></h2>
+    <p class="lead">The only settings OpenMBB will help you change. Each goes through the gated Writes tab &mdash; journaled, backed up, confirmed, sent, then read back and verified with a per-entry revert. Rows appear only for whitelisted names that are present in <em>your</em> bike&#39;s live dump. Change one thing at a time.</p>
+    <h3 class="sub" style="color:var(--mint)">Safe &mdash; display math only (3)</h3>
+    <div class="grid two">
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">set spfront &lt;v&gt;</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Set front sprocket tooth count (speedo/odo math only).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'spfront' - 'Sprocket teeth, front'. Input to speedometer/odometer calculation ONLY; set to the physically installed front sprocket count (FX/FXS factory is 20). Validator: whole number 10-40. Risk text: 'SAFE - display math only. Wrong values skew speed/odo/Wh-per-km.' Written only via the gated Writes tab, which backs up, confirms, verifies and journals.</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">set sprear &lt;v&gt;</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Set rear sprocket tooth count (speedo/odo math only).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'sprear' - 'Sprocket teeth, rear'. Input to speedo/odo calculation ONLY; set to the installed rear sprocket count (FX/FXS factory is 90). Validator: whole number 30-150. Risk text: 'SAFE - display math only.' Gated Writes-tab path only.</p>
+  </article>
+  <article class="cmd safe">
+    <div class="cmdhead">
+      <code class="cname">set rwhcirc &lt;v&gt;</code>
+      <span class="tag safe">SAFE</span>
+    </div>
+    <p class="one">Set rear wheel circumference in mm (speedo math only).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'rwhcirc' - 'Rear wheel circumference (mm)'. Input to speedo calculation; trim so speedo matches GPS (typically ~1900-2000 mm). Validator: whole number 1500-2400. Risk text: 'SAFE - display math only.' Gated Writes-tab path only.</p>
+  </article>
+    </div>
+    <h3 class="sub">Caution &mdash; changes feel or gauge behaviour (11)</h3>
+    <div class="grid">
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">set maxcustspmph &lt;v&gt;</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Set Custom-mode max speed in mph.</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'maxcustspmph' - 'Custom mode: max speed (mph)'. Top speed in Custom ride mode (real rev-41 name maxcustspmph). Physical ceiling ~85 mph; console accepts up to 102. Validator: whole number 20-102. Risk text labels it SAFE (factory-supported parameter space). Gated Writes-tab path only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Sets the Custom ride-mode speed cap. Values above the bike's ~85 mph physical ceiling are accepted by the console but not physically achievable; it stays within the factory-supported parameter space.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - it is a whitelisted, journaled setting; re-run the write with the prior value (captured in the writes journal / 'set' dump) to restore it.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-write the previous value via the Writes tab; the write flow journals old-&gt;new so the prior value is recorded.</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">set maxcusttq_allowed &lt;v&gt;</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Set Custom-mode max torque (% of allowed).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'maxcusttq_allowed' - 'Custom mode: max torque (% of allowed)'. Torque cap in Custom mode, % of what the Sevcon allows (real name maxcusttq_allowed). Validator: whole number 10-100. Risk text labels it SAFE (factory-supported parameter space). Gated Writes-tab path only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Changes how much torque Custom mode delivers as a percentage of the Sevcon-allowed maximum; stays within factory-supported bounds. Higher values increase acceleration/aggressiveness within limits.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - whitelisted and journaled; restore by re-writing the prior value.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-write the previous value via the Writes tab (old value is journaled).</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">set maxcustregcotq_allow &lt;v&gt;</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Set Custom-mode coast (off-throttle) regen (% of allowed).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'maxcustregcotq_allow' - 'Custom mode: coast regen (% of allowed)'. Off-throttle coast regen in Custom mode, % of allowed (real name maxcustregcotq_allow). Validator _v_coast_regen: whole number 0-100 but EXACTLY 0 is refused (0% coasting regen can cause fishtailing in low traction). Risk text: 'SAFE, but exactly 0 is refused (fishtail risk in low traction).' Gated Writes-tab path only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Changes off-throttle regen braking feel. Very low values give free coasting; exactly 0 is refused because zero coast regen can cause fishtailing in low traction.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - whitelisted and journaled; restore by re-writing the prior value.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-write the previous value via the Writes tab (old value is journaled).</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">set maxcustregbrtq_allow &lt;v&gt;</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Set Custom-mode brake regen (% of allowed).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'maxcustregbrtq_allow' - 'Custom mode: brake regen (% of allowed)'. Regen applied when the brake switch triggers, in Custom mode (real name maxcustregbrtq_allow). Validator: whole number 0-100. Risk text labels it SAFE (factory-supported parameter space). Gated Writes-tab path only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Changes how much regen is applied when the brake switch triggers in Custom mode; affects brake feel. Stays within factory-supported bounds.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - whitelisted and journaled; restore by re-writing the prior value.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-write the previous value via the Writes tab (old value is journaled).</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">set brakeregen &lt;v&gt;</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Set whether the brake switch applies max brake regen (Yes/No).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'brakeregen' - 'Apply regen on brake switch'. Whether the brake light switch applies max brake regen. Validator _v_yes_no. Risk text: 'CAUTION - modest changes only; affects brake feel.' Note: whitelisted but not observed on the verified rev 41 (not in REV41_FXS_SETTINGS); the transport refuses a write to a name absent from the live 'set' dump. Gated Writes-tab path only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Changes braking behavior/feel by tying (or untying) max brake regen to the brake switch. Modest changes only are advised.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - whitelisted and journaled; restore by re-writing the prior value. On rev 41 it may not be present at all, in which case the write is refused before it reaches the wire.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-write the previous value via the Writes tab (old value is journaled).</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">set brakefilter &lt;v&gt;</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Set brake-switch filter delay in ms.</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'brakefilter' - 'Brake switch filter (ms)'. Delay after the brake switch closes before the light + regen trigger. Validator: whole number 0-1000. Risk text: 'CAUTION - keep near default (100 ms).' May be absent on rev 41 (not in REV41_FXS_SETTINGS); transport refuses writes to names absent from the live dump. Gated Writes-tab path only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Changes the delay before the brake light and brake regen engage after the switch closes. Far-from-default values change brake responsiveness.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - whitelisted and journaled; restore by re-writing the prior value (default ~100 ms).</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-write the previous value via the Writes tab (old value is journaled).</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">set noregenstopped &lt;v&gt;</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Set the low-speed regen guard (leave Yes).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'noregenstopped' - 'Prevent regen at low speed'. Blocks regen below ~13 mph. Validator _v_yes_no. Risk text: 'CAUTION - safe-direction only: leave enabled (Yes). Disabling removes a low-speed stability guard.' Has a warn_fn that fires when set to No/off/0. May be absent on rev 41. Gated Writes-tab path only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Setting this to 'No' removes the low-speed regen stability guard, allowing regen below ~13 mph - a stability risk at low speed. The write flow warns explicitly on a disabling value.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - whitelisted and journaled; restore by re-writing 'Yes'. The safe direction is to leave it enabled.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-write 'Yes' via the Writes tab (old value is journaled).</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">set reserve_sw &lt;v&gt;</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Toggle the SOC reserve partition (Yes/No).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'reserve_sw' - 'Use SOC reserve partition'. Treats part of the battery as a 'fuel reserve' partition. Validator _v_yes_no. Risk text: 'CAUTION - changes what the gauge withholds, not real capacity. On an aged pack, don't reduce your reserve margin.' Gated Writes-tab path only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Enables/disables the gauge's reserve partition. This changes what the gauge WITHHOLDS, not real capacity (adds zero real Ah). On an aged pack, dropping the reserve reduces your safety margin before empty.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - whitelisted and journaled; restore by re-writing the prior value.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-write the previous value via the Writes tab (old value is journaled).</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">set reserve_pct &lt;v&gt;</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Set reserve partition size (%).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'reserve_pct' - 'Reserve partition size (%)'. How much SoC the reserve partition withholds (default 33%). Validator: whole number 0-50. Risk text: 'CAUTION - gauge behavior only, adds zero real Ah.' Gated Writes-tab path only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Changes how much SoC the gauge withholds as reserve. Gauge behavior only - adds zero real Ah. Lowering it reduces displayed margin before empty.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - whitelisted and journaled; restore by re-writing the prior value (default 33).</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-write the previous value via the Writes tab (old value is journaled).</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">set fuelgaugepes &lt;v&gt;</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Set fuel-gauge pessimism (%).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'fuelgaugepes' - 'Fuel gauge pessimism (%)'. SoC display buffer (default 5%); shifts only the DISPLAYED percentage, not actual pack charge. Validator: whole number 0-20. Risk text: 'CAUTION - reducing it removes low-SOC margin on an aged pack.' warn_fn fires for values &lt; 5. Gated Writes-tab path only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Shifts the displayed SoC buffer. Display only - does not change actual charge. Lowering it (below the default 5%) removes low-SOC display safety margin on an aged pack; the write flow warns on values under 5.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - whitelisted and journaled; restore by re-writing the prior value (default 5).</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-write the previous value via the Writes tab (old value is journaled).</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">set chgstby &lt;v&gt;</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Set charge standby time before rebalance (minutes).</p>
+    <p class="what"><span class="lbl">What it does</span>WRITE_WHITELIST 'chgstby' - 'Charge standby time (min)'. How long the BMS sleeps after reaching 100% before waking to rebalance cells (default 1440 = 24 h). Validator: whole number 60-10080. Risk text: 'CAUTION - affects balancing cadence; the default is usually right.' Gated Writes-tab path only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Changes how often the BMS wakes to rebalance cells after a full charge. Affects balancing cadence; the default (1440 min = 24 h) is usually correct, and unusual values change how frequently balancing occurs.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Yes - whitelisted and journaled; restore by re-writing the prior value (default 1440).</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-write the previous value via the Writes tab (old value is journaled).</span></div>
+    </div>
+  </article>
+    </div>
+  </section>
+  <section id="dangerous">
+    <h2 class="pink"><span class="n">04</span> Dangerous / destructive <span class="cnt">55 &middot; type &ldquo;confirm&rdquo; to send</span></h2>
+    <p class="lead">These change state, erase data, defeat safety interlocks, or touch firmware. OpenMBB will <b style="color:var(--pink)">send them</b> &mdash; but only after you have read the consequences below and typed <code style="font-family:var(--mono); color:var(--yellow)">confirm</code>. Pink is destructive/state-changing; <span style="color:var(--red)">red is brick / EEPROM / interlock class</span> and may be unrecoverable. Capture your logs and a full <code>set</code> dump <em>before</em> anything here.</p>
+    <div class="note danger">
+      <span class="k">&#9888; No undo for most of these</span>
+      Cleared logs, wiped EEPROM, reset stats, flashed/bootloader firmware, and defeated interlocks (ABS, BMS, isolation) are largely <b>irreversible</b> from the console. Where recovery exists at all it often needs vendor/dealer tooling. Read every card fully.
+    </div>
+    <div class="grid">
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">dtc_clear</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Clear stored diagnostic trouble codes.</p>
+    <p class="what"><span class="lbl">What it does</span>Clears stored DTCs (BLOCKED_COMMANDS comment: 'clears stored DTCs'). On the hard blocklist - the transport refuses to send it from any path, including the raw box.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Erases the stored fault history the bike (and a technician) would use to diagnose a problem. The clearing itself is a deliberate state change; a real underlying fault will simply re-log if still present, but past evidence is gone.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No - cleared DTCs cannot be un-cleared; the historical fault records are permanently gone.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without a prior log capture. Run errorlogdump/eventlogdump BEFORE any clear to preserve the record; there is no console way to restore cleared codes.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">force_all_storage_mode</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Force all battery modules into storage mode.</p>
+    <p class="what"><span class="lbl">What it does</span>Forces the battery modules into storage mode (BLOCKED_COMMANDS comment: 'forces battery modules into storage mode'). On the hard blocklist - never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Commands the pack toward its storage state of charge / storage behavior, changing pack management state deliberately. Exact firmware-side effects and whether it self-discharges cells are not fully documented in the repo.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown / treat as potentially irreversible - the repo does not document a clean inverse, and any self-discharge toward a storage SOC would not be undone by simply exiting the mode.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented. Best effort would be a normal charge cycle to bring the pack back up, but any state change or discharge caused by storage mode may not be cleanly reversible; treat as unrecoverable without vendor tooling.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">blcmds</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Bootloader command block.</p>
+    <p class="what"><span class="lbl">What it does</span>Bootloader command block (BLOCKED_COMMANDS comment: 'bootloader command block'). Exposes bootloader-level operations. On the hard blocklist - never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Gives access to bootloader commands that can alter or erase firmware / low-level state. Effects are undocumented in the repo and potentially brick-class.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No / unknown - bootloader-level operations can leave firmware in an unbootable state with no console-level undo.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without a firmware reflash via vendor/dealer tooling; potentially requires MBB replacement if the bootloader path corrupts firmware.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">burn</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Bluetooth BMS firmware updater (firmware flashing).</p>
+    <p class="what"><span class="lbl">What it does</span>Bluetooth BMS firmware updater = firmware flashing (BLOCKED_COMMANDS comment: 'bluetooth BMS firmware updater'). On the hard blocklist - never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Initiates a firmware flash of the Bluetooth BMS. An interrupted or wrong flash can brick the target module.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No - flashing overwrites firmware; a failed/partial flash is not undoable from the console.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without a successful re-flash via vendor tooling; a bricked module may need replacement.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">format</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Wipe EEPROM (covers 'format eeprom').</p>
+    <p class="what"><span class="lbl">What it does</span>First token 'format' is hard-blocked; it covers 'format eeprom' which wipes the EEPROM (safety.py header comment). Never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Erases the EEPROM contents - configuration, calibration and identity data stored there are wiped.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No - a format destroys stored data; there is no console undo.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without a full known-good EEPROM image restored via vendor tooling; loss of calibration/identity may require dealer reprogramming.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">erase</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Wipe EEPROM (covers 'erase eeprom').</p>
+    <p class="what"><span class="lbl">What it does</span>First token 'erase' is hard-blocked; it covers 'erase eeprom' which wipes the EEPROM (safety.py header comment). Never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Erases EEPROM contents - stored configuration/calibration/identity is destroyed.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No - an erase destroys stored data with no console undo.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without restoring a known-good EEPROM image via vendor tooling; may require dealer reprogramming.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">eeprom set</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Modify raw EEPROM (any 'eeprom' with arguments).</p>
+    <p class="what"><span class="lbl">What it does</span>'eeprom' WITH arguments (e.g. 'eeprom set') can read or MODIFY raw EEPROM and is refused; only bare 'eeprom' (the read-only usage summary) is allowed (_line_blocked).</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Writes raw bytes into EEPROM, corrupting configuration/calibration/identity if wrong. Direct raw writes bypass all validation.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No - a raw EEPROM write overwrites the prior bytes; there is no console undo and no journal of the old value.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without a known-good EEPROM image restored via vendor tooling.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">settingsrst</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Reset settings to defaults.</p>
+    <p class="what"><span class="lbl">What it does</span>Resets settings (BLOCKED_COMMANDS). On the hard blocklist - never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Reverts all configurable settings to firmware defaults, discarding any custom configuration (sprocket/speedo calibration, ride-mode customization, reserve, etc.).</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - you can re-enter each setting IF you recorded the prior values first; the reset itself provides no undo.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Re-apply each setting by hand from a prior full 'set' dump. Without a saved dump the old values are lost.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">statsrst</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Reset lifetime statistics.</p>
+    <p class="what"><span class="lbl">What it does</span>Resets stats (BLOCKED_COMMANDS). On the hard blocklist - never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Zeroes lifetime statistics (odometer, top speed, all-time max temps).</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No - reset lifetime stats cannot be restored; odometer/history is permanently zeroed.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without a prior 'stats' capture, and even then the values can only be noted, not restored to the bike.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">eventlogclear</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Clear the event log.</p>
+    <p class="what"><span class="lbl">What it does</span>Clears the event log (BLOCKED_COMMANDS). On the hard blocklist - never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Permanently erases the event-log history used for diagnosis.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No - cleared event log entries are gone.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without a prior eventlogdump capture; dump the log before clearing to preserve it.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">errorlogclear</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Clear the error log.</p>
+    <p class="what"><span class="lbl">What it does</span>Clears the error log (BLOCKED_COMMANDS). On the hard blocklist - never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Permanently erases the error-log history.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No - cleared error log entries are gone.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without a prior errorlogdump capture; dump the log before clearing to preserve it.</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">eventlogadd</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Inject a synthetic event-log entry.</p>
+    <p class="what"><span class="lbl">What it does</span>Adds an entry to the event log (BLOCKED_COMMANDS). On the hard blocklist - never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Writes a fabricated/synthetic entry into the event log, polluting the diagnostic record. Not destructive to hardware, but corrupts log integrity.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No - an individual injected entry cannot be selectively removed (only a full log clear would remove it, itself destructive).</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not cleanly recoverable; the only removal is a full eventlogclear, which destroys all other entries too.</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">errorlogadd</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Inject a synthetic error-log entry.</p>
+    <p class="what"><span class="lbl">What it does</span>Adds an entry to the error log (BLOCKED_COMMANDS). On the hard blocklist - never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Writes a fabricated entry into the error log, polluting the diagnostic record.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No - an injected entry cannot be selectively removed without a full errorlogclear (itself destructive).</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not cleanly recoverable; removal requires a full errorlogclear that destroys all other entries too.</span></div>
+    </div>
+  </article>
+  <article class="cmd caution">
+    <div class="cmdhead">
+      <code class="cname">reset</code>
+      <span class="tag caution">CAUTION</span>
+    </div>
+    <p class="one">Reboot / reset the MBB.</p>
+    <p class="what"><span class="lbl">What it does</span>Resets the MBB (BLOCKED_COMMANDS). On the hard blocklist - never sent. Would reboot the controller and lose the logged-in console session/state.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">The MBB reboots mid-session: login level and console state are lost (transport treats a boot banner as a ConsoleRebootError). If sent while riding, a controller reset drops normal operation.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - a reset is a reboot, not a data change, so the bike comes back up; but the current session and any in-progress operation are lost.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Reconnect on the Connect tab and log in again. Never send while the bike is in motion.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">exit_to_bl</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Exit to bootloader.</p>
+    <p class="what"><span class="lbl">What it does</span>Exits to the bootloader (BLOCKED_COMMANDS). On the hard blocklist - never sent.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Drops the MBB out of the application firmware into the bootloader, halting normal operation and exposing firmware-flash operations. If firmware is not cleanly re-entered/flashed the unit can be left non-functional.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No / unknown - leaving the application for the bootloader is not a simple reversible toggle from the console; recovery depends on the bootloader path.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without vendor/dealer tooling to return to or reflash the application firmware; potential brick if the bootloader session is mishandled.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">test</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Console test command (state-changing).</p>
+    <p class="what"><span class="lbl">What it does</span>Blocked test command (BLOCKED_COMMANDS). On the hard blocklist - never sent. The repo treats it as unsafe/state-changing and does not document its exact behavior.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Undocumented test/diagnostic action that may actuate outputs or change state. Because its behavior is not characterized in the repo it must be treated as potentially harmful.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; treat as potentially irreversible.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; treat as unrecoverable without knowing exactly what the specific test routine did.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">wdt</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Watchdog-timer command (state-changing).</p>
+    <p class="what"><span class="lbl">What it does</span>Blocked watchdog command (BLOCKED_COMMANDS). On the hard blocklist - never sent. Repo does not document its exact effect; treated as unsafe.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Manipulating the watchdog timer can cause a reset or leave the safety watchdog in an unexpected state.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; treat as potentially irreversible / could force a reset.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; a resulting reset would require reconnect/login. Treat effect as unrecoverable without knowing the exact action.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">timing</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Timing command (state-changing).</p>
+    <p class="what"><span class="lbl">What it does</span>Blocked timing command (BLOCKED_COMMANDS). On the hard blocklist - never sent. Exact effect not documented in the repo; treated as unsafe.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">May alter timing-related parameters; undocumented and potentially affects drivetrain/controller behavior.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; treat as potentially irreversible.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; treat as unrecoverable without a prior record of any changed values.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">can</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">CAN-bus command (state-changing).</p>
+    <p class="what"><span class="lbl">What it does</span>Blocked CAN command (BLOCKED_COMMANDS). On the hard blocklist - never sent. Exact effect not documented; treated as a write to the CAN subsystem.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Could inject/alter CAN traffic or bus configuration, disturbing communication with the BMS/Sevcon and normal operation.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; treat as potentially irreversible for any configuration it changes.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; a bus disturbance may clear on reset, but any changed configuration may not. Treat as unrecoverable without knowing the exact action.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">charger</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Charger control command (state-changing).</p>
+    <p class="what"><span class="lbl">What it does</span>Blocked charger command (BLOCKED_COMMANDS - note this is singular 'charger', distinct from the read 'chargers'). On the hard blocklist - never sent. Exact effect not documented; treated as a write to charging.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">May command or alter charger behavior. Mismanaging charging is a battery-safety concern; undocumented in the repo.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; treat as potentially irreversible for anything it changes and potentially hazardous.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; treat as unrecoverable without vendor guidance. Use the read-only 'chargers' command for status instead.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">sevcon preop</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Put the Sevcon controller into pre-operational mode (a write).</p>
+    <p class="what"><span class="lbl">What it does</span>'sevcon preop' toggles the controller pre-op mode - a write - and is blocked (_line_blocked). Bare 'sevcon' remains a read.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Takes the motor controller out of its normal operational state into pre-op, disabling normal drive/CAN participation until restored. Doing this on a live bike disrupts drivetrain operation.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - pre-op is a mode, not a data wipe, but returning to operational state is a controller state transition the console does not sanction here; exact re-entry is not documented.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented from this tool; typically requires the controller/bike to be power-cycled or re-initialized to return to operational mode. Do not use while riding.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">bluetooth &lt;args&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Modify the Bluetooth module (any 'bluetooth' with arguments).</p>
+    <p class="what"><span class="lbl">What it does</span>'bluetooth' with arguments can modify the BT module and is blocked (_line_blocked).</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Changes Bluetooth module configuration/state; wrong values could disrupt BT connectivity or module behavior.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; depends on what the argument changed. Treat as potentially irreversible.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; treat as unrecoverable without knowing the prior module configuration.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">ov_* (override family)</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Safety-interlock OVERRIDES - any command starting with ov_.</p>
+    <p class="what"><span class="lbl">What it does</span>BLOCKED_PREFIXES = ('ov_',): any token beginning with 'ov_' is a safety-interlock override and is never sent (also blocked as a 'set' name). _line_blocked: 'a safety-interlock override (ov_*) - never sent.'</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Disables or forces a safety interlock (the very guards - isolation, BMS, kill, etc. - that protect the pack and rider). Overriding an interlock can allow operation in an unsafe condition (e.g. isolation fault, BMS bypass).</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No / unknown - an override defeats a protection; even if the override flag is cleared, any damage or unsafe operation it permitted is not undone, and the repo does not document safe re-enable.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable in the sense of undoing consequences; the only safe posture is to never send these. Restoring the interlock requires knowing the exact override state and is undocumented here.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">set abs_disable &lt;v&gt;</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Write that disables ABS - blocked safety interlock.</p>
+    <p class="what"><span class="lbl">What it does</span>'abs_disable' is in BLOCKED_SETTINGS: 'set abs_disable ...' is refused as a protected safety interlock. Would disable the anti-lock braking interlock.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Disabling ABS removes a braking safety system; a rider could lose braking stability. This is a direct safety-critical change.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - the flag could in principle be set back, but the repo blocks it and does not sanction/verify the write, so a safe restore is not guaranteed; any crash consequence is irreversible.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not supported by this tool; restoring ABS behavior would require re-enabling the interlock through sanctioned means. Do not attempt.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">set bypass_bms &lt;v&gt;</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Write that bypasses the BMS - blocked safety interlock.</p>
+    <p class="what"><span class="lbl">What it does</span>'bypass_bms' is in BLOCKED_SETTINGS: refused. Would bypass the Battery Management System protections.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Bypassing the BMS removes cell-level protection (over-voltage, over-current, isolation, thermal). This risks battery damage, fire, or unsafe operation.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No - even if the flag is later cleared, any cell damage/thermal event caused while bypassed is permanent.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable if the pack was harmed; never send. Restoring protection requires the interlock re-enabled through sanctioned means.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">set ignore_iso_err &lt;v&gt;</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Write that ignores isolation faults - blocked safety interlock.</p>
+    <p class="what"><span class="lbl">What it does</span>'ignore_iso_err' is in BLOCKED_SETTINGS: refused. Would make the system ignore isolation (HV-to-chassis) errors.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Ignoring an isolation fault means the bike keeps operating with a high-voltage isolation breach - a serious shock/safety hazard.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially for the flag, but any shock/damage from operating with a real isolation fault is irreversible.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not supported by this tool; the interlock must remain enabled. Never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">set inhibit_iso &lt;v&gt;</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Write that inhibits isolation monitoring - blocked safety interlock.</p>
+    <p class="what"><span class="lbl">What it does</span>'inhibit_iso' is in BLOCKED_SETTINGS: refused. Would inhibit the isolation-monitoring interlock.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Disables/inhibits isolation monitoring, so a high-voltage isolation fault would go undetected - shock/safety hazard.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially for the flag; consequences of undetected faults are not.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not supported by this tool; keep isolation monitoring enabled. Never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set kill &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write to the kill-switch interlock - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'kill' is in BLOCKED_SETTINGS: refused. Relates to the kill-switch interlock state.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Altering the kill interlock could disable the kill switch's protective function or otherwise change a safety-relevant input's behavior.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; treat as potentially irreversible for the interlock state.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; never send. Restoring correct kill-switch behavior would require the interlock reset through sanctioned means.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set test_mode &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Enable test mode - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'test_mode' is in BLOCKED_SETTINGS: refused. Would put the bike/firmware into a test mode.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Test mode can change normal safety/operational behavior in undocumented ways.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; treat as potentially irreversible.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd catastrophic">
+    <div class="cmdhead">
+      <code class="cname">set safe_ov_sw &lt;v&gt;</code>
+      <span class="tag catastrophic">CATASTROPHIC</span>
+    </div>
+    <p class="one">Write to the safety-override switch - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'safe_ov_sw' is in BLOCKED_SETTINGS: refused. A safety-override switch setting (related to the ov_* override family).</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Enables a safety override path, defeating protective interlocks (see ov_* family).</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">No / unknown - defeating a safety switch has consequences that may not be undoable.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable; never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set req_loopback &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write to CAN loopback request - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'req_loopback' is in BLOCKED_SETTINGS: refused. Requests a CAN loopback/diagnostic state.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Puts CAN into a loopback/diagnostic mode, disrupting normal bus communication with BMS/Sevcon.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; a loopback mode may clear on reset but is not sanctioned here.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; never send. A reset may clear the mode but any disturbance during it is not journaled.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set bridge_can &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write to CAN bridge enable - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'bridge_can' is in BLOCKED_SETTINGS: refused. Controls a CAN bridge.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Enabling/disabling the CAN bridge changes how bus segments interconnect, potentially disrupting BMS/Sevcon communication.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; treat as potentially irreversible for bus configuration.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set bike_can_en &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write to bike CAN enable - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'bike_can_en' is in BLOCKED_SETTINGS: refused. Enables/disables the bike CAN bus.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Disabling the bike CAN bus severs communication among modules, breaking normal operation.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; treat as potentially irreversible for the affected configuration.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set sevcon_can_en &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write to Sevcon CAN enable - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'sevcon_can_en' is in BLOCKED_SETTINGS: refused. Enables/disables the Sevcon controller CAN link.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Disabling the Sevcon CAN link cuts controller communication, breaking drivetrain operation.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; treat as potentially irreversible for the affected configuration.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set model &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Overwrite the bike model identity - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'model' is in BLOCKED_SETTINGS (install-time identity): refused. Would change the stored bike model.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Corrupts install-time identity. Wrong model can change how firmware interprets model-dependent parameters and misidentify the bike.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the exact original value was recorded first; the write itself is not journaled/undone by this tool.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value; capture a full 'set' dump before ever touching identity. Never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set model_year &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Overwrite the model-year identity - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'model_year' is in BLOCKED_SETTINGS (install-time identity): refused.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Corrupts install-time identity; can affect model-year-dependent behavior and misidentify the bike.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded first.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value; capture a 'set' dump first. Never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set vin &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Overwrite the VIN - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'vin' is in BLOCKED_SETTINGS (install-time identity): refused. VIN is display-only in OpenMBB and never written.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Overwrites the vehicle identification number - a legal/identity record. A wrong or blank VIN misidentifies the vehicle.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the exact original VIN was recorded first; otherwise the original is lost.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original VIN captured beforehand. Never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set serial &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Overwrite the unit serial number - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'serial' is in BLOCKED_SETTINGS (install-time identity): refused.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Overwrites the stored serial/identity value; a wrong value misidentifies the unit.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original serial was recorded first.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value captured beforehand. Never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set motstage1 &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write the motor temp warning threshold - blocked thermal guard.</p>
+    <p class="what"><span class="lbl">What it does</span>'motstage1' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Motor temp warning threshold (100 C)'). Writing is refused; it is displayed for reference only.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Raising a thermal warning threshold suppresses early overheat warning; wrong values undermine motor thermal protection.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded; not journaled/undone by this tool (it is display-only here).</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. This value is display-only in OpenMBB; do not attempt to write.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set motstage2 &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write the motor temp cutback/shutdown threshold - blocked thermal guard.</p>
+    <p class="what"><span class="lbl">What it does</span>'motstage2' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Motor temp cutback/shutdown threshold (145 C)'). Writing refused.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Changing the cutback/shutdown threshold can let the motor run past safe temperature, risking motor damage.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded; not journaled/undone here.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Display-only in OpenMBB; do not write.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set ctrlstage1 &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write the controller temp warning threshold - blocked thermal guard.</p>
+    <p class="what"><span class="lbl">What it does</span>'ctrlstage1' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Controller temp warning threshold'). Writing refused.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Suppresses early controller-overheat warning; undermines controller thermal protection.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded; not journaled/undone here.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Display-only in OpenMBB; do not write.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set ctrlstage2 &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write the controller temp cutback threshold - blocked thermal guard.</p>
+    <p class="what"><span class="lbl">What it does</span>'ctrlstage2' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Controller temp cutback threshold'). Writing refused.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Changing the controller cutback threshold can let the controller run past safe temperature, risking controller damage.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded; not journaled/undone here.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Display-only in OpenMBB; do not write.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set sevmaxdischgcur &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write the Sevcon max battery discharge amps - blocked guard.</p>
+    <p class="what"><span class="lbl">What it does</span>'sevmaxdischgcur' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Sevcon max battery discharge amps'). Writing refused.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Raising the max discharge current can push the pack beyond safe current limits (over-current), risking cell/pack damage or thermal events.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded; not journaled/undone here.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Display-only in OpenMBB; do not write.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set sevnoregspeed &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write the regen-above-speed guard - blocked regen guard.</p>
+    <p class="what"><span class="lbl">What it does</span>'sevnoregspeed' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Blocks regen above ~70 mph (over-current / over-charge guard)'). Writing refused.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Weakening this guard allows regen at high speed, an over-current / over-charge condition the guard exists to prevent.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded; not journaled/undone here.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Display-only in OpenMBB; do not write.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set sevmaxregv &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write the cell-voltage regen cutoff - blocked regen guard.</p>
+    <p class="what"><span class="lbl">What it does</span>'sevmaxregv' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Cell-voltage regen cutoff (4160 mV = overcharge guard)'). Writing refused.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Raising the regen voltage cutoff lets regen push cells past the overcharge limit, risking cell damage.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded; not journaled/undone here.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Display-only in OpenMBB; do not write.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set sevnoregfull &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write the regen-at-full-SoC guard - blocked regen guard.</p>
+    <p class="what"><span class="lbl">What it does</span>'sevnoregfull' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Blocks regen at 100% SoC'). Writing refused.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Disabling this guard allows regen into an already-full pack, an overcharge condition.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded; not journaled/undone here.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Display-only in OpenMBB; do not write.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set ctrlstage* / motstage* family</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">All thermal-guard thresholds are blocked writes (display-only).</p>
+    <p class="what"><span class="lbl">What it does</span>The thermal guards motstage1/motstage2/ctrlstage1/ctrlstage2 are all in BLOCKED_SETTINGS and READONLY_GUARDS - they are DISPLAYED read-only in the Writes tab and can never be written via 'set'. (Individual entries above cover each.)</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Any change to a thermal threshold undermines overheat protection for the motor or controller.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if originals were recorded; the tool does not write or journal these.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without recorded originals; these are display-only in OpenMBB by design.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set motstage1/2 &amp; ctrlstage1/2 (thermal group note)</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Grouped note: thermal thresholds are read-only guards, not writable.</p>
+    <p class="what"><span class="lbl">What it does</span>Reiterates that the thermal threshold group is blocked from writing and only surfaced read-only via READONLY_GUARDS; use the individual entries for specifics.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Writing any would degrade thermal protection.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - depends on recorded originals.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without recorded originals; display-only by design.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set prewait &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write precharge wait time - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'prewait' is in BLOCKED_SETTINGS: refused. A precharge/contactor sequencing parameter.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Wrong precharge timing can stress the contactor/precharge circuit (inrush current), risking hardware damage on contactor close.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded first.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set prechg &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write precharge parameter - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'prechg' is in BLOCKED_SETTINGS: refused. A precharge parameter.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Incorrect precharge configuration can stress the contactor/precharge circuit with inrush current, risking hardware damage.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded first.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set pretimeout &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write precharge timeout - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'pretimeout' is in BLOCKED_SETTINGS: refused. Precharge timeout parameter.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">A wrong precharge timeout can allow contactor close before precharge completes (inrush) or block startup, risking hardware or leaving the bike inoperable.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded first.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set moddiff &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write allowed module voltage-difference limit - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'moddiff' is in BLOCKED_SETTINGS: refused. Relates to allowed battery-module differences.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Loosening the module-difference limit can allow paralleling modules with unsafe voltage mismatch (large balancing currents), risking pack damage.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded first.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set manmod &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write manual-module control - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'manmod' is in BLOCKED_SETTINGS: refused. A manual module-control parameter.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Manual override of module behavior can force unsafe module states (contactor/paralleling logic).</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Unknown - undocumented; treat as potentially irreversible.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not documented; never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set allowdiffmods &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write allow-mismatched-modules flag - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'allowdiffmods' is in BLOCKED_SETTINGS: refused. Allows differing/mismatched modules.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Permitting mismatched modules can allow unsafe voltage/capacity mismatch between paralleled modules, risking large balancing currents and pack damage.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original value was recorded first.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value. Never send.</span></div>
+    </div>
+  </article>
+  <article class="cmd dangerous">
+    <div class="cmdhead">
+      <code class="cname">set rcoscadjust &lt;v&gt;</code>
+      <span class="tag dangerous">DANGEROUS</span>
+    </div>
+    <p class="one">Write RC oscillator adjustment - blocked.</p>
+    <p class="what"><span class="lbl">What it does</span>'rcoscadjust' is in BLOCKED_SETTINGS: refused. An RC-oscillator (clock) calibration parameter.</p>
+    <div class="detail">
+      <div class="dr happen"><span class="drk">&#9888; What could happen</span><span class="drv">Mis-adjusting the internal oscillator calibration can throw off timing across the firmware, causing malfunction.</span></div>
+      <div class="dr rev"><span class="drk">Reversible?</span><span class="drv">Partially - only if the original calibration value was recorded first.</span></div>
+      <div class="dr recov"><span class="drk">How to recover</span><span class="drv">Not recoverable without the original value; oscillator cal is factory-set. Never send.</span></div>
+    </div>
+  </article>
+    </div>
+  </section>
+  <footer>
+    <div><b>OpenMBB</b> &middot; Command reference for the Gen2 MBB serial console &middot; verified against 2017 Zero FXS, MBB rev 41</div>
+    <p class="disc">Personal diagnostic tool for <b>your own</b> vehicle. Not affiliated with Zero Motorcycles. Every command here is presented exactly as documented &mdash; nothing added, nothing changed. Destructive commands are sendable but require a typed <code style="color:var(--yellow)">confirm</code> after you read what they do. Changing settings may affect your warranty; you are responsible for what you write. Reads are the point &mdash; when in doubt, don&#39;t write.</p>
+  </footer>
+</div>
+</body>
+</html>

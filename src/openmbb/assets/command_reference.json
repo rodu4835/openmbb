@@ -1,0 +1,801 @@
+[
+  {
+    "name": "version",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show firmware and board revision.",
+    "what_it_does": "Prints the MBB firmware + board revision banner (READ_TIPS: 'Firmware + board revision.'). Rev-41 version reply also ends with a 'Reset Source:' line reporting the last reset cause; that is normal, not a reboot."
+  },
+  {
+    "name": "help",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show the console's own command menu.",
+    "what_it_does": "Prints the console's built-in command menu (READ_TIPS: 'The console's own command menu.'). Verified live: logged in, 'help' shows the real menu; the menu differs by login level (003_help.txt pre-login / 019_help.txt post-login)."
+  },
+  {
+    "name": "status",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show current bike status.",
+    "what_it_does": "Overall bike status right now: mode, temps, SOC, faults (READ_TIPS)."
+  },
+  {
+    "name": "stats",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show lifetime statistics.",
+    "what_it_does": "Lifetime statistics: odometer, top speed, all-time max temps (READ_TIPS)."
+  },
+  {
+    "name": "runtime",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show total run and charge time.",
+    "what_it_does": "Total run time and total charge time (READ_TIPS)."
+  },
+  {
+    "name": "bms",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show battery pack data.",
+    "what_it_does": "Battery pack: cell voltages, balance, capacity, isolation, cycles (READ_TIPS)."
+  },
+  {
+    "name": "sevcon",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show motor controller (Sevcon) data.",
+    "what_it_does": "Motor controller (Sevcon) data (READ_TIPS). Bare 'sevcon' is a read; 'sevcon preop' is separately blocked as a write."
+  },
+  {
+    "name": "chargers",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show onboard charger status.",
+    "what_it_does": "Onboard charger port status (READ_TIPS)."
+  },
+  {
+    "name": "inputs",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show raw sensor inputs.",
+    "what_it_does": "Raw sensor inputs: rail voltages, kill switch, kickstand, etc. (READ_TIPS)."
+  },
+  {
+    "name": "outputs",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show output states.",
+    "what_it_does": "Output states: DC/DC, warning light, contactor enable, etc. (READ_TIPS). Read-only reporting of output state; does not toggle outputs."
+  },
+  {
+    "name": "dash",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show instrument-cluster data.",
+    "what_it_does": "Instrument-cluster data: clock, odometer, CAN age (READ_TIPS)."
+  },
+  {
+    "name": "obd",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show OBD summary (protocol, DTCs).",
+    "what_it_does": "OBD summary: protocol, DTCs (READ_TIPS: 'Show all obd info'). Menu-verified at both login levels but its live OUTPUT has not been captured yet, so the full baseline runs it LAST; an empty reply is treated as possibly command-specific, not necessarily a sleeping console. It is a read only."
+  },
+  {
+    "name": "eeprom",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Show EEPROM usage summary (bare form only).",
+    "what_it_does": "Bare 'eeprom' with no arguments is a READ on rev 41 - 'Show EEPROM usage' (a usage summary). Only the bare form is permitted; 'eeprom' WITH arguments is refused because it can read/modify raw EEPROM (see 'eeprom set' / 'format eeprom' entries)."
+  },
+  {
+    "name": "errorlogdump",
+    "category": "read",
+    "danger": "safe",
+    "one_liner": "Dump the small error log (~1 KB, safe).",
+    "what_it_does": "Reads the error log (READ_TIPS: 'The small error log (~1 KB, safe).'). This is the only dump-class command safe to auto-run in the full baseline. Note: 'dumplogs' does NOT exist on rev 41 (bike replies 'invalid command'); errorlogdump is the real small-log read."
+  },
+  {
+    "name": "eventlogdump",
+    "category": "heavy-read",
+    "danger": "caution",
+    "one_liner": "Dump the full event log (~1 MB, minutes) - can briefly open the contactor.",
+    "what_it_does": "Reads the entire event log (~8600 entries / ~1 MB). At 38400 baud it streams for MINUTES and monopolizes the MBB long enough that it stops servicing the Sevcon/CAN bus. READ_TIPS: 'can briefly OPEN the drivetrain contactor. Park the bike first.' It is a read - it does not modify anything - and is never auto-run; the GUI gates it behind an explicit confirm dialog.",
+    "what_could_happen": "The BMS protectively OPENS the drivetrain contactor while the console is monopolized (observed live: audible click + flashing dash). If the bike were moving, the drivetrain would drop out. It also ties up the console for minutes.",
+    "reversible": "Yes - no data is changed; the contactor re-closes on its own once the read finishes. It is a read-only side effect, not a persistent state change.",
+    "recovery": "Wait for the dump to complete; the bike re-closes the contactor automatically and the dash returns to normal. Park the bike before running so a mid-ride contactor open is not a hazard."
+  },
+  {
+    "name": "dumpall",
+    "category": "heavy-read",
+    "danger": "caution",
+    "one_liner": "Dump everything incl. logs (~1 MB, minutes) - same contactor caveat.",
+    "what_it_does": "Dumps everything including the event logs (READ_TIPS: 'Everything incl. logs (~1 MB, minutes) - same contactor caveat.'). Because it includes the full event log it carries the same heavy/monopolize-the-console behavior as eventlogdump. Read-only content, never auto-run, GUI-gated behind a confirm dialog.",
+    "what_could_happen": "Same as eventlogdump: while the console is monopolized for minutes the BMS can protectively OPEN the drivetrain contactor (audible click + flashing dash).",
+    "reversible": "Yes - it reads data only; the contactor re-closes itself once the dump finishes. No persistent change.",
+    "recovery": "Let the dump finish; the bike re-closes the contactor automatically. Park the bike first."
+  },
+  {
+    "name": "dtc_clear",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Clear stored diagnostic trouble codes.",
+    "what_it_does": "Clears stored DTCs (BLOCKED_COMMANDS comment: 'clears stored DTCs'). On the hard blocklist - the transport refuses to send it from any path, including the raw box.",
+    "what_could_happen": "Erases the stored fault history the bike (and a technician) would use to diagnose a problem. The clearing itself is a deliberate state change; a real underlying fault will simply re-log if still present, but past evidence is gone.",
+    "reversible": "No - cleared DTCs cannot be un-cleared; the historical fault records are permanently gone.",
+    "recovery": "Not recoverable without a prior log capture. Run errorlogdump/eventlogdump BEFORE any clear to preserve the record; there is no console way to restore cleared codes."
+  },
+  {
+    "name": "force_all_storage_mode",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Force all battery modules into storage mode.",
+    "what_it_does": "Forces the battery modules into storage mode (BLOCKED_COMMANDS comment: 'forces battery modules into storage mode'). On the hard blocklist - never sent.",
+    "what_could_happen": "Commands the pack toward its storage state of charge / storage behavior, changing pack management state deliberately. Exact firmware-side effects and whether it self-discharges cells are not fully documented in the repo.",
+    "reversible": "Unknown / treat as potentially irreversible - the repo does not document a clean inverse, and any self-discharge toward a storage SOC would not be undone by simply exiting the mode.",
+    "recovery": "Not documented. Best effort would be a normal charge cycle to bring the pack back up, but any state change or discharge caused by storage mode may not be cleanly reversible; treat as unrecoverable without vendor tooling."
+  },
+  {
+    "name": "blcmds",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Bootloader command block.",
+    "what_it_does": "Bootloader command block (BLOCKED_COMMANDS comment: 'bootloader command block'). Exposes bootloader-level operations. On the hard blocklist - never sent.",
+    "what_could_happen": "Gives access to bootloader commands that can alter or erase firmware / low-level state. Effects are undocumented in the repo and potentially brick-class.",
+    "reversible": "No / unknown - bootloader-level operations can leave firmware in an unbootable state with no console-level undo.",
+    "recovery": "Not recoverable without a firmware reflash via vendor/dealer tooling; potentially requires MBB replacement if the bootloader path corrupts firmware."
+  },
+  {
+    "name": "burn",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Bluetooth BMS firmware updater (firmware flashing).",
+    "what_it_does": "Bluetooth BMS firmware updater = firmware flashing (BLOCKED_COMMANDS comment: 'bluetooth BMS firmware updater'). On the hard blocklist - never sent.",
+    "what_could_happen": "Initiates a firmware flash of the Bluetooth BMS. An interrupted or wrong flash can brick the target module.",
+    "reversible": "No - flashing overwrites firmware; a failed/partial flash is not undoable from the console.",
+    "recovery": "Not recoverable without a successful re-flash via vendor tooling; a bricked module may need replacement."
+  },
+  {
+    "name": "format",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Wipe EEPROM (covers 'format eeprom').",
+    "what_it_does": "First token 'format' is hard-blocked; it covers 'format eeprom' which wipes the EEPROM (safety.py header comment). Never sent.",
+    "what_could_happen": "Erases the EEPROM contents - configuration, calibration and identity data stored there are wiped.",
+    "reversible": "No - a format destroys stored data; there is no console undo.",
+    "recovery": "Not recoverable without a full known-good EEPROM image restored via vendor tooling; loss of calibration/identity may require dealer reprogramming."
+  },
+  {
+    "name": "erase",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Wipe EEPROM (covers 'erase eeprom').",
+    "what_it_does": "First token 'erase' is hard-blocked; it covers 'erase eeprom' which wipes the EEPROM (safety.py header comment). Never sent.",
+    "what_could_happen": "Erases EEPROM contents - stored configuration/calibration/identity is destroyed.",
+    "reversible": "No - an erase destroys stored data with no console undo.",
+    "recovery": "Not recoverable without restoring a known-good EEPROM image via vendor tooling; may require dealer reprogramming."
+  },
+  {
+    "name": "eeprom set",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Modify raw EEPROM (any 'eeprom' with arguments).",
+    "what_it_does": "'eeprom' WITH arguments (e.g. 'eeprom set') can read or MODIFY raw EEPROM and is refused; only bare 'eeprom' (the read-only usage summary) is allowed (_line_blocked).",
+    "what_could_happen": "Writes raw bytes into EEPROM, corrupting configuration/calibration/identity if wrong. Direct raw writes bypass all validation.",
+    "reversible": "No - a raw EEPROM write overwrites the prior bytes; there is no console undo and no journal of the old value.",
+    "recovery": "Not recoverable without a known-good EEPROM image restored via vendor tooling."
+  },
+  {
+    "name": "settingsrst",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Reset settings to defaults.",
+    "what_it_does": "Resets settings (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_could_happen": "Reverts all configurable settings to firmware defaults, discarding any custom configuration (sprocket/speedo calibration, ride-mode customization, reserve, etc.).",
+    "reversible": "Partially - you can re-enter each setting IF you recorded the prior values first; the reset itself provides no undo.",
+    "recovery": "Re-apply each setting by hand from a prior full 'set' dump. Without a saved dump the old values are lost."
+  },
+  {
+    "name": "statsrst",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Reset lifetime statistics.",
+    "what_it_does": "Resets stats (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_could_happen": "Zeroes lifetime statistics (odometer, top speed, all-time max temps).",
+    "reversible": "No - reset lifetime stats cannot be restored; odometer/history is permanently zeroed.",
+    "recovery": "Not recoverable without a prior 'stats' capture, and even then the values can only be noted, not restored to the bike."
+  },
+  {
+    "name": "eventlogclear",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Clear the event log.",
+    "what_it_does": "Clears the event log (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_could_happen": "Permanently erases the event-log history used for diagnosis.",
+    "reversible": "No - cleared event log entries are gone.",
+    "recovery": "Not recoverable without a prior eventlogdump capture; dump the log before clearing to preserve it."
+  },
+  {
+    "name": "errorlogclear",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Clear the error log.",
+    "what_it_does": "Clears the error log (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_could_happen": "Permanently erases the error-log history.",
+    "reversible": "No - cleared error log entries are gone.",
+    "recovery": "Not recoverable without a prior errorlogdump capture; dump the log before clearing to preserve it."
+  },
+  {
+    "name": "eventlogadd",
+    "category": "dangerous",
+    "danger": "caution",
+    "one_liner": "Inject a synthetic event-log entry.",
+    "what_it_does": "Adds an entry to the event log (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_could_happen": "Writes a fabricated/synthetic entry into the event log, polluting the diagnostic record. Not destructive to hardware, but corrupts log integrity.",
+    "reversible": "No - an individual injected entry cannot be selectively removed (only a full log clear would remove it, itself destructive).",
+    "recovery": "Not cleanly recoverable; the only removal is a full eventlogclear, which destroys all other entries too."
+  },
+  {
+    "name": "errorlogadd",
+    "category": "dangerous",
+    "danger": "caution",
+    "one_liner": "Inject a synthetic error-log entry.",
+    "what_it_does": "Adds an entry to the error log (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_could_happen": "Writes a fabricated entry into the error log, polluting the diagnostic record.",
+    "reversible": "No - an injected entry cannot be selectively removed without a full errorlogclear (itself destructive).",
+    "recovery": "Not cleanly recoverable; removal requires a full errorlogclear that destroys all other entries too."
+  },
+  {
+    "name": "reset",
+    "category": "dangerous",
+    "danger": "caution",
+    "one_liner": "Reboot / reset the MBB.",
+    "what_it_does": "Resets the MBB (BLOCKED_COMMANDS). On the hard blocklist - never sent. Would reboot the controller and lose the logged-in console session/state.",
+    "what_could_happen": "The MBB reboots mid-session: login level and console state are lost (transport treats a boot banner as a ConsoleRebootError). If sent while riding, a controller reset drops normal operation.",
+    "reversible": "Partially - a reset is a reboot, not a data change, so the bike comes back up; but the current session and any in-progress operation are lost.",
+    "recovery": "Reconnect on the Connect tab and log in again. Never send while the bike is in motion."
+  },
+  {
+    "name": "exit_to_bl",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Exit to bootloader.",
+    "what_it_does": "Exits to the bootloader (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_could_happen": "Drops the MBB out of the application firmware into the bootloader, halting normal operation and exposing firmware-flash operations. If firmware is not cleanly re-entered/flashed the unit can be left non-functional.",
+    "reversible": "No / unknown - leaving the application for the bootloader is not a simple reversible toggle from the console; recovery depends on the bootloader path.",
+    "recovery": "Not recoverable without vendor/dealer tooling to return to or reflash the application firmware; potential brick if the bootloader session is mishandled."
+  },
+  {
+    "name": "test",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Console test command (state-changing).",
+    "what_it_does": "Blocked test command (BLOCKED_COMMANDS). On the hard blocklist - never sent. The repo treats it as unsafe/state-changing and does not document its exact behavior.",
+    "what_could_happen": "Undocumented test/diagnostic action that may actuate outputs or change state. Because its behavior is not characterized in the repo it must be treated as potentially harmful.",
+    "reversible": "Unknown - undocumented; treat as potentially irreversible.",
+    "recovery": "Not documented; treat as unrecoverable without knowing exactly what the specific test routine did."
+  },
+  {
+    "name": "wdt",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Watchdog-timer command (state-changing).",
+    "what_it_does": "Blocked watchdog command (BLOCKED_COMMANDS). On the hard blocklist - never sent. Repo does not document its exact effect; treated as unsafe.",
+    "what_could_happen": "Manipulating the watchdog timer can cause a reset or leave the safety watchdog in an unexpected state.",
+    "reversible": "Unknown - undocumented; treat as potentially irreversible / could force a reset.",
+    "recovery": "Not documented; a resulting reset would require reconnect/login. Treat effect as unrecoverable without knowing the exact action."
+  },
+  {
+    "name": "timing",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Timing command (state-changing).",
+    "what_it_does": "Blocked timing command (BLOCKED_COMMANDS). On the hard blocklist - never sent. Exact effect not documented in the repo; treated as unsafe.",
+    "what_could_happen": "May alter timing-related parameters; undocumented and potentially affects drivetrain/controller behavior.",
+    "reversible": "Unknown - undocumented; treat as potentially irreversible.",
+    "recovery": "Not documented; treat as unrecoverable without a prior record of any changed values."
+  },
+  {
+    "name": "can",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "CAN-bus command (state-changing).",
+    "what_it_does": "Blocked CAN command (BLOCKED_COMMANDS). On the hard blocklist - never sent. Exact effect not documented; treated as a write to the CAN subsystem.",
+    "what_could_happen": "Could inject/alter CAN traffic or bus configuration, disturbing communication with the BMS/Sevcon and normal operation.",
+    "reversible": "Unknown - undocumented; treat as potentially irreversible for any configuration it changes.",
+    "recovery": "Not documented; a bus disturbance may clear on reset, but any changed configuration may not. Treat as unrecoverable without knowing the exact action."
+  },
+  {
+    "name": "charger",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Charger control command (state-changing).",
+    "what_it_does": "Blocked charger command (BLOCKED_COMMANDS - note this is singular 'charger', distinct from the read 'chargers'). On the hard blocklist - never sent. Exact effect not documented; treated as a write to charging.",
+    "what_could_happen": "May command or alter charger behavior. Mismanaging charging is a battery-safety concern; undocumented in the repo.",
+    "reversible": "Unknown - undocumented; treat as potentially irreversible for anything it changes and potentially hazardous.",
+    "recovery": "Not documented; treat as unrecoverable without vendor guidance. Use the read-only 'chargers' command for status instead."
+  },
+  {
+    "name": "sevcon preop",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Put the Sevcon controller into pre-operational mode (a write).",
+    "what_it_does": "'sevcon preop' toggles the controller pre-op mode - a write - and is blocked (_line_blocked). Bare 'sevcon' remains a read.",
+    "what_could_happen": "Takes the motor controller out of its normal operational state into pre-op, disabling normal drive/CAN participation until restored. Doing this on a live bike disrupts drivetrain operation.",
+    "reversible": "Partially - pre-op is a mode, not a data wipe, but returning to operational state is a controller state transition the console does not sanction here; exact re-entry is not documented.",
+    "recovery": "Not documented from this tool; typically requires the controller/bike to be power-cycled or re-initialized to return to operational mode. Do not use while riding."
+  },
+  {
+    "name": "bluetooth <args>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Modify the Bluetooth module (any 'bluetooth' with arguments).",
+    "what_it_does": "'bluetooth' with arguments can modify the BT module and is blocked (_line_blocked).",
+    "what_could_happen": "Changes Bluetooth module configuration/state; wrong values could disrupt BT connectivity or module behavior.",
+    "reversible": "Unknown - undocumented; depends on what the argument changed. Treat as potentially irreversible.",
+    "recovery": "Not documented; treat as unrecoverable without knowing the prior module configuration."
+  },
+  {
+    "name": "ov_* (override family)",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Safety-interlock OVERRIDES - any command starting with ov_.",
+    "what_it_does": "BLOCKED_PREFIXES = ('ov_',): any token beginning with 'ov_' is a safety-interlock override and is never sent (also blocked as a 'set' name). _line_blocked: 'a safety-interlock override (ov_*) - never sent.'",
+    "what_could_happen": "Disables or forces a safety interlock (the very guards - isolation, BMS, kill, etc. - that protect the pack and rider). Overriding an interlock can allow operation in an unsafe condition (e.g. isolation fault, BMS bypass).",
+    "reversible": "No / unknown - an override defeats a protection; even if the override flag is cleared, any damage or unsafe operation it permitted is not undone, and the repo does not document safe re-enable.",
+    "recovery": "Not recoverable in the sense of undoing consequences; the only safe posture is to never send these. Restoring the interlock requires knowing the exact override state and is undocumented here."
+  },
+  {
+    "name": "set abs_disable <v>",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Write that disables ABS - blocked safety interlock.",
+    "what_it_does": "'abs_disable' is in BLOCKED_SETTINGS: 'set abs_disable ...' is refused as a protected safety interlock. Would disable the anti-lock braking interlock.",
+    "what_could_happen": "Disabling ABS removes a braking safety system; a rider could lose braking stability. This is a direct safety-critical change.",
+    "reversible": "Partially - the flag could in principle be set back, but the repo blocks it and does not sanction/verify the write, so a safe restore is not guaranteed; any crash consequence is irreversible.",
+    "recovery": "Not supported by this tool; restoring ABS behavior would require re-enabling the interlock through sanctioned means. Do not attempt."
+  },
+  {
+    "name": "set bypass_bms <v>",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Write that bypasses the BMS - blocked safety interlock.",
+    "what_it_does": "'bypass_bms' is in BLOCKED_SETTINGS: refused. Would bypass the Battery Management System protections.",
+    "what_could_happen": "Bypassing the BMS removes cell-level protection (over-voltage, over-current, isolation, thermal). This risks battery damage, fire, or unsafe operation.",
+    "reversible": "No - even if the flag is later cleared, any cell damage/thermal event caused while bypassed is permanent.",
+    "recovery": "Not recoverable if the pack was harmed; never send. Restoring protection requires the interlock re-enabled through sanctioned means."
+  },
+  {
+    "name": "set ignore_iso_err <v>",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Write that ignores isolation faults - blocked safety interlock.",
+    "what_it_does": "'ignore_iso_err' is in BLOCKED_SETTINGS: refused. Would make the system ignore isolation (HV-to-chassis) errors.",
+    "what_could_happen": "Ignoring an isolation fault means the bike keeps operating with a high-voltage isolation breach - a serious shock/safety hazard.",
+    "reversible": "Partially for the flag, but any shock/damage from operating with a real isolation fault is irreversible.",
+    "recovery": "Not supported by this tool; the interlock must remain enabled. Never send."
+  },
+  {
+    "name": "set inhibit_iso <v>",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Write that inhibits isolation monitoring - blocked safety interlock.",
+    "what_it_does": "'inhibit_iso' is in BLOCKED_SETTINGS: refused. Would inhibit the isolation-monitoring interlock.",
+    "what_could_happen": "Disables/inhibits isolation monitoring, so a high-voltage isolation fault would go undetected - shock/safety hazard.",
+    "reversible": "Partially for the flag; consequences of undetected faults are not.",
+    "recovery": "Not supported by this tool; keep isolation monitoring enabled. Never send."
+  },
+  {
+    "name": "set kill <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write to the kill-switch interlock - blocked.",
+    "what_it_does": "'kill' is in BLOCKED_SETTINGS: refused. Relates to the kill-switch interlock state.",
+    "what_could_happen": "Altering the kill interlock could disable the kill switch's protective function or otherwise change a safety-relevant input's behavior.",
+    "reversible": "Unknown - undocumented; treat as potentially irreversible for the interlock state.",
+    "recovery": "Not documented; never send. Restoring correct kill-switch behavior would require the interlock reset through sanctioned means."
+  },
+  {
+    "name": "set test_mode <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Enable test mode - blocked.",
+    "what_it_does": "'test_mode' is in BLOCKED_SETTINGS: refused. Would put the bike/firmware into a test mode.",
+    "what_could_happen": "Test mode can change normal safety/operational behavior in undocumented ways.",
+    "reversible": "Unknown - undocumented; treat as potentially irreversible.",
+    "recovery": "Not documented; never send."
+  },
+  {
+    "name": "set safe_ov_sw <v>",
+    "category": "dangerous",
+    "danger": "catastrophic",
+    "one_liner": "Write to the safety-override switch - blocked.",
+    "what_it_does": "'safe_ov_sw' is in BLOCKED_SETTINGS: refused. A safety-override switch setting (related to the ov_* override family).",
+    "what_could_happen": "Enables a safety override path, defeating protective interlocks (see ov_* family).",
+    "reversible": "No / unknown - defeating a safety switch has consequences that may not be undoable.",
+    "recovery": "Not recoverable; never send."
+  },
+  {
+    "name": "set req_loopback <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write to CAN loopback request - blocked.",
+    "what_it_does": "'req_loopback' is in BLOCKED_SETTINGS: refused. Requests a CAN loopback/diagnostic state.",
+    "what_could_happen": "Puts CAN into a loopback/diagnostic mode, disrupting normal bus communication with BMS/Sevcon.",
+    "reversible": "Unknown - undocumented; a loopback mode may clear on reset but is not sanctioned here.",
+    "recovery": "Not documented; never send. A reset may clear the mode but any disturbance during it is not journaled."
+  },
+  {
+    "name": "set bridge_can <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write to CAN bridge enable - blocked.",
+    "what_it_does": "'bridge_can' is in BLOCKED_SETTINGS: refused. Controls a CAN bridge.",
+    "what_could_happen": "Enabling/disabling the CAN bridge changes how bus segments interconnect, potentially disrupting BMS/Sevcon communication.",
+    "reversible": "Unknown - undocumented; treat as potentially irreversible for bus configuration.",
+    "recovery": "Not documented; never send."
+  },
+  {
+    "name": "set bike_can_en <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write to bike CAN enable - blocked.",
+    "what_it_does": "'bike_can_en' is in BLOCKED_SETTINGS: refused. Enables/disables the bike CAN bus.",
+    "what_could_happen": "Disabling the bike CAN bus severs communication among modules, breaking normal operation.",
+    "reversible": "Unknown - undocumented; treat as potentially irreversible for the affected configuration.",
+    "recovery": "Not documented; never send."
+  },
+  {
+    "name": "set sevcon_can_en <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write to Sevcon CAN enable - blocked.",
+    "what_it_does": "'sevcon_can_en' is in BLOCKED_SETTINGS: refused. Enables/disables the Sevcon controller CAN link.",
+    "what_could_happen": "Disabling the Sevcon CAN link cuts controller communication, breaking drivetrain operation.",
+    "reversible": "Unknown - undocumented; treat as potentially irreversible for the affected configuration.",
+    "recovery": "Not documented; never send."
+  },
+  {
+    "name": "set model <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Overwrite the bike model identity - blocked.",
+    "what_it_does": "'model' is in BLOCKED_SETTINGS (install-time identity): refused. Would change the stored bike model.",
+    "what_could_happen": "Corrupts install-time identity. Wrong model can change how firmware interprets model-dependent parameters and misidentify the bike.",
+    "reversible": "Partially - only if the exact original value was recorded first; the write itself is not journaled/undone by this tool.",
+    "recovery": "Not recoverable without the original value; capture a full 'set' dump before ever touching identity. Never send."
+  },
+  {
+    "name": "set model_year <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Overwrite the model-year identity - blocked.",
+    "what_it_does": "'model_year' is in BLOCKED_SETTINGS (install-time identity): refused.",
+    "what_could_happen": "Corrupts install-time identity; can affect model-year-dependent behavior and misidentify the bike.",
+    "reversible": "Partially - only if the original value was recorded first.",
+    "recovery": "Not recoverable without the original value; capture a 'set' dump first. Never send."
+  },
+  {
+    "name": "set vin <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Overwrite the VIN - blocked.",
+    "what_it_does": "'vin' is in BLOCKED_SETTINGS (install-time identity): refused. VIN is display-only in OpenMBB and never written.",
+    "what_could_happen": "Overwrites the vehicle identification number - a legal/identity record. A wrong or blank VIN misidentifies the vehicle.",
+    "reversible": "Partially - only if the exact original VIN was recorded first; otherwise the original is lost.",
+    "recovery": "Not recoverable without the original VIN captured beforehand. Never send."
+  },
+  {
+    "name": "set serial <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Overwrite the unit serial number - blocked.",
+    "what_it_does": "'serial' is in BLOCKED_SETTINGS (install-time identity): refused.",
+    "what_could_happen": "Overwrites the stored serial/identity value; a wrong value misidentifies the unit.",
+    "reversible": "Partially - only if the original serial was recorded first.",
+    "recovery": "Not recoverable without the original value captured beforehand. Never send."
+  },
+  {
+    "name": "set motstage1 <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write the motor temp warning threshold - blocked thermal guard.",
+    "what_it_does": "'motstage1' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Motor temp warning threshold (100 C)'). Writing is refused; it is displayed for reference only.",
+    "what_could_happen": "Raising a thermal warning threshold suppresses early overheat warning; wrong values undermine motor thermal protection.",
+    "reversible": "Partially - only if the original value was recorded; not journaled/undone by this tool (it is display-only here).",
+    "recovery": "Not recoverable without the original value. This value is display-only in OpenMBB; do not attempt to write."
+  },
+  {
+    "name": "set motstage2 <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write the motor temp cutback/shutdown threshold - blocked thermal guard.",
+    "what_it_does": "'motstage2' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Motor temp cutback/shutdown threshold (145 C)'). Writing refused.",
+    "what_could_happen": "Changing the cutback/shutdown threshold can let the motor run past safe temperature, risking motor damage.",
+    "reversible": "Partially - only if the original value was recorded; not journaled/undone here.",
+    "recovery": "Not recoverable without the original value. Display-only in OpenMBB; do not write."
+  },
+  {
+    "name": "set ctrlstage1 <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write the controller temp warning threshold - blocked thermal guard.",
+    "what_it_does": "'ctrlstage1' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Controller temp warning threshold'). Writing refused.",
+    "what_could_happen": "Suppresses early controller-overheat warning; undermines controller thermal protection.",
+    "reversible": "Partially - only if the original value was recorded; not journaled/undone here.",
+    "recovery": "Not recoverable without the original value. Display-only in OpenMBB; do not write."
+  },
+  {
+    "name": "set ctrlstage2 <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write the controller temp cutback threshold - blocked thermal guard.",
+    "what_it_does": "'ctrlstage2' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Controller temp cutback threshold'). Writing refused.",
+    "what_could_happen": "Changing the controller cutback threshold can let the controller run past safe temperature, risking controller damage.",
+    "reversible": "Partially - only if the original value was recorded; not journaled/undone here.",
+    "recovery": "Not recoverable without the original value. Display-only in OpenMBB; do not write."
+  },
+  {
+    "name": "set sevmaxdischgcur <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write the Sevcon max battery discharge amps - blocked guard.",
+    "what_it_does": "'sevmaxdischgcur' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Sevcon max battery discharge amps'). Writing refused.",
+    "what_could_happen": "Raising the max discharge current can push the pack beyond safe current limits (over-current), risking cell/pack damage or thermal events.",
+    "reversible": "Partially - only if the original value was recorded; not journaled/undone here.",
+    "recovery": "Not recoverable without the original value. Display-only in OpenMBB; do not write."
+  },
+  {
+    "name": "set sevnoregspeed <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write the regen-above-speed guard - blocked regen guard.",
+    "what_it_does": "'sevnoregspeed' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Blocks regen above ~70 mph (over-current / over-charge guard)'). Writing refused.",
+    "what_could_happen": "Weakening this guard allows regen at high speed, an over-current / over-charge condition the guard exists to prevent.",
+    "reversible": "Partially - only if the original value was recorded; not journaled/undone here.",
+    "recovery": "Not recoverable without the original value. Display-only in OpenMBB; do not write."
+  },
+  {
+    "name": "set sevmaxregv <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write the cell-voltage regen cutoff - blocked regen guard.",
+    "what_it_does": "'sevmaxregv' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Cell-voltage regen cutoff (4160 mV = overcharge guard)'). Writing refused.",
+    "what_could_happen": "Raising the regen voltage cutoff lets regen push cells past the overcharge limit, risking cell damage.",
+    "reversible": "Partially - only if the original value was recorded; not journaled/undone here.",
+    "recovery": "Not recoverable without the original value. Display-only in OpenMBB; do not write."
+  },
+  {
+    "name": "set sevnoregfull <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write the regen-at-full-SoC guard - blocked regen guard.",
+    "what_it_does": "'sevnoregfull' is in BLOCKED_SETTINGS and shown read-only (READONLY_GUARDS: 'Blocks regen at 100% SoC'). Writing refused.",
+    "what_could_happen": "Disabling this guard allows regen into an already-full pack, an overcharge condition.",
+    "reversible": "Partially - only if the original value was recorded; not journaled/undone here.",
+    "recovery": "Not recoverable without the original value. Display-only in OpenMBB; do not write."
+  },
+  {
+    "name": "set ctrlstage* / motstage* family",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "All thermal-guard thresholds are blocked writes (display-only).",
+    "what_it_does": "The thermal guards motstage1/motstage2/ctrlstage1/ctrlstage2 are all in BLOCKED_SETTINGS and READONLY_GUARDS - they are DISPLAYED read-only in the Writes tab and can never be written via 'set'. (Individual entries above cover each.)",
+    "what_could_happen": "Any change to a thermal threshold undermines overheat protection for the motor or controller.",
+    "reversible": "Partially - only if originals were recorded; the tool does not write or journal these.",
+    "recovery": "Not recoverable without recorded originals; these are display-only in OpenMBB by design."
+  },
+  {
+    "name": "set motstage1/2 & ctrlstage1/2 (thermal group note)",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Grouped note: thermal thresholds are read-only guards, not writable.",
+    "what_it_does": "Reiterates that the thermal threshold group is blocked from writing and only surfaced read-only via READONLY_GUARDS; use the individual entries for specifics.",
+    "what_could_happen": "Writing any would degrade thermal protection.",
+    "reversible": "Partially - depends on recorded originals.",
+    "recovery": "Not recoverable without recorded originals; display-only by design."
+  },
+  {
+    "name": "set prewait <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write precharge wait time - blocked.",
+    "what_it_does": "'prewait' is in BLOCKED_SETTINGS: refused. A precharge/contactor sequencing parameter.",
+    "what_could_happen": "Wrong precharge timing can stress the contactor/precharge circuit (inrush current), risking hardware damage on contactor close.",
+    "reversible": "Partially - only if the original value was recorded first.",
+    "recovery": "Not recoverable without the original value. Never send."
+  },
+  {
+    "name": "set prechg <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write precharge parameter - blocked.",
+    "what_it_does": "'prechg' is in BLOCKED_SETTINGS: refused. A precharge parameter.",
+    "what_could_happen": "Incorrect precharge configuration can stress the contactor/precharge circuit with inrush current, risking hardware damage.",
+    "reversible": "Partially - only if the original value was recorded first.",
+    "recovery": "Not recoverable without the original value. Never send."
+  },
+  {
+    "name": "set pretimeout <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write precharge timeout - blocked.",
+    "what_it_does": "'pretimeout' is in BLOCKED_SETTINGS: refused. Precharge timeout parameter.",
+    "what_could_happen": "A wrong precharge timeout can allow contactor close before precharge completes (inrush) or block startup, risking hardware or leaving the bike inoperable.",
+    "reversible": "Partially - only if the original value was recorded first.",
+    "recovery": "Not recoverable without the original value. Never send."
+  },
+  {
+    "name": "set moddiff <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write allowed module voltage-difference limit - blocked.",
+    "what_it_does": "'moddiff' is in BLOCKED_SETTINGS: refused. Relates to allowed battery-module differences.",
+    "what_could_happen": "Loosening the module-difference limit can allow paralleling modules with unsafe voltage mismatch (large balancing currents), risking pack damage.",
+    "reversible": "Partially - only if the original value was recorded first.",
+    "recovery": "Not recoverable without the original value. Never send."
+  },
+  {
+    "name": "set manmod <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write manual-module control - blocked.",
+    "what_it_does": "'manmod' is in BLOCKED_SETTINGS: refused. A manual module-control parameter.",
+    "what_could_happen": "Manual override of module behavior can force unsafe module states (contactor/paralleling logic).",
+    "reversible": "Unknown - undocumented; treat as potentially irreversible.",
+    "recovery": "Not documented; never send."
+  },
+  {
+    "name": "set allowdiffmods <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write allow-mismatched-modules flag - blocked.",
+    "what_it_does": "'allowdiffmods' is in BLOCKED_SETTINGS: refused. Allows differing/mismatched modules.",
+    "what_could_happen": "Permitting mismatched modules can allow unsafe voltage/capacity mismatch between paralleled modules, risking large balancing currents and pack damage.",
+    "reversible": "Partially - only if the original value was recorded first.",
+    "recovery": "Not recoverable without the original value. Never send."
+  },
+  {
+    "name": "set rcoscadjust <v>",
+    "category": "dangerous",
+    "danger": "dangerous",
+    "one_liner": "Write RC oscillator adjustment - blocked.",
+    "what_it_does": "'rcoscadjust' is in BLOCKED_SETTINGS: refused. An RC-oscillator (clock) calibration parameter.",
+    "what_could_happen": "Mis-adjusting the internal oscillator calibration can throw off timing across the firmware, causing malfunction.",
+    "reversible": "Partially - only if the original calibration value was recorded first.",
+    "recovery": "Not recoverable without the original value; oscillator cal is factory-set. Never send."
+  },
+  {
+    "name": "set spfront <v>",
+    "category": "write",
+    "danger": "safe",
+    "one_liner": "Set front sprocket tooth count (speedo/odo math only).",
+    "what_it_does": "WRITE_WHITELIST 'spfront' - 'Sprocket teeth, front'. Input to speedometer/odometer calculation ONLY; set to the physically installed front sprocket count (FX/FXS factory is 20). Validator: whole number 10-40. Risk text: 'SAFE - display math only. Wrong values skew speed/odo/Wh-per-km.' Written only via the gated Writes tab, which backs up, confirms, verifies and journals."
+  },
+  {
+    "name": "set sprear <v>",
+    "category": "write",
+    "danger": "safe",
+    "one_liner": "Set rear sprocket tooth count (speedo/odo math only).",
+    "what_it_does": "WRITE_WHITELIST 'sprear' - 'Sprocket teeth, rear'. Input to speedo/odo calculation ONLY; set to the installed rear sprocket count (FX/FXS factory is 90). Validator: whole number 30-150. Risk text: 'SAFE - display math only.' Gated Writes-tab path only."
+  },
+  {
+    "name": "set rwhcirc <v>",
+    "category": "write",
+    "danger": "safe",
+    "one_liner": "Set rear wheel circumference in mm (speedo math only).",
+    "what_it_does": "WRITE_WHITELIST 'rwhcirc' - 'Rear wheel circumference (mm)'. Input to speedo calculation; trim so speedo matches GPS (typically ~1900-2000 mm). Validator: whole number 1500-2400. Risk text: 'SAFE - display math only.' Gated Writes-tab path only."
+  },
+  {
+    "name": "set maxcustspmph <v>",
+    "category": "write",
+    "danger": "caution",
+    "one_liner": "Set Custom-mode max speed in mph.",
+    "what_it_does": "WRITE_WHITELIST 'maxcustspmph' - 'Custom mode: max speed (mph)'. Top speed in Custom ride mode (real rev-41 name maxcustspmph). Physical ceiling ~85 mph; console accepts up to 102. Validator: whole number 20-102. Risk text labels it SAFE (factory-supported parameter space). Gated Writes-tab path only.",
+    "what_could_happen": "Sets the Custom ride-mode speed cap. Values above the bike's ~85 mph physical ceiling are accepted by the console but not physically achievable; it stays within the factory-supported parameter space.",
+    "reversible": "Yes - it is a whitelisted, journaled setting; re-run the write with the prior value (captured in the writes journal / 'set' dump) to restore it.",
+    "recovery": "Re-write the previous value via the Writes tab; the write flow journals old->new so the prior value is recorded."
+  },
+  {
+    "name": "set maxcusttq_allowed <v>",
+    "category": "write",
+    "danger": "caution",
+    "one_liner": "Set Custom-mode max torque (% of allowed).",
+    "what_it_does": "WRITE_WHITELIST 'maxcusttq_allowed' - 'Custom mode: max torque (% of allowed)'. Torque cap in Custom mode, % of what the Sevcon allows (real name maxcusttq_allowed). Validator: whole number 10-100. Risk text labels it SAFE (factory-supported parameter space). Gated Writes-tab path only.",
+    "what_could_happen": "Changes how much torque Custom mode delivers as a percentage of the Sevcon-allowed maximum; stays within factory-supported bounds. Higher values increase acceleration/aggressiveness within limits.",
+    "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value.",
+    "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
+  },
+  {
+    "name": "set maxcustregcotq_allow <v>",
+    "category": "write",
+    "danger": "caution",
+    "one_liner": "Set Custom-mode coast (off-throttle) regen (% of allowed).",
+    "what_it_does": "WRITE_WHITELIST 'maxcustregcotq_allow' - 'Custom mode: coast regen (% of allowed)'. Off-throttle coast regen in Custom mode, % of allowed (real name maxcustregcotq_allow). Validator _v_coast_regen: whole number 0-100 but EXACTLY 0 is refused (0% coasting regen can cause fishtailing in low traction). Risk text: 'SAFE, but exactly 0 is refused (fishtail risk in low traction).' Gated Writes-tab path only.",
+    "what_could_happen": "Changes off-throttle regen braking feel. Very low values give free coasting; exactly 0 is refused because zero coast regen can cause fishtailing in low traction.",
+    "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value.",
+    "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
+  },
+  {
+    "name": "set maxcustregbrtq_allow <v>",
+    "category": "write",
+    "danger": "caution",
+    "one_liner": "Set Custom-mode brake regen (% of allowed).",
+    "what_it_does": "WRITE_WHITELIST 'maxcustregbrtq_allow' - 'Custom mode: brake regen (% of allowed)'. Regen applied when the brake switch triggers, in Custom mode (real name maxcustregbrtq_allow). Validator: whole number 0-100. Risk text labels it SAFE (factory-supported parameter space). Gated Writes-tab path only.",
+    "what_could_happen": "Changes how much regen is applied when the brake switch triggers in Custom mode; affects brake feel. Stays within factory-supported bounds.",
+    "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value.",
+    "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
+  },
+  {
+    "name": "set brakeregen <v>",
+    "category": "write",
+    "danger": "caution",
+    "one_liner": "Set whether the brake switch applies max brake regen (Yes/No).",
+    "what_it_does": "WRITE_WHITELIST 'brakeregen' - 'Apply regen on brake switch'. Whether the brake light switch applies max brake regen. Validator _v_yes_no. Risk text: 'CAUTION - modest changes only; affects brake feel.' Note: whitelisted but not observed on the verified rev 41 (not in REV41_FXS_SETTINGS); the transport refuses a write to a name absent from the live 'set' dump. Gated Writes-tab path only.",
+    "what_could_happen": "Changes braking behavior/feel by tying (or untying) max brake regen to the brake switch. Modest changes only are advised.",
+    "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value. On rev 41 it may not be present at all, in which case the write is refused before it reaches the wire.",
+    "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
+  },
+  {
+    "name": "set brakefilter <v>",
+    "category": "write",
+    "danger": "caution",
+    "one_liner": "Set brake-switch filter delay in ms.",
+    "what_it_does": "WRITE_WHITELIST 'brakefilter' - 'Brake switch filter (ms)'. Delay after the brake switch closes before the light + regen trigger. Validator: whole number 0-1000. Risk text: 'CAUTION - keep near default (100 ms).' May be absent on rev 41 (not in REV41_FXS_SETTINGS); transport refuses writes to names absent from the live dump. Gated Writes-tab path only.",
+    "what_could_happen": "Changes the delay before the brake light and brake regen engage after the switch closes. Far-from-default values change brake responsiveness.",
+    "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value (default ~100 ms).",
+    "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
+  },
+  {
+    "name": "set noregenstopped <v>",
+    "category": "write",
+    "danger": "caution",
+    "one_liner": "Set the low-speed regen guard (leave Yes).",
+    "what_it_does": "WRITE_WHITELIST 'noregenstopped' - 'Prevent regen at low speed'. Blocks regen below ~13 mph. Validator _v_yes_no. Risk text: 'CAUTION - safe-direction only: leave enabled (Yes). Disabling removes a low-speed stability guard.' Has a warn_fn that fires when set to No/off/0. May be absent on rev 41. Gated Writes-tab path only.",
+    "what_could_happen": "Setting this to 'No' removes the low-speed regen stability guard, allowing regen below ~13 mph - a stability risk at low speed. The write flow warns explicitly on a disabling value.",
+    "reversible": "Yes - whitelisted and journaled; restore by re-writing 'Yes'. The safe direction is to leave it enabled.",
+    "recovery": "Re-write 'Yes' via the Writes tab (old value is journaled)."
+  },
+  {
+    "name": "set reserve_sw <v>",
+    "category": "write",
+    "danger": "caution",
+    "one_liner": "Toggle the SOC reserve partition (Yes/No).",
+    "what_it_does": "WRITE_WHITELIST 'reserve_sw' - 'Use SOC reserve partition'. Treats part of the battery as a 'fuel reserve' partition. Validator _v_yes_no. Risk text: 'CAUTION - changes what the gauge withholds, not real capacity. On an aged pack, don't reduce your reserve margin.' Gated Writes-tab path only.",
+    "what_could_happen": "Enables/disables the gauge's reserve partition. This changes what the gauge WITHHOLDS, not real capacity (adds zero real Ah). On an aged pack, dropping the reserve reduces your safety margin before empty.",
+    "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value.",
+    "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
+  },
+  {
+    "name": "set reserve_pct <v>",
+    "category": "write",
+    "danger": "caution",
+    "one_liner": "Set reserve partition size (%).",
+    "what_it_does": "WRITE_WHITELIST 'reserve_pct' - 'Reserve partition size (%)'. How much SoC the reserve partition withholds (default 33%). Validator: whole number 0-50. Risk text: 'CAUTION - gauge behavior only, adds zero real Ah.' Gated Writes-tab path only.",
+    "what_could_happen": "Changes how much SoC the gauge withholds as reserve. Gauge behavior only - adds zero real Ah. Lowering it reduces displayed margin before empty.",
+    "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value (default 33).",
+    "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
+  },
+  {
+    "name": "set fuelgaugepes <v>",
+    "category": "write",
+    "danger": "caution",
+    "one_liner": "Set fuel-gauge pessimism (%).",
+    "what_it_does": "WRITE_WHITELIST 'fuelgaugepes' - 'Fuel gauge pessimism (%)'. SoC display buffer (default 5%); shifts only the DISPLAYED percentage, not actual pack charge. Validator: whole number 0-20. Risk text: 'CAUTION - reducing it removes low-SOC margin on an aged pack.' warn_fn fires for values < 5. Gated Writes-tab path only.",
+    "what_could_happen": "Shifts the displayed SoC buffer. Display only - does not change actual charge. Lowering it (below the default 5%) removes low-SOC display safety margin on an aged pack; the write flow warns on values under 5.",
+    "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value (default 5).",
+    "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
+  },
+  {
+    "name": "set chgstby <v>",
+    "category": "write",
+    "danger": "caution",
+    "one_liner": "Set charge standby time before rebalance (minutes).",
+    "what_it_does": "WRITE_WHITELIST 'chgstby' - 'Charge standby time (min)'. How long the BMS sleeps after reaching 100% before waking to rebalance cells (default 1440 = 24 h). Validator: whole number 60-10080. Risk text: 'CAUTION - affects balancing cadence; the default is usually right.' Gated Writes-tab path only.",
+    "what_could_happen": "Changes how often the BMS wakes to rebalance cells after a full charge. Affects balancing cadence; the default (1440 min = 24 h) is usually correct, and unusual values change how frequently balancing occurs.",
+    "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value (default 1440).",
+    "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
+  }
+]
