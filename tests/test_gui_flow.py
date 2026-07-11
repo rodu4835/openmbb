@@ -295,6 +295,21 @@ def test_done_dialog_routes_to_analyze(app, monkeypatch):
     assert "analyze" in str(app.nb.tab(app.nb.select(), "text")).lower()
 
 
+def test_done_hub_login_lands_on_writes(app, monkeypatch):
+    # request: "Log in for Writes" in the completion hub logs in (no second click)
+    # and lands on the Writes tab.
+    from openmbb import dialogs
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    monkeypatch.setattr(dialogs, "_dialog", lambda *a, **k: "login")
+    app._show_done_dialog()
+    assert _pump(app, lambda: app.logged_in)          # logged in without a 2nd click
+    assert _pump(app, lambda: "writes" in
+                 str(app.nb.tab(app.nb.select(), "text")).lower())
+
+
 def test_analyze_help_enriches_notes(app):
     # T4: the novice explanations (analyze_help.json) load and enrich a health
     # metric's row note with what-it-is / how-it-fits / healthy context.

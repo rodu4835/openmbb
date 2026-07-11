@@ -1082,7 +1082,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if choice == "analyze":
                 self._select_tab("Analyze")
             elif choice == "login":
-                self._select_tab("Login")
+                if self.logged_in:
+                    self._select_tab("Writes")
+                else:
+                    # no second click: run the known-password login now, and land
+                    # on Writes on success (the Login tab shows progress either way).
+                    self._select_tab("Login")
+                    self._login(then=lambda ok: ok and self._select_tab("Writes"))
             elif choice == "quit":
                 self._safe_quit()
 
@@ -1832,7 +1838,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 return
             self._login([pw], redact=True)
 
-        def _login(self, passwords=None, redact=False):
+        def _login(self, passwords=None, redact=False, then=None):
             if passwords is not None:
                 pws = [p for p in passwords if p]
             else:
@@ -1899,6 +1905,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if not success:
                     self._login_log("Rejected — staying read-only. (MBB passwords "
                                     "are community-held; try another.)")
+                    if then:
+                        then(False)
                     return
                 self.logged_in = True
                 lvl_txt = " (level %d)" % level if level else ""
@@ -1940,6 +1948,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._apply_gates()
                 self._login_log("\nPhase 3 (Writes) unlocked — writes still require the "
                                 "master unlock toggle + per-write confirmation.")
+                if then:
+                    then(True)
 
             self._run_bg(job, done)
 
