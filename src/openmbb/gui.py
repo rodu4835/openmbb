@@ -39,6 +39,11 @@ from .transport import (DUMP_COMMANDS, HEAVY_COMMANDS, LONG_COMMANDS,
 # cable needed). Selecting it makes _make_port hand back a SimPort.
 SIM_CHOICE = "SIMULATOR (no bike)"
 
+# Connect-tab button labels — the two-step flow reads verify-first so nobody has
+# to infer that the (receive-only) link check comes before the live connect.
+VERIFY_LABEL = "1 · Verify link"
+CONNECT_LABEL = "2 · Connect & Probe"
+
 # Plain-language description of each read command, shown as a hover tooltip so the
 # bare firmware button names aren't a wall of jargon to a first-timer.
 READ_TIPS = {
@@ -91,12 +96,12 @@ phase; closing the window never loses data (everything is saved as you go).
 
 PHASE 0 — CONNECT
   Pick your COM port from the dropdown — or pick "SIMULATOR (no bike)" to explore
-  the whole tool with no bike or cable attached. On a home-built cable, click
-  "Listen only (Stage 1)" first: it never transmits, so it safely proves your RX
-  wiring + baud (power the bike during the ~45 s listen window to catch the boot
-  banner). Then "Connect & Probe" wakes the console prompt and reads the firmware
-  version. Garbage output at 38400 baud usually means the Tx/Rx wires are swapped
-  — stop and recheck.
+  the whole tool with no bike or cable attached. Two steps, in order: click
+  "1 · Verify link" first — it only LISTENS (transmits nothing), so it safely
+  proves your cable + baud and that the bike is talking (power the bike during
+  the ~45 s window to catch the boot banner). Then "2 · Connect & Probe" wakes
+  the console prompt and reads the firmware version. Garbage output at 38400 baud
+  usually means the Tx/Rx wires are swapped — stop and recheck.
 
 PHASE 1 — READ
   Click any command button for a one-off read. To advance, click the blue
@@ -908,29 +913,26 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                          values=ports, width=22)
             self.cbo_port.pack(side="left", padx=6)
             ttk.Button(row, text="Refresh", command=self._refresh_ports).pack(side="left")
-            self.btn_listen = ttk.Button(row, text="Listen only (Stage 1)",
+            self.btn_listen = ttk.Button(row, text=VERIFY_LABEL,
                                          command=self._listen_only)
             self.btn_listen.pack(side="left", padx=(12, 0))
-            self.btn_connect = ttk.Button(row, text="Connect & Probe",
+            self.btn_connect = ttk.Button(row, text=CONNECT_LABEL,
                                           style=self.sty["accent"],
                                           command=self._connect)
             self.btn_connect.pack(side="left", padx=12)
 
             ttk.Label(f, text=(
-                "Staged bring-up (safe on any cable — Listen never transmits):\n"
-                "  1. Wiring: FTDI Red (+5 V) to NOTHING; Orange idles ~3.3 V vs "
-                "Black. GND→pin 5, FTDI RXD←pin 8 (bike Tx), FTDI TXD→pin 9 (bike "
-                "Rx). The port is under the seat; 38400 8-N-1, CR-LF.\n"
-                "  2. Power: key ON, OR simply plug in the AC charger (wakes the "
-                "MBB; console is live for reads — bike shows Mode: Charging).\n"
-                "  3. STAGE 1 — click 'Listen only': it never transmits in software, "
-                "so it proves RX wiring/baud safely (power the bike DURING the listen "
-                "window to catch the boot banner).\n"
-                "  4. STAGE 2 — click 'Connect & Probe' to start the session. Garbage "
-                "= Tx/Rx swap — STOP.\n"
+                "Two quick steps — do them in order (Step 1 never transmits, so it's "
+                "safe on any cable):\n"
+                "  STEP 1 — click '1 · Verify link': it only LISTENS (sends nothing) "
+                "to confirm your cable + baud are good and the bike is talking. Power "
+                "the bike during the ~45 s window — key ON, or just plug in the AC "
+                "charger (the bike shows Mode: Charging).\n"
+                "  STEP 2 — click '2 · Connect & Probe' to open the live session.\n"
                 "  No bike yet? Pick 'SIMULATOR (no bike)' in the Port list to explore "
                 "everything at the desk.\n"
-                "  Note: isolation-resistance reads are only valid OFF the charger."),
+                "  Cable wiring + pinout: Help → Wiring diagram. Isolation-resistance "
+                "reads are only valid OFF the charger."),
                 justify="left", padding=(0, 10),
                 foreground=P["warn"]).pack(anchor="w")
 
@@ -1028,8 +1030,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._probe_log("  received %d bytes" % nbytes)
                 if sigs:
                     self._probe_log("  banner signatures seen: %s" % ", ".join(sigs))
-                    self._probe_log("  RX wiring + baud look GOOD — click "
-                                    "'Connect & Probe' to start the session.")
+                    self._probe_log("  Link verified — RX wiring + baud look GOOD. "
+                                    "Now click '2 · Connect & Probe' to start the "
+                                    "session.")
                 elif nbytes == 0:
                     self._probe_log("  NOTHING received. Power the bike DURING the "
                                     "listen window (key ON or plug in the charger); "
@@ -1053,7 +1056,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     except Exception:
                         pass
                 try:
-                    self.btn_listen.config(text="Listen only (Stage 1)")
+                    self.btn_listen.config(text=VERIFY_LABEL)
                 except Exception:
                     pass
                 return
@@ -1084,27 +1087,32 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             is_simport = sim or port_name == SIM_CHOICE
 
             def job():
+                # B3: narrate each step into the connect console AS IT HAPPENS (the
+                # worker enqueues to _cbq; the main loop pumps it) — no more staring
+                # at a bare progress bar.
+                def log(msg):
+                    self._cbq.put(lambda m=msg: self._probe_log(m))
+
                 tag = "sim" if is_simport else port_name.replace(":", "")
                 logger = SessionLogger(base_dir=self.log_dir, tag=tag)
+                log("Session folder: %s" % logger.dir)
                 port = self._make_port(port_name)
                 tr = Transport(port, logger)
                 try:
-                    notes = ["Session folder: %s" % logger.dir]
-                    notes.append("Listening %s for unsolicited output..."
-                                 % ("0.3 s" if is_simport else "3 s"))
+                    log("Listening %s for unsolicited output…"
+                        % ("0.3 s" if is_simport else "3 s"))
                     pre = tr.listen(0.3 if is_simport else 3)
-                    notes.append("  got %d bytes" % len(pre))
+                    log("  got %d bytes" % len(pre))
                     # C2: the real console needs one or two CR-LFs to wake — retry
                     resp, prompt = b"", False
                     for attempt in range(1, 4):
-                        notes.append("Wake %d: bare CR-LF, looking for prompt..." % attempt)
+                        log("Waking the console (attempt %d): sending CR-LF…" % attempt)
                         resp = tr.send_raw_newline()
                         if looks_like_prompt(pre + resp):
+                            log("  ZERO MBB> prompt detected.")
                             prompt = True
                             break
                     blob = pre + resp
-                    notes.append("  response: %r"
-                                 % resp.decode("utf-8", errors="replace")[-80:])
                     # C1: reject garbage — a bare '>' in noise no longer counts
                     if not prompt:
                         if nonprintable_ratio(blob) > 0.2:
@@ -1116,29 +1124,29 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             "No prompt detected.\n"
                             "- Check the COM port and that the bike is powered "
                             "(key ON, or plug in the AC charger).\n"
-                            "- Run 'Listen only (Stage 1)' to prove RX wiring first.\n"
+                            "- Click '1 · Verify link' to prove RX wiring first.\n"
                             "- Garbage at 38400 usually means Tx/Rx swapped — STOP.\n"
                             "Raw bytes were logged to session_raw.log.")
                     # C3: the version banner must actually parse (positive proof
                     # this is a Gen2 MBB console) before we unlock Phase 1
+                    log("Reading firmware version…")
                     ver = tr.exec_command("version", idle_timeout=1.5)
                     if not _looks_like_version(ver):
                         raise RuntimeError(
                             "Reached a prompt, but the 'version' banner was empty or "
                             "unrecognized — not proceeding. Re-check the link (right "
                             "baud? bike powered?). Raw output saved.")
-                    return logger, tr, notes, ver, _parse_fw_rev(ver)
+                    log("Checking firmware revision…")
+                    return logger, tr, ver, _parse_fw_rev(ver)
                 except Exception:
                     tr.close()            # C5: never leak the port on a failed probe
                     raise
 
             def done(result):
-                logger, tr, notes, ver, rev = result
+                logger, tr, ver, rev = result
                 self.logger, self.transport = logger, tr
                 self.connected = True
                 self.version_text = ver
-                for n in notes:
-                    self._probe_log(n)
                 self._probe_log("PROMPT OK — connected.\n")
                 self._probe_log(ver)
                 self.lbl_ver.config(text="MBB firmware rev %s"
@@ -1393,10 +1401,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             def job():
                 results, errors = {}, {}
                 for i, cmd in enumerate(seq):
+                    # B3: progress bar + label AND a live play-by-play line
                     self._cbq.put(lambda c=cmd, i=i: (
                         self.lbl_prog.config(text="baseline: %s (%d/%d)"
                                              % (c, i + 1, len(seq))),
-                        self.prg.config(maximum=len(seq), value=i)))
+                        self.prg.config(maximum=len(seq), value=i),
+                        self._out("  [%d/%d] reading %s…" % (i + 1, len(seq), c))))
                     is_dump = cmd in LONG_COMMANDS
                     prog = None
                     if is_dump:

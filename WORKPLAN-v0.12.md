@@ -26,16 +26,16 @@ open a real COM port. Commit per tier.
    already built — move build detail to Instructions"; "want live output during probe, not just
    a bar"]
 
-- [ ] **B1 Verify-first framing.** Make the cable/link check the obvious FIRST action: reframe
+- [x] **B1 Verify-first framing.** Make the cable/link check the obvious FIRST action: reframe
   the primary flow as (1) pick port → (2) Verify link (the Listen-only check, renamed to read as
   a verify step) → (3) Connect & Probe. The user should not have to infer that Listen-only comes
   first. (Rename the button / lead the checklist with it; keep Connect & Probe as the second
   step.)
-- [ ] **B2 Trim the orange text.** The Connect-tab checklist mixes cable-BUILD detail (pinout,
+- [x] **B2 Trim the orange text.** The Connect-tab checklist mixes cable-BUILD detail (pinout,
   "Red taped off") that assumes you haven't built the cable — that belongs in the Wiring dialog /
   README, not the first screen. Cut it to what you DO on this screen (pick port, verify, connect,
   the SIMULATOR option, the isolation-off-charger note). The full pinout stays in Help → Wiring.
-- [ ] **B3 Live probe narration.** During Connect & Probe, narrate the steps into the connect
+- [x] **B3 Live probe narration.** During Connect & Probe, narrate the steps into the connect
   console ("listening…", "waking prompt…", "reading version…", "checking firmware…") as they
   happen, instead of only moving a progress bar. Same idea for FULL BASELINE — stream each
   command as it runs.
@@ -76,4 +76,8 @@ open a real COM port. Commit per tier.
 ### Tier A — dark chrome (complete)
 - A1: _apply_dark_titlebar() sets DWMWA_USE_IMMERSIVE_DARK_MODE (attr 20, fallback 19) on the top-level HWND via ctypes — Windows-only, best-effort, never blocks launch. Smoketest confirms no crash.
 - A2: replaced the native white menubar with a themed ttk Menubutton bar (Session/Bike/Help) + dark dropdown menus (_dark_menu); all v0.11 commands + F1 preserved. Test asserts the Menubuttons exist and no native menu is installed.
+### Tier B — Connect screen (complete)
+- B1: buttons renamed to a numbered verify-first flow — '1 · Verify link' (VERIFY_LABEL) then '2 · Connect & Probe' (CONNECT_LABEL); checklist + Instructions Phase 0 lead with the verify step.
+- B2: trimmed the orange checklist to what you DO on this screen (verify -> connect, SIMULATOR option, isolation caveat); the FTDI pinout/build detail now points to Help -> Wiring diagram.
+- B3: Connect & Probe narrates each step live into the connect console (listening / waking / reading version / checking firmware) via _cbq instead of only a progress bar; FULL BASELINE streams a per-command '[i/N] reading <cmd>…' line. Tests updated for the new labels + a live-narration test.
 (append per item)

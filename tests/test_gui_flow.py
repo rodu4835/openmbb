@@ -472,13 +472,23 @@ def test_read_tab_has_legend_and_tooltips(app):
         assert READ_TIPS.get(cmd), "no tooltip for read button %r" % cmd
 
 
+def test_connect_narrates_probe_steps_live(app):
+    # B3: Connect & Probe streams what it's doing into the connect console
+    # (version read, firmware check) rather than only moving a progress bar.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    log = app.txt_probe.get("1.0", "end").lower()
+    assert "reading firmware version" in log
+    assert "prompt" in log and "connected" in log
+
+
 def test_simulator_offered_in_real_mode(monkeypatch):
     # A1/A5: SIMULATOR must be in the port dropdown even in REAL (non-sim) mode so a
     # downloaded-exe owner can explore without a bike; and the Connect button reads
     # "Connect & Probe" (not the literal "&&").
     import tempfile
     tk = pytest.importorskip("tkinter")
-    from openmbb.gui import build_gui, SIM_CHOICE
+    from openmbb.gui import build_gui, SIM_CHOICE, CONNECT_LABEL
     from openmbb.sim import SimPort
     try:
         app = build_gui(sim=False, log_dir=tempfile.mkdtemp(prefix="a1_"))
@@ -487,7 +497,7 @@ def test_simulator_offered_in_real_mode(monkeypatch):
     try:
         assert SIM_CHOICE in app.cbo_port.cget("values")     # offered in real mode
         assert isinstance(app._make_port(SIM_CHOICE), SimPort)   # maps to the sim
-        assert app.btn_connect.cget("text") == "Connect & Probe"  # not "&&"
+        assert app.btn_connect.cget("text") == CONNECT_LABEL      # "2 · Connect & Probe"
     finally:
         app.destroy()
 
@@ -525,7 +535,8 @@ def test_listen_only_announces_and_counts_down(app):
     assert str(app.btn_listen.cget("state")) == "disabled"     # busy signal
     # ...and it recovers to a normal, clickable button once the window closes
     assert _pump(app, lambda: str(app.btn_listen.cget("state")) == "normal")
-    assert app.btn_listen.cget("text") == "Listen only (Stage 1)"
+    from openmbb.gui import VERIFY_LABEL
+    assert app.btn_listen.cget("text") == VERIFY_LABEL
 
 
 def _all_label_text(widget):
@@ -546,7 +557,7 @@ def test_connect_guidance_is_cable_agnostic(app):
     # so unplugging TX is optional, not a required step. (The status bar's
     # "● DISCONNECTED" is a different, legitimate use — target the checklist.)
     checklist = next((t for t in _all_label_text(app)
-                      if "staged bring-up" in t.lower()), None)
+                      if "two quick steps" in t.lower()), None)
     assert checklist is not None                   # sanity: found the checklist
     low = checklist.lower()
     assert "disconnect" not in low
