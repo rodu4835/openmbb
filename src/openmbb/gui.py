@@ -213,6 +213,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.settings = {}
             self.settings_order = []
             self.journal_entries = []   # (name, old, new)
+            self._cmd_history = []      # raw command-line history (↑/↓)
+            self._cmd_hist_idx = 0
             self._busy = False
             self.analyze_session = None      # currently loaded Session for analysis
             self.compare_list = []           # [Session, ...] for the Compare panel
@@ -1670,15 +1672,6 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.lbl_prog = ttk.Label(prow, text="", style="Muted.TLabel")
             self.lbl_prog.pack(anchor="w")
 
-            ttk.Label(right, text="Raw command", style="Heading.TLabel").pack(anchor="w")
-            self.raw_var = tk.StringVar()
-            ent = ttk.Entry(right, textvariable=self.raw_var)
-            ent.pack(fill="x", pady=(2, 2))
-            ent.bind("<Return>", lambda e: self._raw_send())
-            ttk.Button(right, text="Send", command=self._raw_send).pack(anchor="w")
-            ttk.Label(right, text="read-only intent · blocklist enforced",
-                      style="Muted.TLabel", wraplength=280).pack(anchor="w", pady=(1, 12))
-
             ttk.Label(right, text="Quick reads", style="Heading.TLabel").pack(anchor="w")
             quick = ttk.Frame(right)
             quick.pack(fill="x", pady=(2, 0))
@@ -1716,12 +1709,30 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 hb.pack(fill="x", pady=2)
                 self._add_tooltip(hb, READ_TIPS.get(cmd, ""))
 
-            # LEFT: output + status (fills the remaining space)
+            # LEFT: output + status, with a command line underneath — type a
+            # command, Enter sends + clears, ↑/↓ cycles through what you've typed.
             left = ttk.Frame(body)
             left.pack(side="left", fill="both", expand=True)
             ttk.Label(left, text="Output & status", style="Heading.TLabel").pack(anchor="w")
             self.txt_out = self._console_text(left, 20)
-            self.txt_out.pack(fill="both", expand=True, pady=(4, 0))
+            self.txt_out.pack(fill="both", expand=True, pady=(4, 6))
+
+            cmdrow = ttk.Frame(left)
+            cmdrow.pack(fill="x")
+            ttk.Label(cmdrow, text="›", foreground=P["green"],
+                      font=(self.sty["mono"], 13, "bold")).pack(side="left", padx=(2, 6))
+            self.raw_var = tk.StringVar()
+            self.ent_cmd = ttk.Entry(cmdrow, textvariable=self.raw_var,
+                                     font=(self.sty["mono"], 10))
+            self.ent_cmd.pack(side="left", fill="x", expand=True)
+            self.ent_cmd.bind("<Return>", lambda e: self._cmd_enter())
+            self.ent_cmd.bind("<Up>", lambda e: self._cmd_history_nav(-1))
+            self.ent_cmd.bind("<Down>", lambda e: self._cmd_history_nav(1))
+            ttk.Button(cmdrow, text="Send", command=self._cmd_enter).pack(
+                side="left", padx=(6, 0))
+            ttk.Label(left, text="type a command · Enter sends · ↑/↓ history · "
+                      "read-only intent, blocklist enforced",
+                      style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
 
             self._refresh_dash_header()
 
@@ -1833,6 +1844,33 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self._apply_gates()
 
             self._run_bg(job, done)
+
+        def _cmd_enter(self):
+            """Command-line Enter: send the typed command, then clear the box +
+            record it in history (↑/↓ recall it)."""
+            cmd = self.raw_var.get().strip()
+            if not cmd:
+                return "break"
+            if not self._cmd_history or self._cmd_history[-1] != cmd:
+                self._cmd_history.append(cmd)
+            self._cmd_hist_idx = len(self._cmd_history)
+            self._raw_send()             # reads raw_var synchronously
+            self.raw_var.set("")         # clear like a terminal
+            return "break"
+
+        def _cmd_history_nav(self, delta):
+            """↑/↓ through previously typed commands."""
+            if not self._cmd_history:
+                return "break"
+            self._cmd_hist_idx = max(0, min(len(self._cmd_history),
+                                            self._cmd_hist_idx + delta))
+            self.raw_var.set(self._cmd_history[self._cmd_hist_idx]
+                             if self._cmd_hist_idx < len(self._cmd_history) else "")
+            try:
+                self.ent_cmd.icursor("end")
+            except Exception:
+                pass
+            return "break"
 
         def _raw_send(self):
             cmd = self.raw_var.get().strip()

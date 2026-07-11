@@ -346,6 +346,21 @@ def test_done_hub_login_lands_on_writes(app, monkeypatch):
                  str(app.nb.tab(app.nb.select(), "text")).lower())
 
 
+def test_read_command_line_clears_and_history(app):
+    # Read page command line: Enter sends the command, clears the box like a
+    # terminal, and ↑/↓ cycles through what you've typed.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app.raw_var.set("status")
+    app._cmd_enter()
+    assert app.raw_var.get() == ""                 # cleared after send
+    assert "status" in app._cmd_history
+    app._cmd_history_nav(-1)                        # ↑ recalls it
+    assert app.raw_var.get() == "status"
+    app._cmd_history_nav(1)                         # ↓ past the end clears
+    assert app.raw_var.get() == ""
+
+
 def test_analyze_help_enriches_notes(app):
     # T4: the novice explanations (analyze_help.json) load and enrich a health
     # metric's row note with what-it-is / how-it-fits / healthy context.
