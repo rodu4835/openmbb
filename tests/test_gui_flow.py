@@ -228,29 +228,52 @@ def test_landing_is_front_door(app):
     assert "Test your cable" in labels
     assert any("Connect" in t for t in labels)
 
+    # the simulator toggle lives on the landing (owner couldn't find it in a menu)
+    checks = []
+
+    def walk_cb(w):
+        for c in w.winfo_children():
+            if isinstance(c, ttk.Checkbutton):
+                checks.append(str(c.cget("text")))
+            walk_cb(c)
+
+    walk_cb(app.landing)
+    assert any("simulator" in t.lower() for t in checks)
+
     app._leave_landing()
     assert app.nb.winfo_manager() == "pack"           # notebook now shown
     assert app.landing.winfo_manager() != "pack"
     assert app.nb.index(app.nb.select()) == 0          # on the Connect tab
 
 
-def test_landing_test_cable_runs_listen(app):
-    # request: clicking "Test your cable" on the landing actually RUNS the cable
-    # test (leaves the landing + starts the listen), here in simulator mode.
-    import tkinter.ttk as ttk
-    hit = []
+def test_cable_wizard_verifies_and_offers_connect(app):
+    # "Test your cable" opens a self-contained wizard; running the test in sim mode
+    # verifies the link and then offers Connect & probe / Retry / Cancel.
+    import tkinter as tk
+    from tkinter import ttk
+    app._show_cable_wizard()
+    wins = [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)]
+    assert wins, "the cable wizard should open a dialog"
+    wiz = wins[-1]
 
-    def walk(w):
-        for c in w.winfo_children():
-            if isinstance(c, ttk.Button) and str(c.cget("text")) == "Test your cable":
-                hit.append(c)
-            walk(c)
+    def find_btn(sub):
+        out = []
 
-    walk(app.landing)
-    assert hit, "landing should have a 'Test your cable' button"
-    hit[0].invoke()
-    assert app.landing.winfo_manager() != "pack"       # left the landing
-    assert _pump(app, lambda: "Listening" in app.txt_probe.get("1.0", "end"))
+        def walk(w):
+            for c in w.winfo_children():
+                if isinstance(c, ttk.Button) and sub.lower() in str(c.cget("text")).lower():
+                    out.append(c)
+                walk(c)
+
+        walk(wiz)
+        return out[0] if out else None
+
+    start = find_btn("Start test")
+    assert start is not None
+    start.invoke()
+    assert _pump(app, lambda: find_btn("Connect & probe") is not None, timeout=20)
+    for w in [x for x in app.winfo_children() if isinstance(x, tk.Toplevel)]:
+        w.destroy()
 
 
 def test_sim_toggle_shows_indicator(app):
@@ -264,29 +287,6 @@ def test_sim_toggle_shows_indicator(app):
     app._on_sim_toggle()
     assert "SIMULATOR" in str(app.lbl_sim.cget("text"))
     assert app._sim_badge.winfo_manager() == "place"   # badge shown
-
-
-def test_landing_test_cable_reminds_in_real_mode(monkeypatch):
-    # owner: hitting "Test your cable" in REAL mode silently failed with no heads-up.
-    # It must first remind you to connect the cable + power the bike.
-    import tempfile
-    tk = pytest.importorskip("tkinter")
-    from openmbb import dialogs
-    from openmbb.gui import build_gui
-    asked = []
-    monkeypatch.setattr(dialogs, "askokcancel",
-                        lambda *a, **k: asked.append(a) or False)
-    try:
-        app = build_gui(sim=False, log_dir=tempfile.mkdtemp(prefix="tc_"))
-    except tk.TclError:
-        pytest.skip("no display available for Tk")
-    try:
-        app._landing_test_cable()          # real mode, user cancels the reminder
-        assert asked, "real-mode cable test should show a readiness reminder first"
-        blob = str(asked[0]).lower()
-        assert "cable" in blob and "bike" in blob and "charger" in blob
-    finally:
-        app.destroy()
 
 
 def test_dashboard_layout(app):
@@ -716,9 +716,9 @@ def test_connect_narrates_probe_steps_live(app):
     assert "prompt" in log and "connected" in log
 
 
-def test_simulator_is_a_menu_toggle(monkeypatch):
-    # v0.13: simulator is a Tools-menu toggle (sim_var), NOT a port-dropdown entry.
-    # Off in real mode; flipping it on makes connect/verify use the simulator. The
+def test_simulator_is_a_toggle_not_a_port(monkeypatch):
+    # v0.13: simulator is a toggle (sim_var, on the landing), NOT a port-dropdown
+    # entry. Off in real mode; flipping it on makes connect/verify use the sim. The
     # Connect button reads "Connect & Probe" (not the literal "&&").
     import tempfile
     tk = pytest.importorskip("tkinter")

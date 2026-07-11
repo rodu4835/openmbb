@@ -309,7 +309,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             brow = ttk.Frame(inner)
             brow.pack()
             ttk.Button(brow, text="Test your cable", width=22,
-                       command=self._landing_test_cable
+                       command=self._show_cable_wizard
                        ).pack(side="left", padx=10, ipady=8)
             ttk.Button(brow, text="Connect & read", width=22,
                        style=self.sty["accent"],
@@ -326,9 +326,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Button(inner, text="What is this?  —  Instructions",
                        command=self._show_instructions).pack(pady=(30, 0))
 
-            ttk.Label(lf, text="Work PARKED · key on · kill switch off · "
-                      "never while riding", style="Muted.TLabel").place(
-                          relx=0.5, rely=0.93, anchor="center")
+            foot = ttk.Frame(lf)
+            foot.place(relx=0.5, rely=0.9, anchor="center")
+            ttk.Label(foot, text="Work PARKED · key on · kill switch off · "
+                      "never while riding", style="Muted.TLabel").pack()
+            ttk.Checkbutton(foot, text="Simulator mode — no bike or cable needed",
+                            variable=self.sim_var, command=self._on_sim_toggle,
+                            style=self.sty["toggle"]).pack(pady=(12, 0))
 
         def _show_landing(self):
             self.nb.pack_forget()
@@ -353,19 +357,142 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                        "No bike or cable yet? Cancel, then turn on 'Simulator mode "
                        "(no bike)' in the Tools menu.\n\n")
 
-        def _landing_test_cable(self):
-            # sim: nothing to prep, just run. real: remind the owner what's needed
-            # (bike on + cable connected + port) so it doesn't silently fail.
-            self._leave_landing()
-            if self.sim_var.get():
-                self._listen_only()
+        def _show_cable_wizard(self):
+            """Self-contained 'Test your cable' wizard: pick the COM port + read the
+            prep info, run the (listen-only) test, then offer Connect & probe /
+            Retry / Cancel — no jumping to the Connect tab with its own buttons."""
+            if self._busy:
+                messagebox.showinfo(APP_NAME, "Busy — wait for the current operation.")
                 return
-            if messagebox.askokcancel(
-                    "Before you test the cable",
-                    "The cable test only LISTENS — it sends nothing, so it's safe on "
-                    "any wiring.\n\n" + self._PREP_STEPS + "Start listening now "
-                    "(~45 s)?"):
-                self._listen_only()
+            if self.connected:
+                messagebox.showinfo(APP_NAME, "Already connected.")
+                return
+            from . import dialogs
+            surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
+            win = tk.Toplevel(self)
+            win.title("Test your cable")
+            win.configure(bg=surface)
+            win.resizable(False, False)
+            win.transient(self)
+
+            body = ttk.Frame(win, padding=24)
+            body.pack(fill="both", expand=True)
+            ttk.Label(body, text="Test your cable", style="Heading.TLabel").pack(anchor="w")
+            ttk.Label(body, text="Listens for the bike — sends nothing, so it's safe "
+                      "on any wiring.", style="Muted.TLabel").pack(anchor="w", pady=(1, 12))
+
+            if self.sim_var.get():
+                ttk.Label(body, text="◆ Simulator mode is ON (Tools menu) — no cable "
+                          "or COM port needed.", style="Accent.TLabel").pack(
+                              anchor="w", pady=(0, 8))
+            else:
+                prow = ttk.Frame(body)
+                prow.pack(fill="x", pady=(0, 6))
+                ttk.Label(prow, text="COM port:").pack(side="left")
+                cbo = ttk.Combobox(prow, textvariable=self.port_var,
+                                   values=list_serial_ports(), width=18)
+                cbo.pack(side="left", padx=8)
+                ttk.Button(prow, text="Refresh",
+                           command=lambda: cbo.config(values=list_serial_ports())
+                           ).pack(side="left")
+                ttk.Label(body, text="Plug in the FTDI cable, pick your port above, and "
+                          "power the bike — key ON, or plug in the AC charger.",
+                          style="Muted.TLabel", wraplength=440, justify="left").pack(
+                              anchor="w", pady=(0, 8))
+
+            status = ttk.Label(body, text="Ready when you are.", wraplength=460,
+                               justify="left")
+            status.pack(anchor="w", pady=(6, 14))
+            btns = ttk.Frame(body)
+            btns.pack(fill="x")
+
+            def alive():
+                try:
+                    return bool(win.winfo_exists())
+                except Exception:
+                    return False
+
+            def set_status(text, color=None):
+                if alive():
+                    status.config(text=text, foreground=color or P["fg"])
+
+            def set_buttons(specs):
+                if not alive():
+                    return
+                for w in btns.winfo_children():
+                    w.destroy()
+                for label, cmd, primary in reversed(specs):
+                    ttk.Button(btns, text=label,
+                               style="Accent.TButton" if primary else "TButton",
+                               command=cmd).pack(side="right", padx=(8, 0))
+
+            def close():
+                try:
+                    win.grab_release()
+                except Exception:
+                    pass
+                win.destroy()
+
+            def on_connect():
+                close()
+                self._leave_landing()
+                self._connect()
+
+            def start_test():
+                port_name = self.port_var.get().strip()
+                is_sim = self.sim_var.get()
+                if not is_sim and not port_name:
+                    set_status("Pick a COM port first (Refresh if it's not listed).",
+                               P["warn"])
+                    return
+                self._ensure_log_dir()
+                secs = 2 if is_sim else 45
+                set_status("Listening… %s" % ("(~2 s, simulator)" if is_sim else
+                           "(~45 s — power the bike NOW: key ON or AC charger)"))
+                set_buttons([("Cancel", close, False)])
+
+                def job():
+                    port = self._make_port(port_name, is_sim)
+                    logger = SessionLogger(base_dir=self.log_dir, tag="listen")
+                    try:
+                        data = Transport(port, logger).listen(secs)
+                    finally:
+                        try:
+                            port.close()
+                        except Exception:
+                            pass
+                    sigs = [s.decode() for s in (b"Zero Motorcycles MBB",
+                            b"Reset Source:", b"Checking EEPROM", b"ZERO MBB>")
+                            if s in data]
+                    return len(data), sigs
+
+                def done(result):
+                    if not alive():
+                        return
+                    nbytes, sigs = result
+                    if sigs:
+                        set_status("✓ Link verified — the bike is talking (%d bytes: "
+                                   "%s)." % (nbytes, ", ".join(sigs)), P["green"])
+                        set_buttons([("Cancel", close, False),
+                                     ("Retry", start_test, False),
+                                     ("Connect & probe", on_connect, True)])
+                    else:
+                        set_status("✗ No recognizable signal (%d bytes). Check the "
+                                   "cable, the COM port, and that the bike is powered, "
+                                   "then Retry." % nbytes, P["warn"])
+                        set_buttons([("Cancel", close, False),
+                                     ("Retry", start_test, True)])
+
+                self._run_bg(job, done)
+
+            set_buttons([("Cancel", close, False), ("Start test", start_test, True)])
+            win.protocol("WM_DELETE_WINDOW", close)
+            dialogs._dark_titlebar(win)
+            dialogs._center(win, self)
+            try:
+                win.grab_set()
+            except Exception:
+                pass
 
         def _landing_connect(self):
             self._leave_landing()
@@ -517,9 +644,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _dark_menu(self, parent):
             """A dropdown tk.Menu coloured to match the dark theme (dropdowns DO
             honour bg/fg on Windows, unlike the native menubar strip)."""
-            return tk.Menu(parent, tearoff=0, bg=P["panel"], fg=P["fg"],
-                           activebackground=P["sel"], activeforeground="#eafff2",
-                           disabledforeground=P["dim"], relief="flat", borderwidth=0)
+            return tk.Menu(parent, tearoff=0, bg="#26262b", fg=P["fg"],
+                           activebackground="#3a4150", activeforeground="#ffffff",
+                           disabledforeground=P["dim"], relief="flat", borderwidth=0,
+                           activeborderwidth=0, font=(self.sty["ui"], 10))
 
         def _build_menubar(self):
             # A2: the native Tk menubar strip is OS-drawn white on Windows and
@@ -587,10 +715,6 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 sess.add_command(label="Exit", command=self._on_close)
 
             def build_bike(bike):
-                bike.add_checkbutton(label="Simulator mode (no bike)",
-                                     variable=self.sim_var,
-                                     command=self._on_sim_toggle)
-                bike.add_separator()
                 bike.add_command(label="Bike info…", command=self._show_bike_info)
                 bike.add_command(label="Write options (read-only)…",
                                  command=self._show_write_options)
