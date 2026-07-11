@@ -361,7 +361,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 "These are the only settings OpenMBB will ever let you change (the",
                 "write whitelist). This view is informational: actually writing still",
                 "requires the Writes tab (login + master unlock + a per-write confirm),",
-                "and only settings present in the live dump can be written.",
+                "and only settings your bike actually reports can be written.",
+                "",
+                "(\"live dump\" below = the `set` list the console reported after you",
+                "logged in — i.e. the settings that really exist on YOUR bike.)",
                 "",
                 WRITE_PANEL_CONTEXT,
                 "",
@@ -1224,11 +1227,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             f = ttk.Frame(self.nb, padding=12)
             self.nb.add(f, text=" 2 · Login ")
             ttk.Label(f, text=(
-                "Login is explicit and never automatic. Click 'Try known "
-                "passwords' to attempt the community-known ones (%s), or type a "
-                "specific password and 'Try this password'. Both may fail — the "
-                "tool just stays read-only then. A typed password is never saved "
-                "to disk (it is masked in the logs)." % ", ".join(COMMUNITY_PASSWORDS)),
+                "Some tuning settings sit behind the console's service login. The "
+                "passwords below are the SERVICE passwords Zero owners have "
+                "documented publicly over the years (%s) — logging in only REVEALS "
+                "those settings; it is read-only and changes nothing on the bike. "
+                "Click 'Try known passwords' to attempt them in order, or type your "
+                "own and 'Try this password'. If they all fail, no problem — the tool "
+                "stays read-only. On success you reach login LEVEL 2 (the tuning "
+                "level): the full `set` list appears and the Writes tab unlocks. A "
+                "typed password is masked in the logs and never saved to disk unless "
+                "you choose to remember it (Session menu → Remember login password)."
+                % ", ".join(COMMUNITY_PASSWORDS)),
                 wraplength=920, justify="left").pack(anchor="w")
 
             row = ttk.Frame(f)
@@ -1354,8 +1363,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Checkbutton(top, text="UNLOCK WRITES (master gate)",
                             style=self.sty["toggle"],
                             variable=self.unlock_var).pack(side="left")
-            ttk.Label(top, text="  " + WRITE_PANEL_CONTEXT, foreground=P["warn"],
-                      wraplength=760, justify="left").pack(side="left")
+            # D3: a read-only "what could I change" reference, right here (not only
+            # buried in the Bike menu).
+            ttk.Button(top, text="What can I change? (read-only)",
+                       command=self._show_write_options).pack(side="right")
+
+            # D4: say what arming the toggle actually does (and what it does NOT).
+            ttk.Label(f, foreground=P["dim"], wraplength=940, justify="left",
+                      text="Arming UNLOCK WRITES changes nothing by itself — it only "
+                      "enables the Write… button. Every write still asks you to "
+                      "confirm, backs up all settings first, reads the value back to "
+                      "verify, and logs it so you can Revert. The rows below are the "
+                      "settings from YOUR bike's live `set` dump (what the console "
+                      "reported after login) that are safe to change.").pack(
+                          anchor="w", pady=(2, 0))
+            ttk.Label(f, text=WRITE_PANEL_CONTEXT, foreground=P["warn"],
+                      wraplength=940, justify="left").pack(anchor="w", pady=(2, 4))
 
             cols = ("name", "current", "risk")
             self.tree = ttk.Treeview(f, columns=cols, show="headings", height=9)
@@ -1463,8 +1486,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
             def confirm_and_send(result):
                 dump, old_val = result
-                text = ("%s — %s\n\n%s -> %s\n\nEFFECT: %s\nRISK: %s\n%s\n"
-                        "A full settings backup will be saved first. Proceed?"
+                text = ("%s — %s\n\n%s  ->  %s\n\nEFFECT: %s\nRISK: %s\n%s\n"
+                        "What happens when you click OK:\n"
+                        "  1. a full backup of ALL current settings is saved to the "
+                        "session folder,\n"
+                        "  2. the change is sent, then read back to VERIFY it took,\n"
+                        "  3. it's recorded in the writes journal — select it and "
+                        "click 'Revert selected' (below the table) to undo it.\n\n"
+                        "Proceed?"
                         % (name, label, old_val, new_val, effect, risk,
                            ("\nWARNING: %s\n" % warn) if warn else ""))
                 if not messagebox.askokcancel("Confirm write", text):

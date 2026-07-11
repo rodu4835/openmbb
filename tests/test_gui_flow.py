@@ -267,6 +267,50 @@ def test_listen_only_reports_without_connecting(app):
     assert "ZERO MBB>" in app.txt_probe.get("1.0", "end")   # sim greet detected
 
 
+def test_login_tab_explains_passwords_and_level(app):
+    # D1: the Login intro reassures a first-timer — whose passwords, that it's
+    # read-only, what "level 2" is, and what unlocks.
+    blob = " ".join(_all_label_text(app)).lower()
+    assert "service passwords" in blob
+    assert "read-only" in blob and "changes nothing on the bike" in blob
+    assert "level 2" in blob and "writes tab unlocks" in blob
+
+
+def test_writes_tab_surfaces_options_and_explains_unlock(app, monkeypatch):
+    # D3/D4: the Writes tab has the read-only options reference button + explains
+    # what arming UNLOCK does, and the browser defines "live dump".
+    blob = " ".join(_all_label_text(app))
+    assert "What can I change?" in blob                            # D3 button
+    assert "Arming UNLOCK WRITES changes nothing by itself" in blob  # D4
+    captured = {}
+    monkeypatch.setattr(app, "_info_window", lambda t, x: captured.update(text=x))
+    app._show_write_options()
+    low = captured["text"].lower()
+    assert "live dump" in low and "settings that really exist on your bike" in low
+
+
+def test_write_confirm_explains_backup_verify_revert(app, monkeypatch):
+    # D2: the write-confirm dialog spells out the backup -> verify -> journal/Revert
+    # story at the moment of the (nervous) first write.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    import tkinter.messagebox as mb
+    seen = []
+    monkeypatch.setattr(mb, "askokcancel",
+                        lambda title, text=None, **k: seen.append(text) or False)
+    app.tree.selection_set("spfront")
+    app.newval_var.set("22")
+    app.unlock_var.set(True)
+    app._write()
+    assert _pump(app, lambda: seen)                    # the confirm fired
+    low = seen[-1].lower()
+    assert "backup" in low and "verify" in low and "revert" in low
+
+
 def test_read_points_to_analyze_once(app):
     # C1: the first read prints a one-time pointer to Analyze (don't nag every read).
     app._connect()

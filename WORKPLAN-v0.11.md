@@ -70,13 +70,13 @@ item; GUI tests standalone. Never open a real COM port. Commit per tier.
 
 ## Tier D — login / writes trust  [login-level2, confirm-dialog, write-options jargon, unlock]
 
-- [ ] **D1 Login tab plain-language**: whose passwords ("community-documented service
+- [x] **D1 Login tab plain-language**: whose passwords ("community-documented service
   passwords"), that trying them is read-safe, what "level 2" means, and what unlocks on success.
-- [ ] **D2 Write-confirm dialog**: add the backup → send → read-back verify → journal (with
+- [x] **D2 Write-confirm dialog**: add the backup → send → read-back verify → journal (with
   one-click Revert) story, right where the nervous first write happens.
-- [ ] **D3 Define "live dump"** in the write-options browser + surface it from the Writes tab
+- [x] **D3 Define "live dump"** in the write-options browser + surface it from the Writes tab
   (a button), not only the Bike menu.
-- [ ] **D4 UNLOCK toggle**: a one-line explanation of what arming it does (and that a write still
+- [x] **D4 UNLOCK toggle**: a one-line explanation of what arming it does (and that a write still
   needs a per-write confirm).
 
 ## Tier E — new pathways sized for a small Tk app  [MP-01..06]
@@ -120,4 +120,9 @@ item; GUI tests standalone. Never open a real COM port. Commit per tier.
 - C5: (done in B4) Rides names the real zero-log-parser source.
 - C6: loading a folder with no readable session data warns + flags 'no readable data' instead of silent all-n/a.
 - C7: clicking a locked tab (or 'Open Writes tab' before login) explains what unlocks that phase.
+### Tier D — login/writes trust (complete)
+- D1: Login intro rewritten — the passwords are publicly-documented SERVICE passwords, logging in is read-only and changes nothing, success = LEVEL 2 (tuning level) which reveals `set` and unlocks Writes; a typed password is saved only if you choose to remember it.
+- D2: the write-confirm dialog now spells out the numbered story: backup ALL settings -> send -> read-back VERIFY -> journal (select + 'Revert selected' to undo).
+- D3: a 'What can I change? (read-only)' button on the Writes tab (not just the Bike menu); the browser now defines 'live dump' = the `set` list the console reported after login (the settings that really exist on your bike).
+- D4: a label under the UNLOCK toggle explains arming it changes nothing by itself (only enables Write…), and every write still confirms/backs-up/verifies/journals.
 (append per item)
