@@ -43,7 +43,7 @@ open a real COM port. Commit per tier.
 ## Tier C — gating  [note: "don't like being gated; want connect → login directly; but
    prioritize safety over speed"]
 
-- [ ] **C1 Login reachable straight after Connect.** Login is READ-ONLY (it only reveals the
+- [x] **C1 Login reachable straight after Connect.** Login is READ-ONLY (it only reveals the
   tunable settings), so it should not require FULL BASELINE. Drop the baseline requirement from
   the Login gate. Keep the real safety rule where it belongs: **the WRITES tab stays gated on a
   settings backup existing** (baseline_done) AND login — so "no write without a backup" holds,
@@ -80,4 +80,6 @@ open a real COM port. Commit per tier.
 - B1: buttons renamed to a numbered verify-first flow — '1 · Verify link' (VERIFY_LABEL) then '2 · Connect & Probe' (CONNECT_LABEL); checklist + Instructions Phase 0 lead with the verify step.
 - B2: trimmed the orange checklist to what you DO on this screen (verify -> connect, SIMULATOR option, isolation caveat); the FTDI pinout/build detail now points to Help -> Wiring diagram.
 - B3: Connect & Probe narrates each step live into the connect console (listening / waking / reading version / checking firmware) via _cbq instead of only a progress bar; FULL BASELINE streams a per-command '[i/N] reading <cmd>…' line. Tests updated for the new labels + a live-narration test.
+### Tier C — gating (complete)
+- C1: Login now opens as soon as you're connected (it's read-only) — the baseline requirement moved OFF the Login gate. The WRITES tab keeps the real safety rule: connected + logged_in + baseline_done (a backup must exist before any write). Updated _tab_unlock_hint (Read/Login just need connect; Writes lists what's missing) and the baseline complete/incomplete messages (backup-based, not 'Phase 2 unlocked'). New test proves login works pre-baseline while Writes stays gated until the backup exists.
 (append per item)

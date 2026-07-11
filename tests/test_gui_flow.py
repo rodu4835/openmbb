@@ -615,8 +615,23 @@ def test_baseline_tolerant_saves_and_gates(app, monkeypatch):
     assert "session_meta.txt" in files
 
 
+def test_login_open_without_baseline_but_writes_gated(app):
+    # C1: Login is read-only, so it opens as soon as you're connected — no FULL
+    # BASELINE needed. The backup requirement stays where it matters: WRITES.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    assert not app.baseline_done
+    assert str(app.nb.tab(2, "state")) == "normal"      # Login open pre-baseline
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert str(app.nb.tab(3, "state")) == "disabled"    # Writes still gated (no backup)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    assert str(app.nb.tab(3, "state")) == "normal"      # backup exists -> Writes opens
+
+
 def test_baseline_incomplete_stays_locked(app, monkeypatch):
-    # C6/C17: an empty settings dump must NOT unlock Phase 2
+    # C6/C17: an empty settings dump must NOT mark a baseline (so Writes stays gated)
     app._connect()
     assert _pump(app, lambda: app.connected)
     orig = app.transport.exec_command

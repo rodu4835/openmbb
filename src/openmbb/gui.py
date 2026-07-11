@@ -753,12 +753,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._info_window("About", text)
 
         def _apply_gates(self):
+            # C1: Login is READ-ONLY (it only reveals the tunable settings), so it
+            # opens as soon as you're connected — no FULL BASELINE required. The one
+            # hard safety rule lives on WRITES: a settings backup (FULL BASELINE)
+            # AND a login must both exist before anything can be written.
             states = [
-                "normal",
-                "normal" if self.connected else "disabled",
-                "normal" if (self.connected and self.baseline_done) else "disabled",
-                "normal" if (self.connected and self.baseline_done and self.logged_in)
-                else "disabled",
+                "normal",                                          # Connect
+                "normal" if self.connected else "disabled",        # Read
+                "normal" if self.connected else "disabled",        # Login (read-only)
+                "normal" if (self.connected and self.logged_in and self.baseline_done)
+                else "disabled",                                   # Writes (needs backup)
             ]
             for i, st in enumerate(states):
                 self.nb.tab(i, state=st)
@@ -773,20 +777,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _tab_unlock_hint(self, idx):
             # C7: plain-language "here's how to unlock this phase" for a locked tab.
-            if idx == 1:
-                return "The Read tab opens once you Connect & Probe on the Connect tab."
-            if idx == 2:
-                if not self.connected:
-                    return ("The Login tab opens after you Connect, then run ★ FULL "
-                            "BASELINE on the Read tab.")
-                return ("The Login tab opens after you run ★ FULL BASELINE on the Read "
-                        "tab (so a backup exists before any change).")
+            if idx in (1, 2):     # Read + Login both just need a connection
+                return ("The %s tab opens once you Connect & Probe on the Connect tab."
+                        % ("Read" if idx == 1 else "Login"))
             if idx == 3:
                 if not self.connected:
-                    return "The Writes tab opens after Connect → FULL BASELINE → Login."
+                    return ("The Writes tab opens once you're connected, logged in, and "
+                            "have run ★ FULL BASELINE (a backup must exist before any "
+                            "write).")
+                need = []
+                if not self.logged_in:
+                    need.append("log in on the Login tab")
                 if not self.baseline_done:
-                    return "The Writes tab opens after FULL BASELINE (Read tab) → Login."
-                return "The Writes tab opens after you log in on the Login tab."
+                    need.append("run ★ FULL BASELINE on the Read tab (saves a backup)")
+                return "The Writes tab opens once you " + " and ".join(need) + "."
             return "That tab isn't available yet — finish the earlier phase first."
 
         def _on_tab_click(self, event):
@@ -1463,12 +1467,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self._out("→ Open the Analyze tab and click 'Use current session' "
                               "to see battery health, temps and gearing flagged "
                               "ok / watch / alert.")
-                    self._out("Phase 2 (Login) unlocked.")
+                    self._out("Backup saved — the Writes tab is now available after "
+                              "you log in (Login is open any time you're connected).")
                 else:
                     self.lbl_prog.config(text="baseline incomplete")
                     self._out("\n[!] BASELINE INCOMPLETE — essential reads missing/"
-                              "unparsed: %s. Phase 2 stays LOCKED; fix the link and "
-                              "re-run FULL BASELINE." % ", ".join(missing))
+                              "unparsed: %s. No backup was saved, so Writes stays "
+                              "LOCKED; fix the link and re-run FULL BASELINE."
+                              % ", ".join(missing))
 
             self._run_bg(job, done)
 
