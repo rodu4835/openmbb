@@ -2159,13 +2159,33 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                    lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
             canvas.bind("<Configure>",
                         lambda e: canvas.itemconfigure(win, width=e.width))
-            # wheel scrolling bound directly on the canvas (not bind_all, which
-            # churns the interpreter-global "all" bindtag across app lifecycles);
-            # the visible scrollbar drag works from anywhere regardless.
-            canvas.bind("<MouseWheel>",
-                        lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)),
-                                                      "units"))
+            def _wheel(e):
+                canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            canvas.bind("<MouseWheel>", _wheel)
+            # stash so the caller can extend wheel/two-finger scroll to the page's
+            # static child widgets (they'd otherwise swallow the event). See
+            # _bind_page_wheel.
+            f._owl_wheel = _wheel
             return f
+
+        def _bind_page_wheel(self, inner):
+            """Route wheel / two-finger scroll over the page's static widgets to the
+            scrollable canvas — child widgets otherwise eat the event so only the
+            scrollbar drag worked. Widgets that scroll themselves (Treeview / Text /
+            Listbox) are left alone."""
+            wheel = getattr(inner, "_owl_wheel", None)
+            if wheel is None:
+                return
+
+            def walk(w):
+                if w.winfo_class() not in ("Treeview", "Text", "Listbox"):
+                    try:
+                        w.bind("<MouseWheel>", wheel)
+                    except Exception:
+                        pass
+                for c in w.winfo_children():
+                    walk(c)
+            walk(inner)
 
         # -- Phase 3: Writes -------------------------------------------------------
         def _build_write_tab(self):
@@ -2187,11 +2207,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                           anchor="w", pady=(2, 6))
 
             cols = ("name", "current", "risk")
-            self.tree = ttk.Treeview(f, columns=cols, show="headings", height=9)
+            trow = ttk.Frame(f)
+            trow.pack(fill="x", pady=(8, 4))
+            self.tree = ttk.Treeview(trow, columns=cols, show="headings", height=9)
+            tvsb = ttk.Scrollbar(trow, orient="vertical", command=self.tree.yview)
+            self.tree.configure(yscrollcommand=tvsb.set)
+            tvsb.pack(side="right", fill="y")
+            self.tree.pack(side="left", fill="both", expand=True)
             for c, w in zip(cols, (170, 300, 420)):
                 self.tree.heading(c, text=c.title())
                 self.tree.column(c, width=w, anchor="w")
-            self.tree.pack(fill="x", pady=(8, 4))
             self._attach_tree_copy(self.tree)       # E4
             self.tree.tag_configure("safe", foreground="#7fe0a0")
             self.tree.tag_configure("caution", foreground=P["warn"])
@@ -2215,8 +2240,21 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       "'(not in live dump)'). The simulator fills in examples.",
                       foreground=P["dim"], wraplength=940, justify="left").pack(
                           anchor="w", pady=(10, 2))
-            self.txt_guards = self._console_text(f, 6, fg=P["warn"])
-            self.txt_guards.pack(fill="x")
+            grow = ttk.Frame(f)
+            grow.pack(fill="x")
+            gcols = ("guard", "value", "meaning")
+            self.guards_tree = ttk.Treeview(grow, columns=gcols, show="headings",
+                                            height=6)
+            for c, w in zip(gcols, (180, 150, 560)):
+                self.guards_tree.heading(c, text=c.title())
+                self.guards_tree.column(c, width=w, anchor="w")
+            gvsb = ttk.Scrollbar(grow, orient="vertical",
+                                 command=self.guards_tree.yview)
+            self.guards_tree.configure(yscrollcommand=gvsb.set)
+            gvsb.pack(side="right", fill="y")
+            self.guards_tree.pack(side="left", fill="both", expand=True)
+            self.guards_tree.tag_configure("guard", foreground=P["warn"])
+            self._attach_tree_copy(self.guards_tree)
 
             ttk.Label(f, text="Writes journal (select an entry to revert):",
                       foreground=P["dim"]).pack(anchor="w", pady=(10, 2))
@@ -2232,6 +2270,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Button(jrow, text="Revert selected", command=self._revert).pack(
                 side="left", padx=8, anchor="n")
 
+            self._bind_page_wheel(f)   # wheel/two-finger scroll over the whole page
+
         def _refresh_write_rows(self):
             if not hasattr(self, "tree"):
                 return
@@ -2243,14 +2283,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self.tree.insert("", "end", iid=name, tags=(tag,), values=(
                         name, self.settings[name]["value"], risk.split(" - ")[0]))
             # guards pane
-            lines = []
+            self.guards_tree.delete(*self.guards_tree.get_children())
             for gname, gdesc in READONLY_GUARDS:
                 val = self.settings.get(gname, {}).get("value", "(not in live dump)")
-                lines.append("  %-16s %-24s %s" % (gname, val, gdesc))
-            self.txt_guards.config(state="normal")
-            self.txt_guards.delete("1.0", "end")
-            self.txt_guards.insert("end", "\n".join(lines))
-            self.txt_guards.config(state="disabled")
+                self.guards_tree.insert("", "end", tags=("guard",),
+                                        values=(gname, val, gdesc))
 
         def _write_help_map(self):
             """T5: lazy-load the write-options explanations
