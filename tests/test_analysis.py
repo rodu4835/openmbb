@@ -209,6 +209,26 @@ def test_compare_two_sessions(tmp_path):
     assert all("lifetime" in basis for _, _, basis in result["gearing_trend"])
 
 
+def test_charts_helpers():
+    from openmbb import charts
+    lo, hi, step = charts.nice_bounds(2.3, 97.8)
+    assert lo <= 2.3 and hi >= 97.8 and step > 0
+    assert lo % step == 0                              # bounds land on the step grid
+    ticks = charts.axis_ticks(lo, hi, step)
+    assert ticks[0] == lo and ticks[-1] >= hi - step   # spans the range
+    # a flat series still yields a usable band (no divide-by-zero downstream)
+    flo, fhi, fstep = charts.nice_bounds(50, 50)
+    assert fhi > flo and fstep > 0
+    # downsample keeps endpoints and caps the count
+    big = [(i, i * i) for i in range(5000)]
+    ds = charts.downsample(big, 500)
+    assert len(ds) == 500 and ds[0] == big[0] and ds[-1] == big[-1]
+    # series_from drops partial samples and sorts by x
+    recs = [{"odo_km": 3, "soc": 80}, {"odo_km": 1, "soc": 90},
+            {"odo_km": 2, "soc": None}, {"soc": 70}]
+    assert charts.series_from(recs, "odo_km", "soc") == [(1, 90), (3, 80)]
+
+
 def test_health_temp_units_convert(tmp_path):
     # temperature metrics render in the chosen unit; default is Celsius and is
     # byte-identical to the explicit "C" call (so existing output is unchanged).

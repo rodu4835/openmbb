@@ -25,6 +25,13 @@ def app(monkeypatch):
     errors = []
     monkeypatch.setattr(mb, "showerror", lambda *a, **k: errors.append(a))
     import tempfile
+    from pathlib import Path
+    # hermetic config: unit/password prefs must never touch the user's real
+    # ~/.openmbb/config.json (several tests call _apply_units/_apply_temp_units).
+    from openmbb import config as _cfg
+    _tmpcfg = Path(tempfile.mkdtemp(prefix="zccfg_")) / "config.json"
+    monkeypatch.setattr(_cfg, "CONFIG_DIR", _tmpcfg.parent)
+    monkeypatch.setattr(_cfg, "CONFIG_PATH", _tmpcfg)
     from openmbb.gui import build_gui
     # hermetic: sessions go to a temp dir, never the user's configured location.
     # Build directly (no throwaway probe root) and skip cleanly with no display.
@@ -262,6 +269,45 @@ def test_bike_about_merged_two_tab_window(app):
         nbs = [c for c in _descendants(w) if isinstance(c, ttk.Notebook)]
         assert nbs and len(nbs[0].tabs()) == 2     # exactly two tabs
         w.destroy()
+    assert not app._errors
+
+
+def test_connect_shows_continue_banner_not_autojump(app):
+    # owner: connect no longer auto-jumps to Read — it reveals a success banner
+    # with a "Continue to read data" button that navigates only when clicked.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    assert app.connect_success.winfo_manager() == "pack"       # banner is shown
+    assert "Connected" in app.lbl_connect_success.cget("text")
+    assert app.nb.index(app.nb.select()) == 0                  # still on Connect
+    app._continue_to_read()
+    assert app.nb.index(app.nb.select()) == 1                  # now on Read
+
+
+def test_analyze_charts_render_every_metric(app):
+    # the new Charts tab plots ride-log telemetry on a tk.Canvas (no matplotlib);
+    # every metric draws without error, and an empty log shows a friendly message.
+    recs = [{"odo_km": 100 + i * 0.5, "soc": 92 - i, "vpack": 116.0 - i * 0.2,
+             "pack_temp_c": 24 + i * 0.3, "motor_temp_c": 40 + i * 0.5,
+             "motamps": 40 + i, "ts": "05/16/2026 08:%02d:00" % i}
+            for i in range(24)]
+    app._render_ride_records(recs, "test log")
+    app.update_idletasks()
+    assert app._ride_records
+    cv = app.chart_canvas
+    for metric in app._CHART_METRICS:
+        app.chart_metric.set(metric)
+        app._render_charts()
+        app.update_idletasks()
+        assert cv.find_all(), "nothing drawn for %s" % metric   # canvas has items
+    # temperature unit switch re-renders in F without error
+    app.temp_units_var.set("F")
+    app._apply_temp_units()
+    app.update_idletasks()
+    # empty ride set -> a guidance message, still no crash
+    app._render_ride_records([], "empty")
+    app.update_idletasks()
+    assert cv.find_all()
     assert not app._errors
 
 

@@ -22,6 +22,7 @@ def open_in_file_manager(path):
         subprocess.Popen(["xdg-open", path])
 
 from . import APP_NAME, __version__
+from . import charts as charts_mod
 from . import compare as compare_mod
 from . import gearing as gearing_mod
 from . import health as health_mod
@@ -659,6 +660,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.lbl_sim.pack(side="left", padx=16)
 
         # -- menu bar --------------------------------------------------------
+        def _dismiss_open_menu(self):
+            """Tear down the open top-menu popup + any fly-out (used when the main
+            window moves — an absolute-positioned popup can't follow it)."""
+            for attr in ("_open_submenu", "_open_menu"):
+                win = getattr(self, attr, None)
+                if win is not None:
+                    try:
+                        win.destroy()
+                    except Exception:
+                        pass
+                setattr(self, attr, None)
+
         def _menu_popup(self, anchor, specs):
             """A custom themed dropdown (an overrideredirect Toplevel) so there's no
             native white border and full control over colours / spacing / hover —
@@ -734,8 +747,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             p.config(bg=hover)
                         if submenu_fn:
                             open_submenu(row, submenu_fn)
-                        else:
-                            close_submenu()
+                        # NOTE: hovering a plain item does NOT close an open submenu
+                        # — otherwise a diagonal move toward the fly-out (crossing a
+                        # sibling row) would dismiss it before you reach it. It closes
+                        # only on click, Escape, outside-click, or another submenu.
 
                     def leave(_e):
                         for p in parts:
@@ -823,15 +838,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             add_menu("Tools", self._tools_menu)
             add_menu("Help", self._help_menu)
             self.bind("<F1>", lambda e: self._show_instructions())
+            # an open dropdown is an absolute-positioned popup that can't follow the
+            # window; dismiss it when the main window moves/resizes (like a native
+            # menu). Only acts while a menu is open, and only for the main window.
+            self.bind("<Configure>", lambda e: self._dismiss_open_menu()
+                      if (e.widget is self and getattr(self, "_open_menu", None))
+                      else None, add="+")
 
         def _file_menu(self):
+            # save location + copy path now live in Tools -> Settings -> Session
             return [
                 ("cmd", "Save health report…", self._save_health_report),
                 ("sep",),
                 ("cmd", "Open recent session…", self._open_recent_session),
                 ("cmd", "Open session folder", self._open_session_folder),
-                ("cmd", "Set save location…", self._set_log_dir),
-                ("cmd", "Copy session path", self._copy_session_path),
                 ("sep",),
                 ("cmd", "Exit", self._on_close),
             ]
@@ -1174,11 +1194,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             config.set_units(self.units_var.get())
             if self.analyze_session:      # re-render distances in the new unit
                 self._render_rides()
+            self._render_charts()         # charts read the unit too
 
         def _apply_temp_units(self):
             config.set_temp_units(self.temp_units_var.get())
             if self.analyze_session:      # re-render temps in the new unit
                 self._render_health()
+            self._render_charts()
 
         # -- Settings (tabbed) -----------------------------------------------
         def _show_settings(self, active=None):
@@ -1525,6 +1547,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.unlock_var.set(False)
             if hasattr(self, "lst_journal"):
                 self.lst_journal.delete(0, "end")
+            self._hide_connect_success()     # a new/broken session re-earns it
             self._refresh_write_rows()
             self._apply_gates()          # also refreshes the dashboard header
 
@@ -1718,7 +1741,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         # -- Phase 0: Connect --------------------------------------------------
         def _build_connect_tab(self):
-            f = self._new_tab(" 0 · Connect ", "Connect to your bike",
+            f = self._new_tab(" Connect ", "Connect to your bike",
                               "verify the cable, then connect & probe")
             row = ttk.Frame(f)
             row.pack(fill="x")
@@ -1755,8 +1778,30 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 justify="left", padding=(0, 10),
                 foreground=P["warn"]).pack(anchor="w")
 
+            # success banner shown by _connect's done() instead of auto-jumping to
+            # Read (owner: let the user confirm + click through). Hidden until then.
+            self.connect_success = ttk.Frame(f)
+            self.lbl_connect_success = ttk.Label(self.connect_success, text="",
+                                                 style="Good.TLabel")
+            self.lbl_connect_success.pack(side="left")
+            self.btn_continue_read = ttk.Button(
+                self.connect_success, text="Continue to read data  →",
+                style=self.sty["accent"], command=self._continue_to_read)
+            self.btn_continue_read.pack(side="left", padx=12)
+
             self.txt_probe = self._console_text(f, 16)
             self.txt_probe.pack(fill="both", expand=True)
+
+        def _show_connect_success(self, text):
+            self.lbl_connect_success.config(text=text)
+            self.connect_success.pack(fill="x", pady=(0, 8), before=self.txt_probe)
+
+        def _hide_connect_success(self):
+            if hasattr(self, "connect_success"):
+                self.connect_success.pack_forget()
+
+        def _continue_to_read(self):
+            self.nb.select(1)      # the Read tab
 
         def _refresh_ports(self):
             real_ports = list_serial_ports()
@@ -2011,7 +2056,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                            "cautious about writes." % (rev, known, known))
                 self._refresh_save_label()
                 self._apply_gates()
-                self.nb.select(1)
+                # owner: don't auto-jump to Read — confirm success here and let the
+                # user click through.
+                where = "SIMULATOR" if self.sim_var.get() else self.port_var.get()
+                self._probe_log("\nConnected. Click 'Continue to read data' (or the "
+                                "Read tab) to pull the bike's data.")
+                self._show_connect_success(
+                    "✓  Connected to %s — the link is live and read-only." % where)
 
             self._run_bg(job, done)
 
@@ -2046,7 +2097,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             widget.bind("<Destroy>", hide)
 
         def _build_read_tab(self):
-            f = self._new_tab(" 1 · Read ", "Read the bike",
+            f = self._new_tab(" Read ", "Read the bike",
                               "pull the data, then review it in Analyze")
 
             # T2 dashboard: a connected/identity header, then a two-column body —
@@ -2587,7 +2638,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         # -- Phase 2: Login ------------------------------------------------------
         def _build_login_tab(self):
-            f = self._new_tab(" 2 · Login ", "Log in for more access",
+            f = self._new_tab(" Login ", "Log in for more access",
                               "read-only — reveals the tunable settings")
             ttk.Label(f, text=(
                 "Logging in is READ-ONLY — it reveals the tuning settings the console "
@@ -2786,7 +2837,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         # -- Phase 3: Writes -------------------------------------------------------
         def _build_write_tab(self):
-            f = self._scrollable_tab(" 3 · Writes ")     # D3: visible scrollbar
+            f = self._scrollable_tab(" Writes ")     # D3: visible scrollbar
             self._tab_header(f, "Change a setting",
                              "advanced — whitelisted, backed up, reversible")
             self.unlock_var = tk.BooleanVar(value=False)
@@ -3058,7 +3109,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         # -- Analyze tab (Health / Rides / Compare / Gearing) ----------------
         def _build_analyze_tab(self):
-            f = self._new_tab(" 4 · Analyze ", "Analyze the data",
+            f = self._new_tab(" Analyze ", "Analyze the data",
                               "health, rides, and comparisons")
 
             top = ttk.Frame(f)
@@ -3124,6 +3175,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.ride_tree.column(c, width=w, anchor="w")
             self.ride_tree.pack(fill="both", expand=True, pady=(6, 0))
             self._attach_tree_copy(self.ride_tree)       # E4
+
+            # Charts — plot the ride-log time series on a themed canvas (no matplotlib)
+            self._build_charts_tab(sub)
 
             # Compare
             cf = ttk.Frame(sub, padding=8)
@@ -3283,12 +3337,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if recs:
                 self._render_ride_records(recs, "session dumplogs (legacy capture)")
                 return
+            self._ride_records = []
+            self._render_charts()
             self.lbl_ride_totals.config(
                 text="Ride telemetry isn't a console command on this firmware — use "
                      "'Load ride log (.txt)' above to analyze a zero-log-parser export.")
 
         def _render_ride_records(self, recs, source):
             self.ride_tree.delete(*self.ride_tree.get_children())
+            self._ride_records = list(recs or [])
+            self._render_charts()                    # keep the Charts tab in sync
             summ = rides.summarize_rides(recs)
             t = summ["totals"]
             if not summ["rides"]:
@@ -3315,6 +3373,202 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     r["max_pack_temp_c"] if r["max_pack_temp_c"] is not None else "n/a",
                     r["max_motor_temp_c"] if r["max_motor_temp_c"] is not None else "n/a",
                     r["max_rpm"] if r["max_rpm"] is not None else "n/a"))
+
+        # -- Analyze: Charts (dependency-free tk.Canvas plots) ---------------
+        _CHART_METRICS = ("SOC vs distance", "Pack voltage vs distance",
+                          "Temperatures vs distance", "Motor current vs distance",
+                          "SOC vs pack voltage", "Efficiency per ride (bar)")
+
+        def _build_charts_tab(self, sub):
+            self._ride_records = []
+            cf = ttk.Frame(sub, padding=8)
+            sub.add(cf, text=" Charts ")
+            row = ttk.Frame(cf)
+            row.pack(fill="x")
+            ttk.Label(row, text="Plot:").pack(side="left")
+            self.chart_metric = tk.StringVar(value=self._CHART_METRICS[0])
+            self.cbo_chart = ttk.Combobox(row, textvariable=self.chart_metric,
+                                          state="readonly", width=26,
+                                          values=list(self._CHART_METRICS))
+            self.cbo_chart.pack(side="left", padx=6)
+            self.cbo_chart.bind("<<ComboboxSelected>>",
+                                lambda e: self._render_charts())
+            ttk.Label(row, text="from the loaded ride log (Rides tab)",
+                      style="Muted.TLabel").pack(side="left", padx=8)
+            self.chart_canvas = tk.Canvas(cf, highlightthickness=0,
+                                          bg=P["console"], height=380)
+            self.chart_canvas.pack(fill="both", expand=True, pady=(8, 0))
+            # redraw responsively; debounce so a resize drag isn't a redraw storm
+            self.chart_canvas.bind("<Configure>", self._chart_on_resize)
+
+        def _chart_on_resize(self, _evt=None):
+            if getattr(self, "_chart_resize_job", None):
+                try:
+                    self.after_cancel(self._chart_resize_job)
+                except Exception:
+                    pass
+            self._chart_resize_job = self.after(120, self._render_charts)
+
+        def _fmt_tick(self, v):
+            return "%d" % round(v) if abs(v - round(v)) < 1e-9 else "%.1f" % v
+
+        def _chart_size(self, cv):
+            # winfo_width() is 1 until the canvas is laid out (and in headless
+            # tests) — fall back to a sensible default so we still draw.
+            w, h = cv.winfo_width(), cv.winfo_height()
+            return (w if w > 1 else 700), (h if h > 1 else 380)
+
+        def _chart_msg(self, cv, text):
+            w, h = self._chart_size(cv)
+            cv.create_text(w / 2, h / 2, text=text, fill=P["dim"],
+                           justify="center", width=max(240, w - 80),
+                           font=(self.sty["ui"], 10))
+
+        def _render_charts(self):
+            cv = getattr(self, "chart_canvas", None)
+            if cv is None:
+                return
+            cv.delete("all")
+            recs = getattr(self, "_ride_records", [])
+            metric = self.chart_metric.get()
+            unit = config.get_units()
+            dfac = 0.621371 if unit == "mi" else 1.0
+            dlabel = "distance (%s)" % ("mi" if unit == "mi" else "km")
+            tu = config.get_temp_units()
+
+            def tconv(c):
+                return round(c * 9 / 5 + 32) if tu == "F" else c
+
+            if not recs:
+                self._chart_msg(cv, "No ride log loaded.\n\nAnalyze → Rides → 'Load "
+                                "ride log (.txt)…' to plot the ride telemetry here.")
+                return
+            base = min((r["odo_km"] for r in recs
+                        if isinstance(r.get("odo_km"), (int, float))), default=0.0)
+
+            def dist_series(ykey, conv=None):
+                pts = charts_mod.series_from(recs, "odo_km", ykey)
+                return [((x - base) * dfac, (conv(y) if conv else y)) for x, y in pts]
+
+            if metric == "SOC vs distance":
+                self._chart_line(cv, [("SOC %", P["green"], dist_series("soc"))],
+                                 dlabel, "state of charge (%)")
+            elif metric == "Pack voltage vs distance":
+                self._chart_line(cv, [("Vpack", "#5aa8ff", dist_series("vpack"))],
+                                 dlabel, "pack voltage (V)")
+            elif metric == "Temperatures vs distance":
+                self._chart_line(cv, [
+                    ("pack", P["warn"], dist_series("pack_temp_c", tconv)),
+                    ("motor", P["danger"], dist_series("motor_temp_c", tconv))],
+                    dlabel, "temperature (°%s)" % tu)
+            elif metric == "Motor current vs distance":
+                self._chart_line(cv, [("motor A", "#8fd0ff", dist_series("motamps"))],
+                                 dlabel, "motor current (A)")
+            elif metric == "SOC vs pack voltage":
+                pts = charts_mod.series_from(recs, "vpack", "soc")
+                self._chart_line(cv, [("SOC", P["green"], pts)],
+                                 "pack voltage (V)", "state of charge (%)", dots=True)
+            elif metric == "Efficiency per ride (bar)":
+                summ = rides.summarize_rides(recs)
+                bars = [(r["start_ts"] or ("ride %d" % (i + 1)),
+                         (r["soc_per_km"] / dfac))
+                        for i, r in enumerate(summ["rides"])
+                        if r["soc_per_km"] is not None]
+                if not bars:
+                    self._chart_msg(cv, "No per-ride efficiency yet — the log needs "
+                                    "distance + SOC samples.")
+                    return
+                self._chart_bar(cv, [b[0] for b in bars], [b[1] for b in bars],
+                                "SOC %% used per %s" % ("mi" if unit == "mi" else "km"))
+
+        def _chart_line(self, cv, series, xlabel, ylabel, dots=False):
+            series = [(lbl, col, charts_mod.downsample(pts))
+                      for lbl, col, pts in series if pts]
+            allpts = [p for _, _, pts in series for p in pts]
+            if not allpts:
+                self._chart_msg(cv, "Not enough data to plot this metric.")
+                return
+            w, h = self._chart_size(cv)
+            x0, y0, x1, y1 = 60, 16, w - 18, h - 42
+            if x1 - x0 < 60 or y1 - y0 < 60:
+                return
+            xs = [p[0] for p in allpts]
+            ys = [p[1] for p in allpts]
+            xlo, xhi, xstep = charts_mod.nice_bounds(min(xs), max(xs))
+            ylo, yhi, ystep = charts_mod.nice_bounds(min(ys), max(ys))
+
+            def sx(x):
+                return x0 + (x - xlo) / (xhi - xlo) * (x1 - x0)
+
+            def sy(y):
+                return y1 - (y - ylo) / (yhi - ylo) * (y1 - y0)
+
+            grid, axcol, fg = "#2a2d38", P["dim"], P["fg"]
+            for xt in charts_mod.axis_ticks(xlo, xhi, xstep):
+                gx = sx(xt)
+                cv.create_line(gx, y0, gx, y1, fill=grid)
+                cv.create_text(gx, y1 + 5, text=self._fmt_tick(xt), fill=axcol,
+                               anchor="n", font=(self.sty["mono"], 8))
+            for yt in charts_mod.axis_ticks(ylo, yhi, ystep):
+                gy = sy(yt)
+                cv.create_line(x0, gy, x1, gy, fill=grid)
+                cv.create_text(x0 - 5, gy, text=self._fmt_tick(yt), fill=axcol,
+                               anchor="e", font=(self.sty["mono"], 8))
+            cv.create_rectangle(x0, y0, x1, y1, outline=axcol)
+            cv.create_text((x0 + x1) / 2, h - 10, text=xlabel, fill=fg,
+                           font=(self.sty["ui"], 9))
+            cv.create_text(12, (y0 + y1) / 2, text=ylabel, fill=fg, angle=90,
+                           font=(self.sty["ui"], 9))
+            for lbl, col, pts in series:
+                coords = []
+                for x, y in pts:
+                    coords += [sx(x), sy(y)]
+                if len(coords) >= 4 and not dots:
+                    cv.create_line(*coords, fill=col, width=2)
+                if dots or len(pts) == 1:
+                    for x, y in pts:
+                        cx, cy = sx(x), sy(y)
+                        cv.create_oval(cx - 1.6, cy - 1.6, cx + 1.6, cy + 1.6,
+                                       fill=col, outline="")
+            if len(series) > 1:
+                lx, ly = x1 - 84, y0 + 10
+                for lbl, col, _ in series:
+                    cv.create_line(lx, ly, lx + 16, ly, fill=col, width=3)
+                    cv.create_text(lx + 22, ly, text=lbl, fill=fg, anchor="w",
+                                   font=(self.sty["mono"], 8))
+                    ly += 15
+
+        def _chart_bar(self, cv, labels, values, ylabel):
+            w, h = self._chart_size(cv)
+            x0, y0, x1, y1 = 60, 16, w - 18, h - 54
+            if x1 - x0 < 60 or y1 - y0 < 60 or not values:
+                return
+            ylo, yhi, ystep = charts_mod.nice_bounds(min(0, min(values)), max(values))
+
+            def sy(y):
+                return y1 - (y - ylo) / (yhi - ylo) * (y1 - y0)
+
+            grid, axcol, fg = "#2a2d38", P["dim"], P["fg"]
+            for yt in charts_mod.axis_ticks(ylo, yhi, ystep):
+                gy = sy(yt)
+                cv.create_line(x0, gy, x1, gy, fill=grid)
+                cv.create_text(x0 - 5, gy, text=self._fmt_tick(yt), fill=axcol,
+                               anchor="e", font=(self.sty["mono"], 8))
+            cv.create_rectangle(x0, y0, x1, y1, outline=axcol)
+            n = len(values)
+            slot = (x1 - x0) / n
+            bw = min(48, slot * 0.6)
+            for i, (lbl, val) in enumerate(zip(labels, values)):
+                bx = x0 + slot * i + (slot - bw) / 2
+                cv.create_rectangle(bx, sy(val), bx + bw, sy(0), fill=P["green"],
+                                    outline="")
+                cv.create_text(bx + bw / 2, sy(val) - 5, text=self._fmt_tick(val),
+                               fill=fg, anchor="s", font=(self.sty["mono"], 8))
+                short = str(lbl)[-8:]
+                cv.create_text(bx + bw / 2, y1 + 5, text=short, fill=axcol,
+                               anchor="ne", angle=35, font=(self.sty["mono"], 7))
+            cv.create_text(12, (y0 + y1) / 2, text=ylabel, fill=fg, angle=90,
+                           font=(self.sty["ui"], 9))
 
         def _load_ride_log(self):
             path = filedialog.askopenfilename(
