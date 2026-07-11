@@ -1024,11 +1024,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       "  %s" % (self.logger.dir if self.logger else "(none yet)")]
             self._info_window("Bike info", "\n".join(lines))
 
-        def _open_html_help(self, filename, fallback_title, fallback_text):
-            """T6b: open a stylized, self-contained HTML help page in the browser.
-            Reads the packaged asset bytes and writes them to a stable temp file
-            (works in dev and in the frozen build), then launches the browser.
-            Falls back to the in-app text window if anything goes wrong."""
+        def _open_html_help(self, filename, fallback_title, fallback_text, anchor=""):
+            """Open a stylized, self-contained HTML help page in the browser (all the
+            help pages are tabs in one info.html; `anchor` selects the tab via
+            #hash). Reads the packaged asset bytes to a stable temp file (dev + the
+            frozen build), then launches the browser. Falls back to the in-app text
+            window if anything goes wrong."""
             try:
                 import webbrowser, tempfile, os, pathlib
                 from importlib.resources import files
@@ -1036,21 +1037,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 tmp = os.path.join(tempfile.gettempdir(), "openmbb_" + filename)
                 with open(tmp, "wb") as fh:
                     fh.write(data)
-                if webbrowser.open(pathlib.Path(tmp).as_uri()):
+                uri = pathlib.Path(tmp).as_uri() + (("#" + anchor) if anchor else "")
+                if webbrowser.open(uri):
                     return
             except Exception:
                 pass
             self._info_window(fallback_title, fallback_text)
 
         def _show_instructions(self, _evt=None):
-            self._open_html_help("instructions.html", "Instructions",
-                                 INSTRUCTIONS_TEXT)
+            self._open_html_help("info.html", "Instructions", INSTRUCTIONS_TEXT,
+                                 "instructions")
 
         def _show_wiring(self):
-            self._open_html_help("wiring.html", "Wiring", WIRING_TEXT)
+            self._open_html_help("info.html", "Wiring", WIRING_TEXT, "wiring")
 
         def _show_safety(self):
-            self._info_window("Safety notes", SAFETY_TEXT)
+            self._open_html_help("info.html", "Safety notes", SAFETY_TEXT, "safety")
 
         def _show_about(self):
             import sys
@@ -2029,8 +2031,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             return result["ok"]
 
         def _show_command_reference(self):
-            self._open_html_help("command_reference.html", "Command reference",
-                                 "Command reference (see the repo for the full page).")
+            self._open_html_help("info.html", "Command reference",
+                                 "Command reference (see the repo for the full page).",
+                                 "reference")
 
         def _baseline(self):
             # D4: run `obd` LAST — after `set` (the backup) and errorlogdump —
