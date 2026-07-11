@@ -1684,11 +1684,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                    lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
             canvas.bind("<Configure>",
                         lambda e: canvas.itemconfigure(win, width=e.width))
-
-            def _wheel(e):
-                canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-            canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _wheel))
-            canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+            # wheel scrolling bound directly on the canvas (not bind_all, which
+            # churns the interpreter-global "all" bindtag across app lifecycles);
+            # the visible scrollbar drag works from anywhere regardless.
+            canvas.bind("<MouseWheel>",
+                        lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)),
+                                                      "units"))
             return f
 
         # -- Phase 3: Writes -------------------------------------------------------

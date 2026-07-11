@@ -4,6 +4,7 @@ Skipped automatically where Tk has no display. Run with the real interpreter
 on Windows; drives the app headlessly by pumping the event loop.
 """
 
+import gc
 import os
 import time
 
@@ -33,10 +34,28 @@ def app(monkeypatch):
         pytest.skip("no display available for Tk")
     application._errors = errors
     yield application
+    # Deterministic teardown. Tk Variable objects (StringVar/BooleanVar/…) hold
+    # reference cycles through their widgets, so they aren't freed the instant the
+    # app is destroyed — they linger until CPython's cyclic GC runs, which can be
+    # mid-way through a *later* test's app.update(). When it fires there, the dead
+    # Variables' __del__ calls into a torn-down interpreter ("main thread is not in
+    # main loop") and can disrupt the live test's event pump. So: cancel any pending
+    # after() callbacks (Watch timer, listen countdown), destroy, then force a
+    # collect here so each test drains the *previous* test's Tk cycles in a
+    # controlled spot instead of letting them accumulate and fire mid-test.
+    try:
+        for aid in application.tk.call("after", "info"):
+            try:
+                application.after_cancel(aid)
+            except Exception:
+                pass
+    except Exception:
+        pass
     try:
         application.destroy()
     except Exception:
         pass
+    gc.collect()
 
 
 def _pump(app, cond, timeout=60):
