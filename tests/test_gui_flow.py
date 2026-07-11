@@ -563,12 +563,12 @@ def test_locked_writes_tab_explains(app, monkeypatch):
 
 
 def test_read_tab_has_legend_and_tooltips(app):
-    # B6: the bare firmware command buttons get a plain-language legend + a hover
-    # tip for every read, so a first-timer isn't facing a wall of jargon.
+    # B6/T2: the dashboard gives plain-language section cues (not a wall of
+    # jargon) plus a hover tip for every read.
     from openmbb.gui import READ_TIPS
     from openmbb.transport import READ_COMMANDS, DUMP_COMMANDS, HEAVY_COMMANDS
     labels = " ".join(_all_label_text(app)).lower()
-    assert "one-shot reads" in labels and "hover a button" in labels
+    assert "quick reads" in labels and "pull full database" in labels
     for cmd in READ_COMMANDS + DUMP_COMMANDS + HEAVY_COMMANDS:
         assert READ_TIPS.get(cmd), "no tooltip for read button %r" % cmd
 
