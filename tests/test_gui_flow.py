@@ -266,6 +266,29 @@ def test_sim_toggle_shows_indicator(app):
     assert app._sim_badge.winfo_manager() == "place"   # badge shown
 
 
+def test_landing_test_cable_reminds_in_real_mode(monkeypatch):
+    # owner: hitting "Test your cable" in REAL mode silently failed with no heads-up.
+    # It must first remind you to connect the cable + power the bike.
+    import tempfile
+    tk = pytest.importorskip("tkinter")
+    from openmbb import dialogs
+    from openmbb.gui import build_gui
+    asked = []
+    monkeypatch.setattr(dialogs, "askokcancel",
+                        lambda *a, **k: asked.append(a) or False)
+    try:
+        app = build_gui(sim=False, log_dir=tempfile.mkdtemp(prefix="tc_"))
+    except tk.TclError:
+        pytest.skip("no display available for Tk")
+    try:
+        app._landing_test_cable()          # real mode, user cancels the reminder
+        assert asked, "real-mode cable test should show a readiness reminder first"
+        blob = str(asked[0]).lower()
+        assert "cable" in blob and "bike" in blob and "charger" in blob
+    finally:
+        app.destroy()
+
+
 def test_dashboard_layout(app):
     # T2: the connected view has a status header + the primary "Pull full
     # database" accent action, and the header tracks connection state.

@@ -309,11 +309,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             brow = ttk.Frame(inner)
             brow.pack()
             ttk.Button(brow, text="Test your cable", width=22,
-                       command=lambda: self._leave_landing(self._listen_only)
+                       command=self._landing_test_cable
                        ).pack(side="left", padx=10, ipady=8)
             ttk.Button(brow, text="Connect & read", width=22,
                        style=self.sty["accent"],
-                       command=lambda: self._leave_landing(self._connect)
+                       command=self._landing_connect
                        ).pack(side="left", padx=10, ipady=8)
 
             cap = ttk.Frame(inner)
@@ -344,6 +344,39 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.update_idletasks()
             if action:
                 action()
+
+        _PREP_STEPS = ("First make sure:\n"
+                       "  • the FTDI cable is plugged into the bike and your PC,\n"
+                       "  • your COM port is selected on this screen (click Refresh "
+                       "if it's missing),\n"
+                       "  • the bike is powered — key ON, or plug in the AC charger.\n\n"
+                       "No bike or cable yet? Cancel, then turn on 'Simulator mode "
+                       "(no bike)' in the Tools menu.\n\n")
+
+        def _landing_test_cable(self):
+            # sim: nothing to prep, just run. real: remind the owner what's needed
+            # (bike on + cable connected + port) so it doesn't silently fail.
+            self._leave_landing()
+            if self.sim_var.get():
+                self._listen_only()
+                return
+            if messagebox.askokcancel(
+                    "Before you test the cable",
+                    "The cable test only LISTENS — it sends nothing, so it's safe on "
+                    "any wiring.\n\n" + self._PREP_STEPS + "Start listening now "
+                    "(~45 s)?"):
+                self._listen_only()
+
+        def _landing_connect(self):
+            self._leave_landing()
+            if self.sim_var.get():
+                self._connect()
+                return
+            if messagebox.askokcancel(
+                    "Before you connect",
+                    "Connecting wakes the bike's console and reads it.\n\n"
+                    + self._PREP_STEPS + "Connect now?"):
+                self._connect()
 
         # -- consistent page scaffold (owner: make tab pages match the landing) --
         def _tab_header(self, parent, title, subtitle=""):
