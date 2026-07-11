@@ -107,16 +107,22 @@ def render(S, grid=True):
     return img.resize((S, S), Image.LANCZOS)
 
 
+SIZES = (16, 32, 48, 64, 256)   # exactly what Windows pulls (taskbar .. Explorer)
+
+
 def main():
     os.makedirs(ASSETS, exist_ok=True)
-    for s in (16, 32, 48, 64, 256):
+    tiles = {}
+    for s in SIZES:
+        tiles[s] = render(s, grid=(s >= 48))
         out = os.path.join(ASSETS, "icon_%d.png" % s)
-        render(s, grid=(s >= 48)).save(out)
+        tiles[s].save(out)
         print("wrote", out)
     ico = os.path.join(HERE, "openmbb.ico")
-    base = render(256, grid=True)
-    others = [render(s, grid=(s >= 48)) for s in (16, 32, 48, 64, 128)]
-    base.save(ico, format="ICO", append_images=others)
+    ordered = [tiles[s] for s in sorted(SIZES, reverse=True)]
+    # pass explicit `sizes` so Pillow emits exactly these frames (its default is 7)
+    ordered[0].save(ico, format="ICO", append_images=ordered[1:],
+                    sizes=[(s, s) for s in sorted(SIZES, reverse=True)])
     print("wrote", ico)
 
 

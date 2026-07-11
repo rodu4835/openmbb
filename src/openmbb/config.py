@@ -104,6 +104,15 @@ def set_units(units):
     return set("units", "mi" if units == "mi" else "km")
 
 
+# temperature display preference ("C" or "F"); default C (the bike's native unit).
+def get_temp_units():
+    return "F" if load_config().get("temp_units") == "F" else "C"
+
+
+def set_temp_units(units):
+    return set("temp_units", "F" if units == "F" else "C")
+
+
 def config_was_corrupt():
     """True if a prior load found a corrupt config and set it aside."""
     return _bad_path().exists()

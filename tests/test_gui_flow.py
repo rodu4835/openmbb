@@ -190,18 +190,28 @@ def test_menubar_normalized_labels_no_chevrons(app):
 
 
 def test_menu_popup_builds_and_reorganized(app):
-    # The dropdown is a custom themed Toplevel (no native white border), and the
-    # menus are reorganized so Tools is no longer a single-item menu.
+    # The dropdown is a custom themed Toplevel (no native white border), reorganized
+    # so Tools has a COM-port fly-out submenu + a Settings dialog (units moved into
+    # Settings), and the COM submenu + Settings build cleanly.
     import tkinter as tk
     import tkinter.ttk as ttk
 
-    # spec shapes are valid and the units radios live under Tools now
     for specs in (app._file_menu(), app._tools_menu(), app._help_menu()):
-        assert specs and all(s[0] in ("cmd", "sep", "radio") for s in specs)
+        assert specs and all(s[0] in ("cmd", "sep", "radio", "submenu") for s in specs)
     tools = app._tools_menu()
-    assert sum(1 for s in tools if s[0] in ("cmd", "radio")) >= 4   # not sparse
-    assert any(s[0] == "radio" for s in tools)                      # units moved here
+    assert any(s[0] == "submenu" for s in tools)                    # COM-port fly-out
+    assert any(s[0] == "cmd" and "settings" in s[1].lower() for s in tools)
     assert any(s[0] == "cmd" and "issue" in s[1].lower() for s in app._help_menu())
+    # the COM-port submenu builds a valid spec list (no ports -> an info row)
+    com = app._com_port_menu()
+    assert com and all(s[0] in ("cmd", "sep", "radio") for s in com)
+    assert any(s[0] == "cmd" and "refresh" in s[1].lower() for s in com)
+    # the units radios now live in the Settings dialog, bound to the unit vars
+    assert app.units_var.get() in ("km", "mi")
+    assert app.temp_units_var.get() in ("C", "F")
+    sw = app._show_settings("Units")
+    assert isinstance(sw, tk.Toplevel)
+    sw.destroy()
 
     # find the File menubutton and open its popup
     mb = None
@@ -222,6 +232,37 @@ def test_menu_popup_builds_and_reorganized(app):
     for w in pops:
         w.destroy()
     app._open_menu = None
+    app._open_submenu = None
+
+
+def _descendants(w):
+    out = []
+    for c in w.winfo_children():
+        out.append(c)
+        out.extend(_descendants(c))
+    return out
+
+
+def test_select_port_sets_next_connect_port(app):
+    # the Tools -> COM port fly-out picks the port for the next Connect and mirrors
+    # it into the Connect-tab combobox; the menu label reflects the choice.
+    app._select_port("COM7")
+    assert app.port_var.get() == "COM7"
+    assert app.cbo_port.get() == "COM7"
+    assert app._current_port_label() == "COM7"     # not connected -> shows selection
+
+
+def test_bike_about_merged_two_tab_window(app):
+    # Bike info + About are one two-tab popup; each entry opens its own tab.
+    import tkinter as tk
+    import tkinter.ttk as ttk
+    for active in ("Bike info", "About"):
+        w = app._bike_about_window(active)
+        assert isinstance(w, tk.Toplevel)
+        nbs = [c for c in _descendants(w) if isinstance(c, ttk.Notebook)]
+        assert nbs and len(nbs[0].tabs()) == 2     # exactly two tabs
+        w.destroy()
+    assert not app._errors
 
 
 def test_themed_dialog_builds_and_centers(app):
@@ -1297,7 +1338,7 @@ def test_probe_warns_on_unknown_firmware_rev(app, monkeypatch):
     app._connect()
     assert _pump(app, lambda: app.connected)      # still connects
     assert warned                                 # but warned about the rev
-    assert app.lbl_ver.cget("text").endswith("99")
+    assert "99" in app.dash_header.cget("text")   # rev surfaced in the dashboard header
 
 
 def test_reconnect_re_earns_phases(app):

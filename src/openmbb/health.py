@@ -55,12 +55,24 @@ def _setting_num_live(settings, name, default):
     return float(default), False
 
 
-def health_snapshot(session):
+def health_snapshot(session, temp_units="C"):
     bms = parse_bms(session.cmd("bms"))
     stats = parse_stats(session.cmd("stats"))
     status = parse_status(session.cmd("status"))
     settings, _ = parse_settings_dump(session.settings_text)
     out = []
+
+    # display-only temperature conversion (comparisons stay in Celsius; default C
+    # keeps the output byte-identical to before)
+    def _t(v):
+        if v is None:
+            return None
+        return "%g F" % round(v * 9 / 5 + 32) if temp_units == "F" else "%g C" % v
+
+    def _rng(a, b):
+        if temp_units == "F":
+            return "%d-%d F" % (round(a * 9 / 5 + 32), round(b * 9 / 5 + 32))
+        return "%d-%d C" % (a, b)
 
     fw = stats.get("fw_rev") or bms.get("bms_fw_rev")
     out.append(_metric("Firmware rev", fw))
@@ -105,18 +117,19 @@ def health_snapshot(session):
         # documented defaults — label each value's provenance so a mix (or a garbled
         # single value) is never presented as a live read of this bike.
         def _lbl(v, live):
-            return "%g C" % v if live else "%g C (default)" % v
+            return _t(v) if live else "%s (default)" % _t(v)
         note = ("highest EVER recorded, not the current temperature. Cutback "
                 "stages at %s / %s" % (_lbl(s1, live1), _lbl(s2, live2)))
         if not (live1 and live2):
             note += " — '(default)' = documented default, not read from this bike"
-        out.append(_metric("Max motor temp (lifetime)", "%g C" % mot_t, st, note))
+        out.append(_metric("Max motor temp (lifetime)", _t(mot_t), st, note))
     batt_t = first_val(stats.get("max_batt_temp_c"), bms.get("pack_max_temp_c"))
     if batt_t is not None:
         st = "ok" if batt_t < 50 else ("watch" if batt_t < 60 else "alert")
-        out.append(_metric("Max battery temp (lifetime)", "%g C" % batt_t, st,
+        out.append(_metric("Max battery temp (lifetime)", _t(batt_t), st,
                            "highest EVER recorded, not the current temperature; "
-                           "charge tapers ~43-50 C, operation stop ~50-60 C"))
+                           "charge tapers ~%s, operation stop ~%s"
+                           % (_rng(43, 50), _rng(50, 60))))
 
     # F5: isolation resistance — healthy is megohms (>1000 kΩ). A low reading on
     # the charger is a documented false-positive, so soften the flag when the

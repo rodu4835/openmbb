@@ -642,96 +642,150 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.after(40, self._pump_cbq)
 
         def _build_statusbar(self):
+            # owner: keep this row lean — connection + login (+ sim). The firmware
+            # rev shows in the Read dashboard header, the app version is in the title
+            # bar, and the save location lives in File / Tools -> Settings, so none
+            # of those are repeated here.
             bar = ttk.Frame(self, padding=(8, 6))
             bar.pack(fill="x")
             self.lbl_conn = ttk.Label(bar, text="● DISCONNECTED",
                                       foreground=P["danger"],
                                       font=(self.sty["ui"], 10, "bold"))
             self.lbl_conn.pack(side="left")
-            self.lbl_ver = ttk.Label(bar, text="", foreground=P["green"])
-            self.lbl_ver.pack(side="left", padx=16)
             self.lbl_login = ttk.Label(bar, text="not logged in",
                                        foreground=P["dim"])
             self.lbl_login.pack(side="left", padx=16)
             self.lbl_sim = ttk.Label(bar, text="", style="Accent.TLabel")
             self.lbl_sim.pack(side="left", padx=16)
-            self.lbl_sess = ttk.Label(bar, text="session: (none yet)",
-                                      foreground=P["dim"], cursor="hand2")
-            self.lbl_sess.pack(side="right")
-            self.lbl_sess.bind("<Button-1>", lambda e: self._open_session_folder())
-            ttk.Label(bar, text="v%s" % __version__,
-                      foreground=P["dim"]).pack(side="right", padx=16)
 
         # -- menu bar --------------------------------------------------------
         def _menu_popup(self, anchor, specs):
             """A custom themed dropdown (an overrideredirect Toplevel) so there's no
             native white border and full control over colours / spacing / hover —
-            tk.Menu on Windows can't be styled that far. `specs` is a list of
-            ("cmd", label, cb) / ("sep",) / ("radio", label, selected, cb)."""
+            tk.Menu on Windows can't be styled that far. Specs items:
+            ("cmd", label, cb) / ("sep",) / ("radio", label, selected, cb) /
+            ("submenu", label, subspecs_fn) — a fly-out side menu."""
             existing = getattr(self, "_open_menu", None)
             if existing is not None:
                 try:
                     existing.destroy()
                 except Exception:
                     pass
-                self._open_menu = None
+            self._open_menu = None
+            self._open_submenu = None
             border, menu_bg, hover = "#4a4470", "#1d1d26", "#33384a"
-            win = tk.Toplevel(self)
-            win.overrideredirect(True)
-            win.configure(bg=border)
-            self._open_menu = win
-            body = tk.Frame(win, bg=menu_bg)
-            body.pack(padx=1, pady=1)     # the 1px win bg shows as a thin accent edge
 
-            def close():
-                try:
-                    win.destroy()
-                except Exception:
-                    pass
-                if getattr(self, "_open_menu", None) is win:
-                    self._open_menu = None
+            def close_all():
+                # destroy the submenu FIRST, then the root — be explicit rather
+                # than relying on Tk to cascade, so no fly-out is left orphaned.
+                for attr in ("_open_submenu", "_open_menu"):
+                    win = getattr(self, attr, None)
+                    if win is not None:
+                        try:
+                            win.destroy()
+                        except Exception:
+                            pass
+                    setattr(self, attr, None)
 
-            def item(label, cb, mark=""):
-                row = tk.Frame(body, bg=menu_bg)
-                row.pack(fill="x")
-                mk = tk.Label(row, text=mark, bg=menu_bg, fg=P["green"], width=2,
-                              font=(self.sty["ui"], 10))
-                mk.pack(side="left")
-                tx = tk.Label(row, text=label, bg=menu_bg, fg=P["fg"], anchor="w",
-                              padx=6, pady=5, font=(self.sty["ui"], 10))
-                tx.pack(side="left", fill="x", expand=True)
-                parts = (row, mk, tx)
-                for w in parts:
-                    w.bind("<Enter>", lambda e: [p.config(bg=hover) for p in parts])
-                    w.bind("<Leave>", lambda e: [p.config(bg=menu_bg) for p in parts])
-                    w.bind("<Button-1>", lambda e, c=cb: (close(), c(), "break")[-1])
+            def close_submenu():
+                sm = getattr(self, "_open_submenu", None)
+                if sm is not None:
+                    try:
+                        sm.destroy()
+                    except Exception:
+                        pass
+                    self._open_submenu = None
 
-            for spec in specs:
-                if spec[0] == "sep":
-                    tk.Frame(body, bg="#39394a", height=1).pack(fill="x", padx=8, pady=4)
-                elif spec[0] == "cmd":
-                    item(spec[1], spec[2])
-                elif spec[0] == "radio":
-                    item(spec[1], spec[3], mark="●" if spec[2] else "")
+            def open_submenu(row, subspecs_fn):
+                cur = getattr(self, "_open_submenu", None)
+                if cur is not None and getattr(cur, "_owner_row", None) is row:
+                    return                   # already open for this row (no flicker)
+                close_submenu()
+                sub = render(subspecs_fn(), self._open_menu)   # child of root -> in grab
+                sub._owner_row = row
+                self._open_submenu = sub
+                row.update_idletasks()
+                sub.geometry("+%d+%d" % (row.winfo_rootx() + row.winfo_width(),
+                                         row.winfo_rooty() - 1))
 
-            win.update_idletasks()
-            win.geometry("+%d+%d" % (anchor.winfo_rootx(),
-                                     anchor.winfo_rooty() + anchor.winfo_height()))
-            win.bind("<Escape>", lambda e: close())
+            def render(items, parent_win):
+                win = tk.Toplevel(parent_win)
+                win.overrideredirect(True)
+                win.configure(bg=border)
+                body = tk.Frame(win, bg=menu_bg)
+                body.pack(padx=1, pady=1)    # 1px win bg shows as a thin accent edge
+
+                def add_item(label, cb=None, mark="", submenu_fn=None):
+                    row = tk.Frame(body, bg=menu_bg)
+                    row.pack(fill="x")
+                    mk = tk.Label(row, text=mark, bg=menu_bg, fg=P["green"], width=2,
+                                  font=(self.sty["ui"], 10))
+                    mk.pack(side="left")
+                    tx = tk.Label(row, text=label, bg=menu_bg, fg=P["fg"], anchor="w",
+                                  padx=6, pady=5, font=(self.sty["ui"], 10))
+                    tx.pack(side="left", fill="x", expand=True)
+                    ar = tk.Label(row, text=("▸" if submenu_fn else ""), bg=menu_bg,
+                                  fg=P["dim"], width=2, font=(self.sty["ui"], 10))
+                    ar.pack(side="right")
+                    parts = (row, mk, tx, ar)
+
+                    def enter(_e):
+                        for p in parts:
+                            p.config(bg=hover)
+                        if submenu_fn:
+                            open_submenu(row, submenu_fn)
+                        else:
+                            close_submenu()
+
+                    def leave(_e):
+                        for p in parts:
+                            p.config(bg=menu_bg)
+                    for w in parts:
+                        w.bind("<Enter>", enter)
+                        w.bind("<Leave>", leave)
+                        if submenu_fn:
+                            w.bind("<Button-1>", lambda e, r=row, f=submenu_fn:
+                                   (open_submenu(r, f), "break")[-1])
+                        else:
+                            w.bind("<Button-1>", lambda e, c=cb:
+                                   (close_all(), c and c(), "break")[-1])
+
+                for spec in items:
+                    if spec[0] == "sep":
+                        tk.Frame(body, bg="#39394a", height=1).pack(
+                            fill="x", padx=8, pady=4)
+                    elif spec[0] == "cmd":
+                        add_item(spec[1], cb=spec[2])
+                    elif spec[0] == "radio":
+                        add_item(spec[1], cb=spec[3], mark="●" if spec[2] else "")
+                    elif spec[0] == "submenu":
+                        add_item(spec[1], submenu_fn=spec[2])
+                win.update_idletasks()
+                return win
+
+            root = render(specs, self)
+            self._open_menu = root
+            root.geometry("+%d+%d" % (anchor.winfo_rootx(),
+                                      anchor.winfo_rooty() + anchor.winfo_height()))
+            root.bind("<Escape>", lambda e: close_all())
             try:
-                win.grab_set()            # so a click anywhere dismisses it
+                root.grab_set()              # so a click anywhere dismisses it
             except Exception:
                 pass
 
             def outside(e):
-                if 0 <= e.x < win.winfo_width() and 0 <= e.y < win.winfo_height():
+                if 0 <= e.x < root.winfo_width() and 0 <= e.y < root.winfo_height():
                     return
                 w = self.winfo_containing(e.x_root, e.y_root)
-                close()
+                sm = getattr(self, "_open_submenu", None)
+                if sm is not None and w is not None and \
+                        (str(w) == str(sm) or str(w).startswith(str(sm) + ".")):
+                    return                   # click landed inside the open submenu
+                close_all()
                 fn = getattr(w, "_owl_menu_specs", None)
-                if fn is not None:        # clicked another menu button -> switch to it
+                if fn is not None:           # clicked another menu button -> switch
                     self._menu_popup(w, fn())
-            win.bind("<Button-1>", outside)
+            root.bind("<Button-1>", outside)
 
         def _build_menubar(self):
             # A themed ttk Menubutton bar with custom popup dropdowns (no native
@@ -754,6 +808,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 mb_style = "TMenubutton"
 
             self.units_var = tk.StringVar(value=config.get_units())
+            self.temp_units_var = tk.StringVar(value=config.get_temp_units())
             bar = ttk.Frame(self)
             bar.pack(side="top", fill="x")
 
@@ -782,18 +837,51 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ]
 
         def _tools_menu(self):
-            u = self.units_var.get()
             return [
                 ("cmd", "Bike info…", self._show_bike_info),
-                ("cmd", "Refresh COM ports", self._refresh_ports),
+                ("submenu", "COM port:  %s" % self._current_port_label(),
+                 self._com_port_menu),
                 ("sep",),
-                ("radio", "Distance: kilometers", u == "km",
-                 lambda: self._set_units("km")),
-                ("radio", "Distance: miles", u == "mi",
-                 lambda: self._set_units("mi")),
-                ("sep",),
-                ("cmd", "Forget saved login passwords", self._forget_passwords),
+                ("cmd", "Settings…", self._show_settings),
             ]
+
+        def _current_port_label(self):
+            if self.connected:
+                return ("SIMULATOR" if self.sim_var.get()
+                        else (self.port_var.get() or "connected"))
+            return self.port_var.get() or "(none)"
+
+        def _com_port_menu(self):
+            # the fly-out list of COM ports; the OS list is queried fresh each time
+            # this opens, so it's always current (Refresh just re-logs on Connect).
+            items = []
+            if self.connected:
+                where = ("SIMULATOR" if self.sim_var.get()
+                         else (self.port_var.get() or "?"))
+                items += [("cmd", "Connected: %s" % where, None), ("sep",)]
+            ports = list_serial_ports()
+            cur = self.port_var.get()
+            if ports:
+                for p in ports:
+                    items.append(("radio", p, p == cur,
+                                  lambda pp=p: self._select_port(pp)))
+            else:
+                items.append(("cmd", "(no COM ports found)", None))
+            items += [("sep",),
+                      ("cmd", "Refresh ports", self._refresh_ports),
+                      ("cmd", "Connection settings…",
+                       lambda: self._show_settings("Connection"))]
+            return items
+
+        def _select_port(self, p):
+            """Pick the port for the next Connect (mirrors it into the Connect-tab
+            combobox). Doesn't touch a live connection."""
+            self.port_var.set(p)
+            if hasattr(self, "cbo_port"):
+                try:
+                    self.cbo_port.set(p)
+                except Exception:
+                    pass
 
         def _help_menu(self):
             return [
@@ -854,6 +942,47 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._attach_copy(txt)       # E4: copyable info dialogs (write options…)
             ttk.Button(outer, text="Close", command=win.destroy).pack(anchor="e",
                                                                       pady=(12, 0))
+            dialogs._dark_titlebar(win)
+            dialogs._center(win, self)
+            win.focus_set()
+            return win
+
+        def _tabbed_info_window(self, title, tabs, active=None):
+            """A themed popup with a ttk.Notebook of read-only text tabs. `tabs` is
+            a list of (tab_label, text); `active` (a label) selects the first tab
+            shown — so one window backs several menu links, each opening its tab."""
+            from . import dialogs
+            surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
+            win = tk.Toplevel(self)
+            win.title("%s — %s" % (APP_NAME, title))
+            win.geometry("760x560")
+            win.configure(bg=surface)
+            win.transient(self)
+            outer = ttk.Frame(win, padding=(16, 14))
+            outer.pack(fill="both", expand=True)
+            nb = ttk.Notebook(outer)
+            nb.pack(fill="both", expand=True)
+            for label, text in tabs:
+                page = ttk.Frame(nb, padding=(2, 8))
+                nb.add(page, text="  %s  " % label)
+                body = ttk.Frame(page)
+                body.pack(fill="both", expand=True)
+                sb = ttk.Scrollbar(body)
+                sb.pack(side="right", fill="y")
+                txt = tk.Text(body, wrap="word", font=(self.sty["mono"], 10),
+                              bg=P["console"], fg=P["termfg"], relief="flat",
+                              padx=16, pady=14, insertbackground=P["fg"],
+                              yscrollcommand=sb.set, highlightthickness=1,
+                              highlightbackground=P["panel"], highlightcolor=P["panel"])
+                txt.pack(side="left", fill="both", expand=True)
+                sb.config(command=txt.yview)
+                txt.insert("1.0", text)
+                txt.config(state="disabled")
+                self._attach_copy(txt)
+                if active and active.lower() == label.lower():
+                    nb.select(page)
+            ttk.Button(outer, text="Close", command=win.destroy).pack(
+                anchor="e", pady=(10, 0))
             dialogs._dark_titlebar(win)
             dialogs._center(win, self)
             win.focus_set()
@@ -921,10 +1050,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             return os.path.join(self.log_dir or os.getcwd(), "openmbb-sessions")
 
         def _refresh_save_label(self):
-            if self.logger:
-                self.lbl_sess.config(text="session: %s" % self.logger.dir)
-            else:
-                self.lbl_sess.config(text="save to: %s" % self._session_root())
+            # the status-bar session label was removed (owner: declutter the row);
+            # the save location now lives in File / Tools -> Settings. Kept as a
+            # no-op so existing callers don't need to change.
+            return
 
         def _set_log_dir(self):
             chosen = filedialog.askdirectory(
@@ -974,21 +1103,37 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             return root, dirs[:limit]
 
         def _open_recent_session(self):
+            from . import dialogs
             root, recent = self._recent_sessions()
             if not recent:
                 messagebox.showinfo(APP_NAME, "No saved sessions yet in:\n%s" % root)
                 return
+            surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
             win = tk.Toplevel(self)
             win.title("%s — Recent sessions" % APP_NAME)
-            win.geometry("620x380")
+            win.geometry("640x420")
+            win.configure(bg=surface)
             win.transient(self)
-            ttk.Label(win, text="Most recent sessions in %s:" % root,
-                      wraplength=590, justify="left").pack(anchor="w", padx=10,
-                                                           pady=(10, 4))
-            lb = tk.Listbox(win, font=(self.sty["mono"], 9))
+            outer = ttk.Frame(win, padding=(18, 16))
+            outer.pack(fill="both", expand=True)
+            ttk.Label(outer, text="Recent sessions",
+                      style="Heading.TLabel").pack(anchor="w", pady=(0, 2))
+            ttk.Label(outer, text=root, style="Muted.TLabel",
+                      wraplength=600).pack(anchor="w", pady=(0, 10))
+            body = ttk.Frame(outer)
+            body.pack(fill="both", expand=True)
+            sb = ttk.Scrollbar(body)
+            sb.pack(side="right", fill="y")
+            lb = tk.Listbox(body, font=(self.sty["mono"], 10),
+                            bg=P["console"], fg=P["termfg"], relief="flat",
+                            selectbackground=P["sel"], selectforeground=P["fg"],
+                            highlightthickness=1, highlightbackground=P["panel"],
+                            highlightcolor=P["panel"], activestyle="none",
+                            yscrollcommand=sb.set)
             for d in recent:
                 lb.insert("end", d)
-            lb.pack(fill="both", expand=True, padx=10, pady=4)
+            lb.pack(side="left", fill="both", expand=True)
+            sb.config(command=lb.yview)
             lb.selection_set(0)
 
             def open_sel(_e=None):
@@ -1004,9 +1149,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     messagebox.showerror(APP_NAME, "Couldn't load session:\n%s" % e)
 
             lb.bind("<Double-Button-1>", open_sel)
-            ttk.Button(win, text="Open in Analyze", style=self.sty["accent"],
-                       command=open_sel).pack(pady=(0, 10))
-            win.focus_set()
+            row = ttk.Frame(outer)
+            row.pack(fill="x", pady=(12, 0))
+            ttk.Button(row, text="Open in Analyze", style=self.sty["accent"],
+                       command=open_sel).pack(side="right")
+            ttk.Button(row, text="Cancel", command=win.destroy).pack(
+                side="right", padx=(0, 8))
+            dialogs._dark_titlebar(win)
+            dialogs._center(win, self)
+            lb.focus_set()
 
         # -- E5: forget saved passwords --------------------------------------
         def _forget_passwords(self):
@@ -1018,11 +1169,126 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 config.clear_saved_passwords()
                 messagebox.showinfo(APP_NAME, "Saved login passwords cleared.")
 
-        # -- E6: distance units ----------------------------------------------
+        # -- E6: distance + temperature units --------------------------------
         def _apply_units(self):
             config.set_units(self.units_var.get())
             if self.analyze_session:      # re-render distances in the new unit
                 self._render_rides()
+
+        def _apply_temp_units(self):
+            config.set_temp_units(self.temp_units_var.get())
+            if self.analyze_session:      # re-render temps in the new unit
+                self._render_health()
+
+        # -- Settings (tabbed) -----------------------------------------------
+        def _show_settings(self, active=None):
+            """One tabbed popup for the app's preferences: serial port, display
+            units, saved logins, and the session save location (owner: gather the
+            scattered Tools items into a Settings dialog)."""
+            from . import dialogs
+            surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
+            win = tk.Toplevel(self)
+            win.title("%s — Settings" % APP_NAME)
+            win.geometry("620x470")
+            win.configure(bg=surface)
+            win.transient(self)
+            outer = ttk.Frame(win, padding=(16, 14))
+            outer.pack(fill="both", expand=True)
+            nb = ttk.Notebook(outer)
+            nb.pack(fill="both", expand=True)
+            pages = {}
+
+            def page(label):
+                p = ttk.Frame(nb, padding=(14, 12))
+                nb.add(p, text="  %s  " % label)
+                pages[label] = p
+                return p
+
+            # --- Connection ---
+            conn = page("Connection")
+            ttk.Label(conn, text="Serial port", style="Heading.TLabel").pack(anchor="w")
+            ttk.Label(conn, text="Pick the COM port used on the next Connect. In "
+                      "Simulator mode the port is ignored.", style="Muted.TLabel",
+                      wraplength=560).pack(anchor="w", pady=(0, 8))
+            prow = ttk.Frame(conn)
+            prow.pack(fill="x")
+            ttk.Label(prow, text="Port:").pack(side="left")
+            cbo = ttk.Combobox(prow, textvariable=self.port_var,
+                               values=list_serial_ports(), width=24)
+            cbo.pack(side="left", padx=6)
+            conn_status = ttk.Label(conn, text="", style="Muted.TLabel", wraplength=560)
+
+            def _refresh_settings_ports():
+                ports = list_serial_ports()
+                cbo.config(values=ports)
+                conn_status.config(text=("Found: %s" % ", ".join(ports)) if ports
+                                   else "No COM ports found — plug in the FTDI cable "
+                                        "and Refresh (or use Simulator mode).")
+            ttk.Button(prow, text="Refresh", command=_refresh_settings_ports).pack(side="left")
+            conn_status.pack(anchor="w", pady=(8, 0))
+            if self.connected:
+                where = "SIMULATOR" if self.sim_var.get() else self.port_var.get()
+                ttk.Label(conn, text="Connected now to %s — a change here applies on "
+                          "your next Connect." % where, style="Muted.TLabel",
+                          wraplength=560).pack(anchor="w", pady=(8, 0))
+
+            # --- Units ---
+            units = page("Units")
+            ttk.Label(units, text="Distance", style="Heading.TLabel").pack(anchor="w")
+            for lab, val in (("Kilometers (km)", "km"), ("Miles (mi)", "mi")):
+                ttk.Radiobutton(units, text=lab, value=val, variable=self.units_var,
+                                command=self._apply_units).pack(anchor="w")
+            ttk.Separator(units).pack(fill="x", pady=12)
+            ttk.Label(units, text="Temperature", style="Heading.TLabel").pack(anchor="w")
+            for lab, val in (("Celsius (°C)", "C"), ("Fahrenheit (°F)", "F")):
+                ttk.Radiobutton(units, text=lab, value=val,
+                                variable=self.temp_units_var,
+                                command=self._apply_temp_units).pack(anchor="w")
+
+            # --- Login ---
+            login = page("Login")
+            ttk.Label(login, text="Saved login passwords",
+                      style="Heading.TLabel").pack(anchor="w")
+            lbl_pw = ttk.Label(login, style="Muted.TLabel", wraplength=560)
+            lbl_pw.pack(anchor="w", pady=(0, 8))
+
+            def _refresh_pw():
+                c = len(config.get_saved_passwords())
+                lbl_pw.config(text=("%d saved password(s) — remembered so 'Try known "
+                                    "passwords' can reuse them." % c) if c
+                              else "No saved passwords. After a successful login you "
+                                   "can choose to remember it.")
+            _refresh_pw()
+
+            def _forget_and_refresh():
+                self._forget_passwords()
+                _refresh_pw()
+            ttk.Button(login, text="Forget saved passwords",
+                       command=_forget_and_refresh).pack(anchor="w")
+
+            # --- Session ---
+            sess = page("Session")
+            ttk.Label(sess, text="Session save location",
+                      style="Heading.TLabel").pack(anchor="w")
+            ttk.Label(sess, text=self._session_root(), style="Muted.TLabel",
+                      wraplength=560).pack(anchor="w", pady=(0, 8))
+            srow = ttk.Frame(sess)
+            srow.pack(anchor="w")
+            ttk.Button(srow, text="Change…",
+                       command=self._set_log_dir).pack(side="left")
+            ttk.Button(srow, text="Open folder",
+                       command=self._open_session_folder).pack(side="left", padx=6)
+            ttk.Button(srow, text="Copy path",
+                       command=self._copy_session_path).pack(side="left")
+
+            ttk.Button(outer, text="Close", command=win.destroy).pack(
+                anchor="e", pady=(10, 0))
+            if active and active in pages:
+                nb.select(pages[active])
+            dialogs._dark_titlebar(win)
+            dialogs._center(win, self)
+            win.focus_set()
+            return win
 
         # -- E2: health report -----------------------------------------------
         def _build_health_report(self, s):
@@ -1038,7 +1304,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     lines.append("  %-14s %s" % (lab, v))
             # NOTE: VIN/serial are deliberately omitted so a shared report leaks no IDs.
             lines += ["", "== Health (ok / watch / alert) =="]
-            for m in health_mod.health_snapshot(s):
+            for m in health_mod.health_snapshot(s, config.get_temp_units()):
                 lines.append("  [%-5s] %-26s %s" % (m["status"].upper(),
                                                     m["label"], m["value"]))
                 if m["note"]:
@@ -1089,7 +1355,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     facts.append((label, self.settings[key]["value"]))
             return facts
 
-        def _show_bike_info(self):
+        def _bike_info_text(self):
             lines = ["BIKE INFO", ""]
             facts = self._bike_facts()
             if facts:
@@ -1105,7 +1371,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       if self.logged_in else "not logged in")]
             lines += ["", "Session folder:",
                       "  %s" % (self.logger.dir if self.logger else "(none yet)")]
-            self._info_window("Bike info", "\n".join(lines))
+            return "\n".join(lines)
+
+        def _bike_about_window(self, active):
+            # owner: Bike info + About share one two-tab popup; each menu link opens
+            # its own tab.
+            return self._tabbed_info_window(
+                "Bike info & About",
+                [("Bike info", self._bike_info_text()),
+                 ("About", self._about_text())],
+                active)
+
+        def _show_bike_info(self):
+            self._bike_about_window("Bike info")
 
         def _open_html_help(self, filename, fallback_title, fallback_text, anchor=""):
             """Open a stylized, self-contained HTML help page in the browser (all the
@@ -1146,9 +1424,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _show_safety(self):
             self._open_html_help("info.html", "Safety notes", SAFETY_TEXT, "safety")
 
-        def _show_about(self):
+        def _about_text(self):
             import sys
-            text = (
+            return (
                 "%s  v%s\n\n"
                 "Serial console & diagnostics for Gen2 MBB-based Zero\n"
                 "electric motorcycles (~2013-2019: S/SR/DS/DSR/FX/FXS/FXE).\n"
@@ -1161,7 +1439,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 "with Zero Motorcycles."
                 % (APP_NAME, __version__, self.sty.get("backend"),
                    sys.version.split()[0]))
-            self._info_window("About", text)
+
+        def _show_about(self):
+            self._bike_about_window("About")
 
         def _apply_gates(self):
             # C1: Login is READ-ONLY (it only reveals the tunable settings), so it
@@ -1245,9 +1525,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.unlock_var.set(False)
             if hasattr(self, "lst_journal"):
                 self.lst_journal.delete(0, "end")
-            self.lbl_ver.config(text="")
             self._refresh_write_rows()
-            self._apply_gates()
+            self._apply_gates()          # also refreshes the dashboard header
 
         def _on_close(self):
             """Window X / Session→Exit: guard an in-flight operation, then release
@@ -1717,8 +1996,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.version_text = ver
                 self._probe_log("PROMPT OK — connected.\n")
                 self._probe_log(ver)
-                self.lbl_ver.config(text="MBB firmware rev %s"
-                                    % (rev if rev is not None else "?"))
+                self._refresh_dash_header()   # surface the firmware rev in the header
                 known = ", ".join(str(r) for r in sorted(KNOWN_FIRMWARE_REVS))
                 if rev is None:
                     self._probe_log("\n[!] Could not parse the firmware rev from the "
@@ -2942,7 +3220,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if not self.analyze_session:
                 return
             help_map = self._analyze_help_map()
-            for i, m in enumerate(health_mod.health_snapshot(self.analyze_session)):
+            for i, m in enumerate(health_mod.health_snapshot(
+                    self.analyze_session, config.get_temp_units())):
                 iid = str(i)
                 self.health_tree.insert("", "end", iid=iid, tags=(m["status"],),
                                         values=(m["label"], m["value"],

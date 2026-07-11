@@ -209,6 +209,23 @@ def test_compare_two_sessions(tmp_path):
     assert all("lifetime" in basis for _, _, basis in result["gearing_trend"])
 
 
+def test_health_temp_units_convert(tmp_path):
+    # temperature metrics render in the chosen unit; default is Celsius and is
+    # byte-identical to the explicit "C" call (so existing output is unchanged).
+    s = sessions.Session(str(tmp_path),
+                         {"stats": "  - Max Motor Temp   : 100 C\n"
+                                   "  - Max Battery Temp : 40 C\n",
+                          "bms": "", "status": ""}, "")
+    c = {m["label"]: m for m in health.health_snapshot(s, "C")}
+    f = {m["label"]: m for m in health.health_snapshot(s, "F")}
+    assert c["Max motor temp (lifetime)"]["value"] == "100 C"
+    assert f["Max motor temp (lifetime)"]["value"] == "212 F"       # 100C -> 212F
+    assert c["Max battery temp (lifetime)"]["value"] == "40 C"
+    assert f["Max battery temp (lifetime)"]["value"] == "104 F"     # 40C -> 104F
+    assert "122-140 F" in f["Max battery temp (lifetime)"]["note"]  # thresholds too
+    assert health.health_snapshot(s) == health.health_snapshot(s, "C")
+
+
 def test_health_on_empty_session_does_not_crash(tmp_path):
     empty = sessions.Session(str(tmp_path), {}, "")
     snap = health.health_snapshot(empty)
