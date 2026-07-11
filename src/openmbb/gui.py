@@ -113,8 +113,9 @@ PHASE 2 — LOGIN
   or type a specific password and "Try this password" (it is masked in the logs
   and never saved to disk). Both failing is fine — the tool stays read-only.
   Success unlocks Writes. A password is masked in the logs and never written to
-  disk unless YOU ask the app to remember it (Session menu → Remember login
-  password) — nothing to hand-edit.
+  disk unless YOU say yes when it offers to remember it after a successful login
+  (clear saved ones via Session → Forget saved login passwords) — nothing to
+  hand-edit.
 
 PHASE 3 — WRITES
   Triple-gated: logged in + the master UNLOCK WRITES switch + a per-write
@@ -246,15 +247,81 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 print("window icon unavailable: %s" % exc)
 
         def _console_text(self, parent, height, fg=None):
-            return tk.Text(parent, height=height, state="disabled",
-                           font=(self.sty["mono"], 9), bg=P["console"],
-                           fg=fg or P["termfg"], insertbackground=P["fg"],
-                           selectbackground=P["sel"],
-                           selectforeground="#eafff2",
-                           relief="flat", padx=10, pady=8,
-                           highlightthickness=1,
-                           highlightbackground=P["panel"],
-                           highlightcolor=P["panel"])
+            t = tk.Text(parent, height=height, state="disabled",
+                        font=(self.sty["mono"], 9), bg=P["console"],
+                        fg=fg or P["termfg"], insertbackground=P["fg"],
+                        selectbackground=P["sel"],
+                        selectforeground="#eafff2",
+                        relief="flat", padx=10, pady=8,
+                        highlightthickness=1,
+                        highlightbackground=P["panel"],
+                        highlightcolor=P["panel"])
+            self._attach_copy(t)         # E4: right-click Copy on every console
+            return t
+
+        def _attach_copy(self, widget):
+            """E4: right-click 'Copy selection / Copy all' on a Text widget, so read
+            output can be pasted into a forum post or a message."""
+            menu = tk.Menu(widget, tearoff=0)
+
+            def copy_all():
+                try:
+                    txt = widget.get("1.0", "end-1c")
+                except Exception:
+                    return
+                if txt:
+                    self.clipboard_clear()
+                    self.clipboard_append(txt)
+
+            def copy_sel():
+                try:
+                    txt = widget.get("sel.first", "sel.last")
+                except Exception:
+                    txt = ""
+                if txt:
+                    self.clipboard_clear()
+                    self.clipboard_append(txt)
+                else:
+                    copy_all()
+
+            menu.add_command(label="Copy selection", command=copy_sel)
+            menu.add_command(label="Copy all", command=copy_all)
+
+            def popup(e):
+                try:
+                    menu.tk_popup(e.x_root, e.y_root)
+                finally:
+                    menu.grab_release()
+
+            widget.bind("<Button-3>", popup)
+            widget.bind("<Control-c>", lambda e: copy_sel())
+
+        def _tree_as_tsv(self, tree):
+            cols = tree["columns"]
+            rows = [[str(tree.heading(c)["text"]) for c in cols]]
+            for iid in tree.get_children():
+                rows.append([str(v) for v in tree.item(iid, "values")])
+            return "\n".join("\t".join(r) for r in rows)
+
+        def _attach_tree_copy(self, tree):
+            """E4: right-click 'Copy table' on a Treeview — rows out as TSV text."""
+            menu = tk.Menu(tree, tearoff=0)
+
+            def copy_table():
+                text = self._tree_as_tsv(tree)
+                if text:
+                    self.clipboard_clear()
+                    self.clipboard_append(text)
+
+            menu.add_command(label="Copy table", command=copy_table)
+
+            def popup(e):
+                try:
+                    menu.tk_popup(e.x_root, e.y_root)
+                finally:
+                    menu.grab_release()
+
+            tree.bind("<Button-3>", popup)
 
         def _pump_cbq(self):
             # D2: one bad callback must NOT kill the pump — if it did, every
@@ -303,8 +370,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                              command=self._set_log_dir)
             sess.add_command(label="Open session folder",
                              command=self._open_session_folder)
+            sess.add_command(label="Open recent session…",          # E3
+                             command=self._open_recent_session)
             sess.add_command(label="Copy session path",
                              command=self._copy_session_path)
+            sess.add_separator()
+            sess.add_command(label="Save health report…",           # E2
+                             command=self._save_health_report)
+            units = tk.Menu(sess, tearoff=0)                         # E6
+            self.units_var = tk.StringVar(value=config.get_units())
+            units.add_radiobutton(label="Kilometers (km)", value="km",
+                                  variable=self.units_var, command=self._apply_units)
+            units.add_radiobutton(label="Miles (mi)", value="mi",
+                                  variable=self.units_var, command=self._apply_units)
+            sess.add_cascade(label="Distance units", menu=units)
+            sess.add_command(label="Forget saved login passwords",   # E5
+                             command=self._forget_passwords)
             sess.add_separator()
             sess.add_command(label="Refresh COM ports", command=self._refresh_ports)
             sess.add_separator()
@@ -346,6 +427,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             sb.config(command=txt.yview)
             txt.insert("1.0", text)
             txt.config(state="disabled")
+            self._attach_copy(txt)       # E4: copyable info dialogs (write options…)
             win.transient(self)
             win.focus_set()
             return win
@@ -451,6 +533,115 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.clipboard_clear()
             self.clipboard_append(path)
             messagebox.showinfo(APP_NAME, "Copied to clipboard:\n%s" % path)
+
+        # -- E3: recent sessions ---------------------------------------------
+        def _recent_sessions(self, limit=25):
+            root = self._session_root()
+            try:
+                dirs = [d for d in os.listdir(root)
+                        if os.path.isdir(os.path.join(root, d))]
+            except OSError:
+                return root, []
+            dirs.sort(key=lambda d: os.path.getmtime(os.path.join(root, d)),
+                      reverse=True)
+            return root, dirs[:limit]
+
+        def _open_recent_session(self):
+            root, recent = self._recent_sessions()
+            if not recent:
+                messagebox.showinfo(APP_NAME, "No saved sessions yet in:\n%s" % root)
+                return
+            win = tk.Toplevel(self)
+            win.title("%s — Recent sessions" % APP_NAME)
+            win.geometry("620x380")
+            win.transient(self)
+            ttk.Label(win, text="Most recent sessions in %s:" % root,
+                      wraplength=590, justify="left").pack(anchor="w", padx=10,
+                                                           pady=(10, 4))
+            lb = tk.Listbox(win, font=(self.sty["mono"], 9))
+            for d in recent:
+                lb.insert("end", d)
+            lb.pack(fill="both", expand=True, padx=10, pady=4)
+            lb.selection_set(0)
+
+            def open_sel(_e=None):
+                sel = lb.curselection()
+                if not sel:
+                    return
+                folder = os.path.join(root, recent[sel[0]])
+                win.destroy()
+                try:
+                    self._analyze_set(sessions.load_session(folder))
+                    self.nb.select(self.nb.index("end") - 1)   # the Analyze tab
+                except Exception as e:
+                    messagebox.showerror(APP_NAME, "Couldn't load session:\n%s" % e)
+
+            lb.bind("<Double-Button-1>", open_sel)
+            ttk.Button(win, text="Open in Analyze", style=self.sty["accent"],
+                       command=open_sel).pack(pady=(0, 10))
+            win.focus_set()
+
+        # -- E5: forget saved passwords --------------------------------------
+        def _forget_passwords(self):
+            n = len(config.get_saved_passwords())
+            if not n:
+                messagebox.showinfo(APP_NAME, "No saved login passwords to forget.")
+                return
+            if messagebox.askyesno(APP_NAME, "Forget %d saved login password(s)?" % n):
+                config.clear_saved_passwords()
+                messagebox.showinfo(APP_NAME, "Saved login passwords cleared.")
+
+        # -- E6: distance units ----------------------------------------------
+        def _apply_units(self):
+            config.set_units(self.units_var.get())
+            if self.analyze_session:      # re-render distances in the new unit
+                self._render_rides()
+
+        # -- E2: health report -----------------------------------------------
+        def _build_health_report(self, s):
+            st, _ = parse_settings_dump(s.settings_text or "")
+            lines = ["OpenMBB health report",
+                     "generated by OpenMBB v%s" % __version__,
+                     "session: %s" % s.name, ""]
+            lines.append("== Bike ==")
+            for key, lab in (("model", "Model"), ("model_year", "Model year"),
+                             ("firmware_rev", "Firmware rev"), ("board_id", "Board ID")):
+                v = st.get(key, {}).get("value")
+                if v:
+                    lines.append("  %-14s %s" % (lab, v))
+            # NOTE: VIN/serial are deliberately omitted so a shared report leaks no IDs.
+            lines += ["", "== Health (ok / watch / alert) =="]
+            for m in health_mod.health_snapshot(s):
+                lines.append("  [%-5s] %-26s %s" % (m["status"].upper(),
+                                                    m["label"], m["value"]))
+                if m["note"]:
+                    lines.append("           %s" % m["note"])
+            lines.append("")
+            return "\n".join(lines)
+
+        def _save_health_report(self):
+            s = self.analyze_session
+            if s is None and self.logger:
+                try:
+                    s = sessions.load_session(self.logger.dir)
+                except Exception:
+                    s = None
+            if not self._session_has_data(s):
+                messagebox.showinfo(APP_NAME, "No session data to report yet — run a "
+                    "FULL BASELINE (or load a session on the Analyze tab) first.")
+                return
+            path = filedialog.asksaveasfilename(
+                title="Save health report", defaultextension=".txt",
+                initialfile="openmbb-health-report.txt",
+                filetypes=[("Text file", "*.txt"), ("All files", "*.*")])
+            if not path:
+                return
+            try:
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(self._build_health_report(s))
+                messagebox.showinfo(APP_NAME, "Health report saved to:\n%s" % path)
+            except OSError as e:
+                messagebox.showerror(APP_NAME, "Couldn't save the report:\n%s" % e)
 
         def _bike_facts(self):
             facts = []
@@ -998,6 +1189,24 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 hb.pack(side="left", padx=2)
                 self._add_tooltip(hb, READ_TIPS.get(cmd, ""))
 
+            # E1: live "Watch" — repeat one light read on a timer (reads only, so it
+            # stays fully inside the safety model). Great for a charge session.
+            wrow = ttk.Frame(f)
+            wrow.pack(fill="x", pady=(4, 0))
+            self.watch_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(wrow, text="Watch (repeat a read)",
+                            variable=self.watch_var,
+                            command=self._toggle_watch).pack(side="left")
+            self.watch_cmd = tk.StringVar(value="status")
+            ttk.Combobox(wrow, textvariable=self.watch_cmd, width=9, state="readonly",
+                         values=["status", "bms", "inputs", "sevcon", "dash",
+                                 "chargers"]).pack(side="left", padx=6)
+            ttk.Label(wrow, text="every").pack(side="left")
+            self.watch_secs = tk.StringVar(value="5")
+            ttk.Combobox(wrow, textvariable=self.watch_secs, width=4, state="readonly",
+                         values=["3", "5", "10", "30"]).pack(side="left", padx=4)
+            ttk.Label(wrow, text="s").pack(side="left")
+
             self.txt_out = self._console_text(f, 20)
             self.txt_out.pack(fill="both", expand=True, pady=(8, 4))
 
@@ -1025,6 +1234,35 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     "SAFELY PARKED (never do this while riding).\n\nContinue?" % cmd):
                 return
             self._read_cmd(cmd, idle_timeout=30.0)   # console pauses mid-dump
+
+        def _toggle_watch(self):
+            # E1: start/stop the repeat-read timer.
+            if self.watch_var.get():
+                if not self.connected:
+                    self.watch_var.set(False)
+                    messagebox.showinfo(APP_NAME, "Connect first — Watch re-runs a "
+                                        "read on a timer once you're connected.")
+                    return
+                self._out("\n=== WATCH started: '%s' every %s s (reads only). Uncheck "
+                          "to stop. ===" % (self.watch_cmd.get(), self.watch_secs.get()))
+                self._watch_tick()
+            else:
+                self._out("=== WATCH stopped ===")
+
+        def _watch_tick(self):
+            if not self.watch_var.get():
+                return
+            if not self.connected:               # auto-stop on disconnect
+                self.watch_var.set(False)
+                self._out("=== WATCH stopped (disconnected) ===")
+                return
+            if not self._busy:                   # skip a tick if a read is in flight
+                self._read_cmd(self.watch_cmd.get())
+            try:
+                secs = max(2, int(self.watch_secs.get()))
+            except (ValueError, TypeError):
+                secs = 5
+            self.after(secs * 1000, self._watch_tick)
 
         def _read_cmd(self, cmd, quiet=False, idle_timeout=None):
             # A1/SAFE-2: classify by the lowercased FIRST TOKEN (like the transport),
@@ -1236,7 +1474,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 "stays read-only. On success you reach login LEVEL 2 (the tuning "
                 "level): the full `set` list appears and the Writes tab unlocks. A "
                 "typed password is masked in the logs and never saved to disk unless "
-                "you choose to remember it (Session menu → Remember login password)."
+                "you say yes when it offers to remember it after login (clear saved "
+                "ones via Session → Forget saved login passwords)."
                 % ", ".join(COMMUNITY_PASSWORDS)),
                 wraplength=920, justify="left").pack(anchor="w")
 
@@ -1269,14 +1508,30 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._login([pw], redact=True)
 
         def _login(self, passwords=None, redact=False):
-            pws = [p for p in (passwords if passwords is not None
-                               else COMMUNITY_PASSWORDS) if p]
+            if passwords is not None:
+                pws = [p for p in passwords if p]
+            else:
+                # E5: the "known passwords" button tries the public community ones
+                # AND any the user chose to remember.
+                pws = [p for p in COMMUNITY_PASSWORDS if p] + [
+                    p for p in config.get_saved_passwords()
+                    if p and p not in COMMUNITY_PASSWORDS]
             if not pws:
                 messagebox.showinfo(APP_NAME, "Enter a password to try.")
                 return
+            # E5: a REMEMBERED password is the user's own — mask it on screen and
+            # register it so it never reaches disk in clear (community passwords are
+            # public and shown as-is).
+            private = set() if redact else (set(config.get_saved_passwords())
+                                            - set(COMMUNITY_PASSWORDS))
+            for p in private:
+                try:
+                    self.transport.logger.add_redaction(p)
+                except Exception:
+                    pass
 
             def shown(pw):
-                return "****" if redact else pw
+                return "****" if (redact or pw in private) else pw
 
             def job():
                 attempts = []
@@ -1313,7 +1568,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             def done(result):
                 attempts, success, post, used, level = result
                 for pw, out, _lvl_out in attempts:
-                    masked = out.replace(pw, "****") if redact else out
+                    masked = (out.replace(pw, "****") if (redact or pw in private)
+                              else out)
                     self._login_log(">>> login %s\n%s\n" % (shown(pw), masked))
                 if not success:
                     self._login_log("Rejected — staying read-only. (MBB passwords "
@@ -1322,13 +1578,23 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.logged_in = True
                 lvl_txt = " (level %d)" % level if level else ""
                 if redact:
-                    self._login_log("LOGIN OK%s with your typed password. It was NOT "
-                                    "saved. To have it tried automatically next "
-                                    "time, add it to COMMUNITY_PASSWORDS in gui.py."
-                                    % lvl_txt)
+                    self._login_log("LOGIN OK%s with your typed password (masked in "
+                                    "the logs)." % lvl_txt)
                 else:
                     self._login_log("LOGIN OK%s (login %s). Re-captured help + settings."
-                                    % (lvl_txt, used))
+                                    % (lvl_txt, shown(used)))
+                # E5: offer to remember a WORKING password that isn't already known
+                # or saved (i.e. one the user just typed) — no source editing.
+                if used and used not in COMMUNITY_PASSWORDS \
+                        and used not in config.get_saved_passwords():
+                    if messagebox.askyesno(APP_NAME, "Remember this password so OpenMBB "
+                            "tries it automatically next time? It is stored in your "
+                            "config file (~/.openmbb/config.json). You can clear it via "
+                            "Session → Forget saved login passwords."):
+                        config.add_saved_password(used)
+                        self._login_log("Password remembered — it'll be tried "
+                                        "automatically next session (Session menu → "
+                                        "Forget saved login passwords to clear).")
                 if self.help_logged_out and post.get("help"):
                     diff = "\n".join(difflib.unified_diff(
                         self.help_logged_out.splitlines(),
@@ -1386,6 +1652,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.tree.heading(c, text=c.title())
                 self.tree.column(c, width=w, anchor="w")
             self.tree.pack(fill="x", pady=(8, 4))
+            self._attach_tree_copy(self.tree)       # E4
             self.tree.tag_configure("safe", foreground="#7fe0a0")
             self.tree.tag_configure("caution", foreground=P["warn"])
             self.tree.bind("<<TreeviewSelect>>", self._show_effect)
@@ -1604,6 +1871,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                              ("alert", P["danger"]), ("info", P["fg"])):
                 self.health_tree.tag_configure(tag, foreground=col)
             self.health_tree.pack(fill="both", expand=True)
+            self._attach_tree_copy(self.health_tree)       # E4
             self.health_tree.bind("<<TreeviewSelect>>", self._health_note)
             # C3: make the per-row explanations discoverable — seed the note with a
             # visible hint so nobody has to guess that clicking a row explains it.
@@ -1640,6 +1908,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.ride_tree.heading(c, text=h)
                 self.ride_tree.column(c, width=w, anchor="w")
             self.ride_tree.pack(fill="both", expand=True, pady=(6, 0))
+            self._attach_tree_copy(self.ride_tree)       # E4
 
             # Compare
             cf = ttk.Frame(sub, padding=8)
@@ -1769,14 +2038,23 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if not summ["rides"]:
                 self.lbl_ride_totals.config(text="No riding records found (%s)." % source)
                 return
+            # E6: show distances in the user's chosen unit (default km, the bike's own)
+            unit = "mi" if config.get_units() == "mi" else "km"
+            f = 0.621371 if unit == "mi" else 1.0
+            self.ride_tree.heading("km", text="Distance %s" % unit)
+
+            def _d(km):
+                return round(km * f, 1) if isinstance(km, (int, float)) else km
+
             self.lbl_ride_totals.config(
-                text="%s: %d rides · %.1f km · mean %s SOC%%/km · max pack %s C / "
+                text="%s: %d rides · %.1f %s · mean %s SOC%%/km · max pack %s C / "
                 "motor %s C · %d samples"
-                % (source, t["ride_count"], t["total_km"], t["mean_soc_per_km"],
-                   t["max_pack_temp_c"], t["max_motor_temp_c"], t["samples"]))
+                % (source, t["ride_count"], _d(t["total_km"]), unit,
+                   t["mean_soc_per_km"], t["max_pack_temp_c"],
+                   t["max_motor_temp_c"], t["samples"]))
             for r in summ["rides"]:
                 self.ride_tree.insert("", "end", values=(
-                    r["start_ts"] or "?", r["distance_km"], r["soc_used_pct"],
+                    r["start_ts"] or "?", _d(r["distance_km"]), r["soc_used_pct"],
                     r["soc_per_km"] if r["soc_per_km"] is not None else "n/a",
                     r["max_pack_temp_c"] if r["max_pack_temp_c"] is not None else "n/a",
                     r["max_motor_temp_c"] if r["max_motor_temp_c"] is not None else "n/a",

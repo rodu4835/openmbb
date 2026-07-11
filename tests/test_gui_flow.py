@@ -267,6 +267,91 @@ def test_listen_only_reports_without_connecting(app):
     assert "ZERO MBB>" in app.txt_probe.get("1.0", "end")   # sim greet detected
 
 
+def test_watch_requires_connection_then_runs(app):
+    # E1: Watch needs a live connection; once connected it announces + stops cleanly.
+    app.watch_var.set(True)
+    app._toggle_watch()                              # not connected -> refused
+    assert not app.watch_var.get()
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app.watch_var.set(True)
+    app._toggle_watch()
+    assert "WATCH started" in app.txt_out.get("1.0", "end")
+    app.watch_var.set(False)
+    app._toggle_watch()
+    assert "WATCH stopped" in app.txt_out.get("1.0", "end")
+
+
+def test_health_report_has_metrics_and_no_ids(app):
+    # E2: the shareable health report carries interpreted metrics but leaks no VIN/serial.
+    from openmbb import sessions
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    report = app._build_health_report(sessions.load_session(app.logger.dir))
+    assert "OpenMBB health report" in report and "== Health" in report
+    assert any(tag in report for tag in ("[OK", "[WATCH", "[ALERT", "[INFO"))
+    assert "ZEROSIMVIN" not in report and "SIM-MBB" not in report   # no identifiers
+
+
+def test_recent_sessions_lists_current(app):
+    # E3: sessions are discoverable in-app, most-recent first.
+    import os
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._read_cmd("status")
+    assert _pump(app, lambda: "### status" in app.txt_out.get("1.0", "end"))
+    root, recent = app._recent_sessions()
+    assert recent and os.path.basename(app.logger.dir) == recent[0]
+
+
+def test_health_tree_copies_as_tsv(app):
+    # E4: the health table serializes to TSV (headers + rows) for the clipboard.
+    from openmbb import sessions
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._analyze_set(sessions.load_session(app.logger.dir))
+    app.update()
+    tsv = app._tree_as_tsv(app.health_tree)
+    assert "\t" in tsv and "Metric" in tsv and "Displayed SOC" in tsv
+
+
+def test_login_offers_to_remember_typed_password(app, monkeypatch, tmp_path):
+    # E5: a working typed password not already known can be remembered (config).
+    from openmbb import config
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path / ".openmbb")
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / ".openmbb" / "config.json")
+    monkeypatch.setattr("openmbb.gui.COMMUNITY_PASSWORDS", [])   # so tpsreport is "new"
+    import tkinter.messagebox as mb
+    monkeypatch.setattr(mb, "askyesno", lambda *a, **k: True)    # user opts to remember
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app.login_pw.set("tpsreport")
+    app._login_custom()
+    assert _pump(app, lambda: app.logged_in)
+    assert "tpsreport" in config.get_saved_passwords()
+
+
+def test_rides_render_honors_unit_preference(app, monkeypatch, tmp_path):
+    # E6: with miles selected, the Rides distance column + totals show mi.
+    from openmbb import config, parsers
+    from openmbb.sim import SimPort
+    from openmbb.transport import Transport, SessionLogger
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path / ".openmbb")
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / ".openmbb" / "config.json")
+    config.set_units("mi")
+    tr = Transport(SimPort(), SessionLogger(base_dir=str(tmp_path), tag="r"))
+    recs = parsers.parse_ride_log(tr.exec_command("dumpall"))
+    app._render_ride_records(recs, "test")
+    assert str(app.ride_tree.heading("km")["text"]) == "Distance mi"
+    assert " mi ·" in app.lbl_ride_totals.cget("text")
+
+
 def test_login_tab_explains_passwords_and_level(app):
     # D1: the Login intro reassures a first-timer — whose passwords, that it's
     # read-only, what "level 2" is, and what unlocks.

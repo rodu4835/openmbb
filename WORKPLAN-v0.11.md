@@ -81,17 +81,17 @@ item; GUI tests standalone. Never open a real COM port. Commit per tier.
 
 ## Tier E — new pathways sized for a small Tk app  [MP-01..06]
 
-- [ ] **E1 Live "Watch"**: re-run a chosen read every N s, append timestamped, auto-stop on
+- [x] **E1 Live "Watch"**: re-run a chosen read every N s, append timestamped, auto-stop on
   disconnect; reads-only so it stays inside the safety model.
-- [ ] **E2 Health report export**: "Save health report…" → a plain-text one-pager (identity +
+- [x] **E2 Health report export**: "Save health report…" → a plain-text one-pager (identity +
   health metrics + gearing) the owner can post/share.
-- [ ] **E3 Recent sessions**: a Session-menu "Open recent session…" list (from the sessions
+- [x] **E3 Recent sessions**: a Session-menu "Open recent session…" list (from the sessions
   folder) so old sessions aren't hunted through an OS picker.
-- [ ] **E4 Copyable output**: right-click / button "Copy" on the console + Analyze text; make the
+- [x] **E4 Copyable output**: right-click / button "Copy" on the console + Analyze text; make the
   read/health/rides text selectable+copyable.
-- [ ] **E5 In-app password save**: on a successful login, offer to remember it (config file, not
+- [x] **E5 In-app password save**: on a successful login, offer to remember it (config file, not
   gui.py) so the exe user never edits source.
-- [ ] **E6 Units preference**: a Session-menu unit toggle (mi/km) applied to the display where
+- [x] **E6 Units preference**: a Session-menu unit toggle (mi/km) applied to the display where
   the app computes distances/speeds; note where values are the bike's own strings.
 
 ## Tier F — release
@@ -125,4 +125,11 @@ item; GUI tests standalone. Never open a real COM port. Commit per tier.
 - D2: the write-confirm dialog now spells out the numbered story: backup ALL settings -> send -> read-back VERIFY -> journal (select + 'Revert selected' to undo).
 - D3: a 'What can I change? (read-only)' button on the Writes tab (not just the Bike menu); the browser now defines 'live dump' = the `set` list the console reported after login (the settings that really exist on your bike).
 - D4: a label under the UNLOCK toggle explains arming it changes nothing by itself (only enables Write…), and every write still confirms/backs-up/verifies/journals.
+### Tier E — new pathways (complete)
+- E1: Read-tab 'Watch (repeat a read)' — re-runs a chosen light read every 3/5/10/30 s (reads only; auto-stops on disconnect).
+- E2: Session -> 'Save health report…' writes a plain-text one-pager (identity + interpreted health metrics + gearing); VIN/serial deliberately omitted so a shared report leaks no IDs.
+- E3: Session -> 'Open recent session…' lists recent session folders (most-recent first) and opens the pick in Analyze.
+- E4: right-click Copy on every console (Copy selection / Copy all, + Ctrl+C) and 'Copy table' (TSV) on the Health/Rides/Writes tables and the info dialogs.
+- E5: config-backed opt-in password remember — a working typed password offers to be saved (asked after login), tried automatically next session (masked + logger-redacted so it never hits disk in clear), cleared via Session -> Forget saved login passwords.
+- E6: Session -> Distance units (km/mi) preference, applied to the Rides distance column + totals; default km (the bike's native unit).
 (append per item)
