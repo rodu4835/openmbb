@@ -81,8 +81,17 @@ OPEN: the HTML help pages (instructions/wiring) are still on the brighter palett
   (These content artifacts are being generated in parallel NOW.)
 
 ## Tier 7 — Release
-- [ ] Bump 0.13.0; full suite + selftest + smoketest green; rebuild exe+installer.
+- [x] Bump 0.13.0; full suite + selftest + smoketest green; rebuild exe+installer.
   Not tagged/pushed.
 
 ## Progress log
-(append per item)
+ALL TIERS COMPLETE (2026-07-10). Each tier committed after a green GUI suite;
+owner reviewed live between tiers (previews via `python -m openmbb.cli --sim`).
+- Theme: full-neon vaporwave was tried, owner found it too vibrant / not modern →
+  REVERTED to the calm Sun Valley dark + restrained accents. (Lesson: preview big
+  visual changes before committing.)
+- Action-bar buttons (Done / Safely disconnect & quit) gated on connect + not-busy
+  per owner feedback.
+- T7: bumped 0.13.0, verified green source + frozen (non-GUI 140, GUI 71/2-skip,
+  --selftest, --smoketest), rebuilt dist/openmbb.exe + installer (ProductVersion
+  0.13.0), installed per-user and launched. NOT tagged/pushed.
