@@ -156,22 +156,37 @@ def test_analyze_tab(app):
     assert not app._errors
 
 
-def test_menubar_is_themed_menubuttons(app):
-    # A2: the menu bar is a themed ttk Menubutton strip (dark), not the OS-white
-    # native menubar — Session / Bike / Help all present as Menubuttons.
+def test_menubar_normalized_labels_no_chevrons(app):
+    # A2 + T0.3: the menu bar is a themed ttk Menubutton strip (not the OS-white
+    # native menubar), now with conventional labels File / Tools / Help and with
+    # the down-chevron indicator element stripped from the menubutton layout.
     import tkinter.ttk as ttk
-    labels = set()
+    style = ttk.Style()
+    found = {}
 
     def walk(w):
         for c in w.winfo_children():
             if isinstance(c, ttk.Menubutton):
-                labels.add(str(c.cget("text")))
+                found[str(c.cget("text"))] = str(c.cget("style"))
             walk(c)
 
     walk(app)
-    assert {"Session", "Bike", "Help"} <= labels
+    assert {"File", "Tools", "Help"} <= set(found)
+    # the old app-specific labels are gone
+    assert not ({"Session", "Bike"} & set(found))
     # and the app no longer installs a native menubar
     assert not app.cget("menu")
+
+    # the chevron/indicator element was stripped from the menubutton layout
+    def has_indicator(layout):
+        for name, opts in layout:
+            if "indicator" in name.lower():
+                return True
+            if "children" in opts and has_indicator(opts["children"]):
+                return True
+        return False
+
+    assert not has_indicator(style.layout(found["File"]))
 
 
 def test_menu_dialogs_open(app):

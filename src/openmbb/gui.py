@@ -399,11 +399,33 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # A2: the native Tk menubar strip is OS-drawn white on Windows and
             # ignores colours. Use a themed ttk Menubutton bar (dark) with dark
             # dropdown menus instead.
+            # v0.13/T0.3: strip the down-chevron indicator from the menubuttons
+            # (owner: "the chevrons look weird") by registering a Menubutton
+            # layout with any *.indicator element removed; fall back to the plain
+            # style if the active theme's layout can't be introspected.
+            style = ttk.Style()
+            mb_style = "Menubar.TMenubutton"
+            try:
+                def _drop_indicator(elems):
+                    out = []
+                    for name, opts in elems:
+                        if "indicator" in name.lower():
+                            continue
+                        opts = dict(opts)
+                        if "children" in opts:
+                            opts["children"] = _drop_indicator(opts["children"])
+                        out.append((name, opts))
+                    return out
+                style.layout(mb_style, _drop_indicator(style.layout("TMenubutton")))
+            except tk.TclError:
+                mb_style = "TMenubutton"
+
             bar = ttk.Frame(self)
             bar.pack(side="top", fill="x")
 
             def add_menu(text, build):
-                mb = ttk.Menubutton(bar, text=text, direction="below")
+                mb = ttk.Menubutton(bar, text=text, direction="below",
+                                    style=mb_style)
                 menu = self._dark_menu(mb)
                 build(menu)
                 mb["menu"] = menu
@@ -451,9 +473,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 hlp.add_separator()
                 hlp.add_command(label="About", command=self._show_about)
 
-            add_menu("Session", build_session)
-            add_menu("Bike", build_bike)
-            add_menu("Help", build_help)
+            # v0.13/T0.3: conventional, less app-specific labels
+            # (owner: "less specific like file, edit, help, about").
+            add_menu("File", build_session)     # session / logs / save / exit
+            add_menu("Tools", build_bike)       # bike info / write options
+            add_menu("Help", build_help)        # instructions / wiring / about
             self.bind("<F1>", lambda e: self._show_instructions())
 
         def _info_window(self, title, text):
