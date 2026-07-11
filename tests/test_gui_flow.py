@@ -268,6 +268,19 @@ def test_done_dialog_routes_to_analyze(app, monkeypatch):
     assert "analyze" in str(app.nb.tab(app.nb.select(), "text")).lower()
 
 
+def test_analyze_help_enriches_notes(app):
+    # T4: the novice explanations (analyze_help.json) load and enrich a health
+    # metric's row note with what-it-is / how-it-fits / healthy context.
+    hm = app._analyze_help_map()
+    assert hm, "analyze_help.json should load"
+    assert "cell balance" in hm and "isolation resistance" in hm
+    enriched = app._enrich_note({"label": "Cell balance", "note": "base note"}, hm)
+    assert "base note" in enriched
+    assert "What it is" in enriched and "In the system" in enriched
+    # a metric with no help entry is returned unchanged (additive only)
+    assert app._enrich_note({"label": "zzz", "note": "x"}, hm) == "x"
+
+
 def test_menu_dialogs_open(app):
     app._connect()
     assert _pump(app, lambda: app.connected)

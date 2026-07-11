@@ -2157,8 +2157,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # C3: make the per-row explanations discoverable — seed the note with a
             # visible hint so nobody has to guess that clicking a row explains it.
             self._health_hint = ("Tip: click any metric row for a plain-language "
-                                 "explanation of what it means and why it's "
-                                 "ok / watch / alert.")
+                                 "explanation — what it is, how it fits the bike's "
+                                 "system, and what a healthy reading looks like.")
             self.lbl_health_note = ttk.Label(hf, text=self._health_hint,
                                              wraplength=980, foreground=P["dim"],
                                              justify="left")
@@ -2285,17 +2285,57 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._health_notes = {}
             if not self.analyze_session:
                 return
+            help_map = self._analyze_help_map()
             for i, m in enumerate(health_mod.health_snapshot(self.analyze_session)):
                 iid = str(i)
                 self.health_tree.insert("", "end", iid=iid, tags=(m["status"],),
                                         values=(m["label"], m["value"],
                                                 m["status"].upper()))
-                self._health_notes[iid] = m["note"]
+                self._health_notes[iid] = self._enrich_note(m, help_map)
 
         def _health_note(self, _evt=None):
             sel = self.health_tree.selection()
             note = self._health_notes.get(sel[0], "") if sel else ""
             self.lbl_health_note.config(text=note or self._health_hint)
+
+        def _analyze_help_map(self):
+            """T4: lazy-load the novice explanations (assets/analyze_help.json),
+            keyed by metric label. Empty dict if unavailable — enrichment is
+            purely additive, so a missing file never breaks Analyze."""
+            cached = getattr(self, "_analyze_help_cache", None)
+            if cached is not None:
+                return cached
+            data = {}
+            try:
+                from importlib.resources import files
+                import json
+                raw = (files("openmbb") / "assets" / "analyze_help.json"
+                       ).read_text(encoding="utf-8")
+                for it in json.loads(raw):
+                    k = str(it.get("key") or it.get("label") or "").strip().lower()
+                    if k:
+                        data[k] = it
+            except Exception:
+                data = {}
+            self._analyze_help_cache = data
+            return data
+
+        def _enrich_note(self, m, help_map):
+            """Append the plain-language explanation (what it is / how it fits the
+            system / healthy range) to a health metric's status note."""
+            note = m.get("note") or ""
+            it = help_map.get(str(m.get("label", "")).strip().lower())
+            if it:
+                extra = []
+                if it.get("what"):
+                    extra.append("What it is — %s" % it["what"])
+                if it.get("how_it_fits"):
+                    extra.append("In the system — %s" % it["how_it_fits"])
+                if it.get("healthy_note"):
+                    extra.append("Healthy — %s" % it["healthy_note"])
+                if extra:
+                    note = (note + "\n\n" if note else "") + "\n".join(extra)
+            return note
 
         def _render_rides(self):
             # A1: rev-41 has no console command that streams ride telemetry as text
