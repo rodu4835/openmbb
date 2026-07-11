@@ -184,9 +184,12 @@ value limits. Coast regen of exactly 0 is refused (fishtail risk).
 
 def build_gui(sim=False, preselect_port=None, log_dir=None):
     import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
+    from tkinter import filedialog, ttk
 
     from . import config
+    # v0.13/T0.2: themed, centered modal dialogs instead of the OS-grey message
+    # boxes. Same API as tkinter.messagebox, so every call site is unchanged.
+    from . import dialogs as messagebox
 
     P = PALETTE
 

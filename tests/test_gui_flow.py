@@ -17,7 +17,7 @@ from openmbb.transport import first_number
 @pytest.fixture
 def app(monkeypatch):
     tk = pytest.importorskip("tkinter")
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
     monkeypatch.setattr(mb, "askyesno", lambda *a, **k: False)
     monkeypatch.setattr(mb, "showinfo", lambda *a, **k: None)
@@ -187,6 +187,25 @@ def test_menubar_normalized_labels_no_chevrons(app):
         return False
 
     assert not has_indicator(style.layout(found["File"]))
+
+
+def test_themed_dialog_builds_and_centers(app):
+    # T0.2: the REAL themed dialog (not the monkeypatched wrapper) builds,
+    # centers on the app window, and tears down cleanly. Auto-dismiss it so the
+    # modal wait_window() returns during the headless test.
+    import tkinter as tk
+    from openmbb import dialogs
+
+    def dismiss():
+        for w in app.winfo_children():
+            if isinstance(w, tk.Toplevel):
+                w.destroy()
+
+    app.after(120, dismiss)
+    val = dialogs._dialog("OpenMBB", "A themed, centered dialog.", "info",
+                          [("OK", True, True)], default=True)
+    assert val is True
+    assert not [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)]
 
 
 def test_menu_dialogs_open(app):
@@ -377,7 +396,7 @@ def test_login_offers_to_remember_typed_password(app, monkeypatch, tmp_path):
     monkeypatch.setattr(config, "CONFIG_DIR", tmp_path / ".openmbb")
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / ".openmbb" / "config.json")
     monkeypatch.setattr("openmbb.gui.COMMUNITY_PASSWORDS", [])   # so tpsreport is "new"
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     monkeypatch.setattr(mb, "askyesno", lambda *a, **k: True)    # user opts to remember
     app._connect()
     assert _pump(app, lambda: app.connected)
@@ -445,7 +464,7 @@ def test_write_confirm_explains_backup_verify_revert(app, monkeypatch):
     assert _pump(app, lambda: app.baseline_done, timeout=120)
     app._login()
     assert _pump(app, lambda: app.logged_in)
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     seen = []
     monkeypatch.setattr(mb, "askokcancel",
                         lambda title, text=None, **k: seen.append(text) or False)
@@ -487,7 +506,7 @@ def test_write_options_guards_are_sim_aware(app, monkeypatch):
 
 def test_analyze_empty_folder_warns(app, monkeypatch, tmp_path):
     # C6: loading a folder with no session data warns instead of silently n/a-ing.
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     from openmbb import sessions
     warns = []
     monkeypatch.setattr(mb, "showwarning", lambda *a, **k: warns.append(a))
@@ -498,7 +517,7 @@ def test_analyze_empty_folder_warns(app, monkeypatch, tmp_path):
 
 def test_locked_writes_tab_explains(app, monkeypatch):
     # C7: "Open Writes tab" / a locked tab must say what unlocks it, not no-op.
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     infos = []
     monkeypatch.setattr(mb, "showinfo", lambda *a, **k: infos.append(a))
     app._goto_writes()                              # not logged in
@@ -560,7 +579,7 @@ def test_refresh_ports_reports_when_none_found(app, monkeypatch):
 
 def test_no_port_selected_error_points_to_simulator(app, monkeypatch):
     # A3: the no-port error speaks GUI-language (Refresh + SIMULATOR), never "--sim".
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     errs = []
     monkeypatch.setattr(mb, "showerror", lambda *a, **k: errs.append(a))
     app.port_var.set("")
@@ -719,7 +738,7 @@ def test_pump_survives_callback_exception(app):
 
 def test_on_close_warns_when_busy(app, monkeypatch):
     # D3: closing during an operation must prompt, not silently interrupt
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     asked = []
     monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: asked.append(1) or False)
     app._busy = True
@@ -784,7 +803,7 @@ def test_rides_no_console_telemetry_guides_to_load(app):
 
 def test_write_mismatch_offers_revert(app, monkeypatch):
     # F8: a read-back mismatch offers an immediate revert to the old value
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     monkeypatch.setattr(mb, "askyesno", lambda *a, **k: True)      # accept the offer
     app._connect()
     assert _pump(app, lambda: app.connected)
@@ -838,7 +857,7 @@ def test_baseline_reboot_aborts_and_stays_locked(app, monkeypatch):
 
 def test_heavy_dump_requires_confirmation(app, monkeypatch):
     # A2: a heavy log dump (contactor risk) must go through a confirm dialog
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     asked = []
     monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: asked.append(a) or False)
     app._connect()
@@ -852,7 +871,7 @@ def test_heavy_dump_requires_confirmation(app, monkeypatch):
 def test_raw_box_heavy_command_confirms_and_can_cancel(app, monkeypatch):
     # A1 (SAFE-1): eventlogdump/dumpall typed into the raw command box must get the
     # SAME contactor confirm as the Heavy buttons, and send NOTHING if the user cancels.
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     asked = []
     monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: asked.append(a) or False)
     app._connect()
@@ -874,7 +893,7 @@ def test_raw_box_heavy_variant_gets_dump_class_timeouts(app, monkeypatch):
     # A1/SAFE-2: a raw-box heavy VARIANT ("eventlogdump 5") is sent verbatim, gets the
     # contactor confirm, the 30 s heavy idle, AND the 900 s dump max_time — never the
     # 60 s cap that would truncate a multi-minute dump mid-stream.
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)   # user proceeds
     app._connect()
     assert _pump(app, lambda: app.connected)
@@ -984,7 +1003,7 @@ def test_probe_fails_on_garbled_version(app, monkeypatch):
 
 def test_probe_warns_on_unknown_firmware_rev(app, monkeypatch):
     # T15/C3: a different firmware rev connects but warns
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     from openmbb.sim import SimPort
     warned = []
     monkeypatch.setattr(mb, "showwarning", lambda *a, **k: warned.append(a))
@@ -1058,7 +1077,7 @@ def test_login_decided_by_level_query(app, monkeypatch, attempt, level, expect_i
 
 def test_on_close_confirm_journals_and_closes(app, monkeypatch):
     # T18/D3: the accept-close-while-busy path journals a trace and closes
-    import tkinter.messagebox as mb
+    from openmbb import dialogs as mb
     monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
     app._connect()
     assert _pump(app, lambda: app.connected)
