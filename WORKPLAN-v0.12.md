@@ -69,7 +69,7 @@ open a real COM port. Commit per tier.
   Bike-menu entry (its real value is browsing options BEFORE login / when the table is empty).
 
 ## Tier E — release
-- [ ] Bump to 0.12.0; full suite + selftest + smoketest green; rebuild exe + installer. Not
+- [x] Bump to 0.12.0; full suite + selftest + smoketest green; rebuild exe + installer. Not
   tagged/pushed.
 
 ## Progress log
@@ -87,4 +87,8 @@ open a real COM port. Commit per tier.
 - D2: Writes top block cut to one concise UNLOCK line (dropped the separate panel-context paragraph).
 - D3: the Writes tab is now a scrollable frame with a VISIBLE scrollbar (_scrollable_tab helper: canvas + ttk.Scrollbar + mousewheel-on-hover) so the guards/journal below the fold are discoverable.
 - D4: removed the redundant 'What can I change?' button from the Writes tab (it duplicated the per-row description); the read-only reference stays in the Bike menu.
+### Suite hardening (pre-release, commit fd88329)
+- Running the whole GUI suite in one process surfaced two TEST-HARNESS issues (product paths unchanged; every test passed standalone): (1) an internal-error crash ~test 64 from _scrollable_tab's canvas.bind_all("<MouseWheel>")/unbind_all churning the interpreter-global "all" bindtag across app lifecycles — fixed by binding the wheel directly on the canvas (visible scrollbar drag works regardless); (2) a cross-test assert-False flake (test_raw_box_logout_regates) from dead Tk Variable cycles GC'd mid-way through a later test's app.update() firing __del__ into a torn-down interpreter — fixed with deterministic fixture teardown (cancel pending after() callbacks, destroy, gc.collect()). Full GUI suite now 65 passed / 1 skipped / 0 warnings (was 16) / 167s (was 226s).
+### Tier E — release (complete)
+- Bumped pyproject.toml + src/openmbb/__init__.py to 0.12.0. Verified GREEN from source: non-GUI 140 passed, GUI 65 passed/1 skipped, --selftest PASS, --smoketest PASS. Rebuilt dist/openmbb.exe (PyInstaller --clean, editable src confirms 0.12.0) — frozen --selftest + --smoketest both PASS. Rebuilt packaging/Output/openmbb-setup-windows-x64.exe via ISCC /DAppVersion=0.12.0 (Inno Setup 6.7.3), installer ProductVersion 0.12.0. NOT tagged/pushed.
 (append per item)
