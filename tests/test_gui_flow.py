@@ -137,6 +137,24 @@ def test_analyze_tab(app):
     assert not app._errors
 
 
+def test_menubar_is_themed_menubuttons(app):
+    # A2: the menu bar is a themed ttk Menubutton strip (dark), not the OS-white
+    # native menubar — Session / Bike / Help all present as Menubuttons.
+    import tkinter.ttk as ttk
+    labels = set()
+
+    def walk(w):
+        for c in w.winfo_children():
+            if isinstance(c, ttk.Menubutton):
+                labels.add(str(c.cget("text")))
+            walk(c)
+
+    walk(app)
+    assert {"Session", "Bike", "Help"} <= labels
+    # and the app no longer installs a native menubar
+    assert not app.cget("menu")
+
+
 def test_menu_dialogs_open(app):
     app._connect()
     assert _pump(app, lambda: app.connected)

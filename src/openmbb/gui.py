@@ -193,6 +193,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.minsize(900, 620)
             self.sty = apply_theme(self)
             self._set_window_icon()
+            self._apply_dark_titlebar()
 
             self.transport = None
             self.logger = None
@@ -245,6 +246,26 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._icon_photos = photos   # Tk keeps no reference; we must
             except Exception as exc:         # cosmetic only — never block launch
                 print("window icon unavailable: %s" % exc)
+
+        def _apply_dark_titlebar(self):
+            """Make the OS title bar dark to match the app (Windows 10 2004+/11).
+            Best-effort and Windows-only — the app theme is always dark. Never
+            blocks launch on other platforms or older builds."""
+            if sys.platform != "win32":
+                return
+            try:
+                import ctypes
+                self.update_idletasks()
+                hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+                value = ctypes.c_int(1)
+                # DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (build >= 19041); 19 before that
+                for attr in (20, 19):
+                    if ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                            hwnd, attr, ctypes.byref(value),
+                            ctypes.sizeof(value)) == 0:
+                        break
+            except Exception as exc:         # cosmetic only — never block launch
+                print("dark title bar unavailable: %s" % exc)
 
         def _console_text(self, parent, height, fg=None):
             t = tk.Text(parent, height=height, state="disabled",
@@ -362,52 +383,72 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       foreground=P["dim"]).pack(side="right", padx=16)
 
         # -- menu bar --------------------------------------------------------
+        def _dark_menu(self, parent):
+            """A dropdown tk.Menu coloured to match the dark theme (dropdowns DO
+            honour bg/fg on Windows, unlike the native menubar strip)."""
+            return tk.Menu(parent, tearoff=0, bg=P["panel"], fg=P["fg"],
+                           activebackground=P["sel"], activeforeground="#eafff2",
+                           disabledforeground=P["dim"], relief="flat", borderwidth=0)
+
         def _build_menubar(self):
-            m = tk.Menu(self)
+            # A2: the native Tk menubar strip is OS-drawn white on Windows and
+            # ignores colours. Use a themed ttk Menubutton bar (dark) with dark
+            # dropdown menus instead.
+            bar = ttk.Frame(self)
+            bar.pack(side="top", fill="x")
 
-            sess = tk.Menu(m, tearoff=0)
-            sess.add_command(label="Set save location…",
-                             command=self._set_log_dir)
-            sess.add_command(label="Open session folder",
-                             command=self._open_session_folder)
-            sess.add_command(label="Open recent session…",          # E3
-                             command=self._open_recent_session)
-            sess.add_command(label="Copy session path",
-                             command=self._copy_session_path)
-            sess.add_separator()
-            sess.add_command(label="Save health report…",           # E2
-                             command=self._save_health_report)
-            units = tk.Menu(sess, tearoff=0)                         # E6
-            self.units_var = tk.StringVar(value=config.get_units())
-            units.add_radiobutton(label="Kilometers (km)", value="km",
-                                  variable=self.units_var, command=self._apply_units)
-            units.add_radiobutton(label="Miles (mi)", value="mi",
-                                  variable=self.units_var, command=self._apply_units)
-            sess.add_cascade(label="Distance units", menu=units)
-            sess.add_command(label="Forget saved login passwords",   # E5
-                             command=self._forget_passwords)
-            sess.add_separator()
-            sess.add_command(label="Refresh COM ports", command=self._refresh_ports)
-            sess.add_separator()
-            sess.add_command(label="Exit", command=self._on_close)
-            m.add_cascade(label="Session", menu=sess)
+            def add_menu(text, build):
+                mb = ttk.Menubutton(bar, text=text, direction="below")
+                menu = self._dark_menu(mb)
+                build(menu)
+                mb["menu"] = menu
+                mb.pack(side="left", padx=(4, 0), pady=1)
 
-            bike = tk.Menu(m, tearoff=0)
-            bike.add_command(label="Bike info…", command=self._show_bike_info)
-            bike.add_command(label="Write options (read-only)…",
-                             command=self._show_write_options)
-            m.add_cascade(label="Bike", menu=bike)
+            def build_session(sess):
+                sess.add_command(label="Set save location…",
+                                 command=self._set_log_dir)
+                sess.add_command(label="Open session folder",
+                                 command=self._open_session_folder)
+                sess.add_command(label="Open recent session…",          # E3
+                                 command=self._open_recent_session)
+                sess.add_command(label="Copy session path",
+                                 command=self._copy_session_path)
+                sess.add_separator()
+                sess.add_command(label="Save health report…",           # E2
+                                 command=self._save_health_report)
+                units = self._dark_menu(sess)                           # E6
+                self.units_var = tk.StringVar(value=config.get_units())
+                units.add_radiobutton(label="Kilometers (km)", value="km",
+                                      variable=self.units_var,
+                                      command=self._apply_units)
+                units.add_radiobutton(label="Miles (mi)", value="mi",
+                                      variable=self.units_var,
+                                      command=self._apply_units)
+                sess.add_cascade(label="Distance units", menu=units)
+                sess.add_command(label="Forget saved login passwords",  # E5
+                                 command=self._forget_passwords)
+                sess.add_separator()
+                sess.add_command(label="Refresh COM ports",
+                                 command=self._refresh_ports)
+                sess.add_separator()
+                sess.add_command(label="Exit", command=self._on_close)
 
-            hlp = tk.Menu(m, tearoff=0)
-            hlp.add_command(label="Instructions   (F1)",
-                            command=self._show_instructions)
-            hlp.add_command(label="Wiring diagram", command=self._show_wiring)
-            hlp.add_command(label="Safety notes", command=self._show_safety)
-            hlp.add_separator()
-            hlp.add_command(label="About", command=self._show_about)
-            m.add_cascade(label="Help", menu=hlp)
+            def build_bike(bike):
+                bike.add_command(label="Bike info…", command=self._show_bike_info)
+                bike.add_command(label="Write options (read-only)…",
+                                 command=self._show_write_options)
 
-            self.config(menu=m)
+            def build_help(hlp):
+                hlp.add_command(label="Instructions   (F1)",
+                                command=self._show_instructions)
+                hlp.add_command(label="Wiring diagram", command=self._show_wiring)
+                hlp.add_command(label="Safety notes", command=self._show_safety)
+                hlp.add_separator()
+                hlp.add_command(label="About", command=self._show_about)
+
+            add_menu("Session", build_session)
+            add_menu("Bike", build_bike)
+            add_menu("Help", build_help)
             self.bind("<F1>", lambda e: self._show_instructions())
 
         def _info_window(self, title, text):
