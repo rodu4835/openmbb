@@ -647,7 +647,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             return tk.Menu(parent, tearoff=0, bg="#26262b", fg=P["fg"],
                            activebackground="#3a4150", activeforeground="#ffffff",
                            disabledforeground=P["dim"], relief="flat", borderwidth=0,
-                           activeborderwidth=0, font=(self.sty["ui"], 10))
+                           activeborderwidth=0, selectcolor="#5aa8ff",
+                           font=(self.sty["ui"], 10))
 
         def _build_menubar(self):
             # A2: the native Tk menubar strip is OS-drawn white on Windows and
@@ -735,24 +736,36 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.bind("<F1>", lambda e: self._show_instructions())
 
         def _info_window(self, title, text):
+            from . import dialogs
+            surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
             win = tk.Toplevel(self)
             win.title("%s — %s" % (APP_NAME, title))
-            win.geometry("760x560")
-            win.configure(bg=P["console"])
-            frame = ttk.Frame(win)
-            frame.pack(fill="both", expand=True)
-            sb = ttk.Scrollbar(frame)
+            win.geometry("780x580")
+            win.configure(bg=surface)
+            win.transient(self)
+
+            outer = ttk.Frame(win, padding=(18, 16))
+            outer.pack(fill="both", expand=True)
+            ttk.Label(outer, text=title, style="Heading.TLabel").pack(anchor="w",
+                                                                      pady=(0, 10))
+            body = ttk.Frame(outer)
+            body.pack(fill="both", expand=True)
+            sb = ttk.Scrollbar(body)
             sb.pack(side="right", fill="y")
-            txt = tk.Text(frame, wrap="word", font=(self.sty["mono"], 10),
+            txt = tk.Text(body, wrap="word", font=(self.sty["mono"], 10),
                           bg=P["console"], fg=P["termfg"], relief="flat",
                           padx=16, pady=14, insertbackground=P["fg"],
-                          yscrollcommand=sb.set)
+                          yscrollcommand=sb.set, highlightthickness=1,
+                          highlightbackground=P["panel"], highlightcolor=P["panel"])
             txt.pack(side="left", fill="both", expand=True)
             sb.config(command=txt.yview)
             txt.insert("1.0", text)
             txt.config(state="disabled")
             self._attach_copy(txt)       # E4: copyable info dialogs (write options…)
-            win.transient(self)
+            ttk.Button(outer, text="Close", command=win.destroy).pack(anchor="e",
+                                                                      pady=(12, 0))
+            dialogs._dark_titlebar(win)
+            dialogs._center(win, self)
             win.focus_set()
             return win
 
