@@ -418,7 +418,7 @@ def test_wake_retry_connects(app, monkeypatch):
                     return                  # swallow the first wake — no prompt
             super()._handle(cmd)
 
-    monkeypatch.setattr(app, "_make_port", lambda pn: TwoWakeSim())
+    monkeypatch.setattr(app, "_make_port", lambda pn, sim: TwoWakeSim())
     app._connect()
     assert _pump(app, lambda: app.connected)
     assert not app._errors
@@ -440,7 +440,7 @@ def test_failed_probe_closes_port(app, monkeypatch):
         def close(self):
             self.closed = True
 
-    def mk(pn):
+    def mk(pn, sim):
         holder["p"] = NeverPromptSim()
         return holder["p"]
 
@@ -1117,7 +1117,7 @@ def test_probe_fails_on_garbled_version(app, monkeypatch):
                 return
             super()._handle(cmd)
 
-    monkeypatch.setattr(app, "_make_port", lambda pn: GarbledVer())
+    monkeypatch.setattr(app, "_make_port", lambda pn, sim: GarbledVer())
     app._connect()
     assert _pump(app, lambda: not app._busy)
     assert not app.connected
@@ -1138,7 +1138,7 @@ def test_probe_warns_on_unknown_firmware_rev(app, monkeypatch):
                 return
             super()._handle(cmd)
 
-    monkeypatch.setattr(app, "_make_port", lambda pn: Rev99())
+    monkeypatch.setattr(app, "_make_port", lambda pn, sim: Rev99())
     app._connect()
     assert _pump(app, lambda: app.connected)      # still connects
     assert warned                                 # but warned about the rev
@@ -1187,7 +1187,7 @@ def _login_sim(attempt_reply, level):
 def test_login_decided_by_level_query(app, monkeypatch, attempt, level, expect_in):
     # T17/D5: login success comes from the read-only `login` level query, not the
     # attempt wording
-    monkeypatch.setattr(app, "_make_port", lambda pn: _login_sim(attempt, level)())
+    monkeypatch.setattr(app, "_make_port", lambda pn, sim: _login_sim(attempt, level)())
     app._connect()
     assert _pump(app, lambda: app.connected)
     app._baseline()
@@ -1239,7 +1239,7 @@ def test_reconnect_closes_old_transport(app, monkeypatch):
         def close(self):
             self.closed = True
 
-    monkeypatch.setattr(app, "_make_port", lambda pn: ClosableSim())
+    monkeypatch.setattr(app, "_make_port", lambda pn, sim: ClosableSim())
     app._connect()
     assert _pump(app, lambda: app.connected)
     app._connect()
