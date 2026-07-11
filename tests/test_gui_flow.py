@@ -370,24 +370,34 @@ def test_rides_render_honors_unit_preference(app, monkeypatch, tmp_path):
     assert " mi ·" in app.lbl_ride_totals.cget("text")
 
 
-def test_login_tab_explains_passwords_and_level(app):
-    # D1: the Login intro reassures a first-timer — whose passwords, that it's
-    # read-only, what "level 2" is, and what unlocks.
+def test_login_tab_is_concise_read_only(app):
+    # D1 (v0.12): the Login intro is trimmed to WHAT logging in does — read-only,
+    # reveals the tunables, unlocks Writes — with no password strings listed.
     blob = " ".join(_all_label_text(app)).lower()
-    assert "service passwords" in blob
     assert "read-only" in blob and "changes nothing on the bike" in blob
-    assert "level 2" in blob and "writes tab unlocks" in blob
+    assert "unlocks the writes tab" in blob
+    # the actual password strings must NOT be on the login screen
+    from openmbb.gui import COMMUNITY_PASSWORDS
+    assert all(pw.lower() not in blob for pw in COMMUNITY_PASSWORDS)
 
 
-def test_writes_tab_surfaces_options_and_explains_unlock(app, monkeypatch):
-    # D3/D4: the Writes tab has the read-only options reference button + explains
-    # what arming UNLOCK does, and the browser defines "live dump".
-    blob = " ".join(_all_label_text(app))
-    assert "What can I change?" in blob                            # D3 button
-    assert "Arming UNLOCK WRITES changes nothing by itself" in blob  # D4
+def test_writes_tab_scrollbar_trimmed_and_no_redundant_button(app, monkeypatch):
+    # v0.12 D2/D3/D4: the Writes tab has a visible scrollbar and a concise UNLOCK
+    # line, and no longer duplicates the read-only options button (that lives in the
+    # Bike menu). The browser itself still works + defines "live dump".
+    import tkinter.ttk as ttk
+
+    def has_scrollbar(w):
+        return isinstance(w, ttk.Scrollbar) or any(has_scrollbar(c)
+                                                   for c in w.winfo_children())
+    writes_tab = app.nb.nametowidget(app.nb.tabs()[3])
+    assert has_scrollbar(writes_tab)                              # D3
+    labels = " ".join(_all_label_text(app))
+    assert "Arming UNLOCK only enables the Write" in labels       # D2 trimmed text
+    assert "What can I change?" not in labels                     # D4 button removed
     captured = {}
     monkeypatch.setattr(app, "_info_window", lambda t, x: captured.update(text=x))
-    app._show_write_options()
+    app._show_write_options()                                     # Bike-menu path still works
     low = captured["text"].lower()
     assert "live dump" in low and "settings that really exist on your bike" in low
 

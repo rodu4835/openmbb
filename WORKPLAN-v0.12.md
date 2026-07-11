@@ -56,15 +56,15 @@ open a real COM port. Commit per tier.
    scrolls — add a visible scrollbar"; "What can I change? button is redundant on Writes since
    clicking a row already shows the description"]
 
-- [ ] **D1 Trim the Login intro.** Cut to a short "what logging in lets you do" (reveals the
+- [x] **D1 Trim the Login intro.** Cut to a short "what logging in lets you do" (reveals the
   tunable settings, unlocks Writes). Remove the literal password strings from the screen; the
   provenance/detail lives in Help → Instructions.
-- [ ] **D2 Trim the Writes top text.** Shorten the explanatory block at the top of the Writes
+- [x] **D2 Trim the Writes top text.** Shorten the explanatory block at the top of the Writes
   tab to the essentials.
-- [ ] **D3 Visible scrollbar on Writes.** The Writes tab scrolls but nothing signals it — add a
+- [x] **D3 Visible scrollbar on Writes.** The Writes tab scrolls but nothing signals it — add a
   visible scrollbar (or make the whole tab scroll with an obvious bar) so the journal/guards
   below the fold are discoverable.
-- [ ] **D4 Remove the redundant Writes-tab options button.** "What can I change? (read-only)"
+- [x] **D4 Remove the redundant Writes-tab options button.** "What can I change? (read-only)"
   duplicates the per-row description on the Writes tab. Remove it from the Writes tab; keep the
   Bike-menu entry (its real value is browsing options BEFORE login / when the table is empty).
 
@@ -82,4 +82,9 @@ open a real COM port. Commit per tier.
 - B3: Connect & Probe narrates each step live into the connect console (listening / waking / reading version / checking firmware) via _cbq instead of only a progress bar; FULL BASELINE streams a per-command '[i/N] reading <cmd>…' line. Tests updated for the new labels + a live-narration test.
 ### Tier C — gating (complete)
 - C1: Login now opens as soon as you're connected (it's read-only) — the baseline requirement moved OFF the Login gate. The WRITES tab keeps the real safety rule: connected + logged_in + baseline_done (a backup must exist before any write). Updated _tab_unlock_hint (Read/Login just need connect; Writes lists what's missing) and the baseline complete/incomplete messages (backup-based, not 'Phase 2 unlocked'). New test proves login works pre-baseline while Writes stays gated until the backup exists.
+### Tier D — login/writes text + Writes UX (complete)
+- D1: Login intro trimmed to WHAT logging in does (read-only, reveals tunables, unlocks Writes) — no password strings on screen.
+- D2: Writes top block cut to one concise UNLOCK line (dropped the separate panel-context paragraph).
+- D3: the Writes tab is now a scrollable frame with a VISIBLE scrollbar (_scrollable_tab helper: canvas + ttk.Scrollbar + mousewheel-on-hover) so the guards/journal below the fold are discoverable.
+- D4: removed the redundant 'What can I change?' button from the Writes tab (it duplicated the per-row description); the read-only reference stays in the Bike menu.
 (append per item)

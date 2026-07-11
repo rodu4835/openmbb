@@ -1522,18 +1522,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             f = ttk.Frame(self.nb, padding=12)
             self.nb.add(f, text=" 2 · Login ")
             ttk.Label(f, text=(
-                "Some tuning settings sit behind the console's service login. The "
-                "passwords below are the SERVICE passwords Zero owners have "
-                "documented publicly over the years (%s) — logging in only REVEALS "
-                "those settings; it is read-only and changes nothing on the bike. "
-                "Click 'Try known passwords' to attempt them in order, or type your "
-                "own and 'Try this password'. If they all fail, no problem — the tool "
-                "stays read-only. On success you reach login LEVEL 2 (the tuning "
-                "level): the full `set` list appears and the Writes tab unlocks. A "
-                "typed password is masked in the logs and never saved to disk unless "
-                "you say yes when it offers to remember it after login (clear saved "
-                "ones via Session → Forget saved login passwords)."
-                % ", ".join(COMMUNITY_PASSWORDS)),
+                "Logging in is READ-ONLY — it reveals the tuning settings the console "
+                "hides and unlocks the Writes tab. It changes nothing on the bike, and "
+                "a failed attempt just leaves you read-only. Click 'Try known "
+                "passwords', or type your own and 'Try this password'."),
                 wraplength=920, justify="left").pack(anchor="w")
 
             row = ttk.Frame(f)
@@ -1675,33 +1667,47 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
             self._run_bg(job, done)
 
+        def _scrollable_tab(self, title):
+            """A notebook tab whose content scrolls with a VISIBLE scrollbar.
+            Returns the inner frame to build into (review D3)."""
+            outer = ttk.Frame(self.nb)
+            self.nb.add(outer, text=title)
+            bg = ttk.Style().lookup("TFrame", "background") or P["bg"]
+            canvas = tk.Canvas(outer, highlightthickness=0, bg=bg)
+            vsb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+            canvas.configure(yscrollcommand=vsb.set)
+            vsb.pack(side="right", fill="y")
+            canvas.pack(side="left", fill="both", expand=True)
+            f = ttk.Frame(canvas, padding=10)
+            win = canvas.create_window((0, 0), window=f, anchor="nw")
+            f.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+            canvas.bind("<Configure>",
+                        lambda e: canvas.itemconfigure(win, width=e.width))
+
+            def _wheel(e):
+                canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _wheel))
+            canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+            return f
+
         # -- Phase 3: Writes -------------------------------------------------------
         def _build_write_tab(self):
-            f = ttk.Frame(self.nb, padding=10)
-            self.nb.add(f, text=" 3 · Writes ")
+            f = self._scrollable_tab(" 3 · Writes ")     # D3: visible scrollbar
 
-            top = ttk.Frame(f)
-            top.pack(fill="x")
             self.unlock_var = tk.BooleanVar(value=False)
-            ttk.Checkbutton(top, text="UNLOCK WRITES (master gate)",
+            ttk.Checkbutton(f, text="UNLOCK WRITES (master gate)",
                             style=self.sty["toggle"],
-                            variable=self.unlock_var).pack(side="left")
-            # D3: a read-only "what could I change" reference, right here (not only
-            # buried in the Bike menu).
-            ttk.Button(top, text="What can I change? (read-only)",
-                       command=self._show_write_options).pack(side="right")
-
-            # D4: say what arming the toggle actually does (and what it does NOT).
+                            variable=self.unlock_var).pack(anchor="w")
+            # D2/D4: one concise line (no redundant options button — it duplicated the
+            # per-row description; the read-only reference lives in the Bike menu).
             ttk.Label(f, foreground=P["dim"], wraplength=940, justify="left",
-                      text="Arming UNLOCK WRITES changes nothing by itself — it only "
-                      "enables the Write… button. Every write still asks you to "
-                      "confirm, backs up all settings first, reads the value back to "
-                      "verify, and logs it so you can Revert. The rows below are the "
-                      "settings from YOUR bike's live `set` dump (what the console "
-                      "reported after login) that are safe to change.").pack(
-                          anchor="w", pady=(2, 0))
-            ttk.Label(f, text=WRITE_PANEL_CONTEXT, foreground=P["warn"],
-                      wraplength=940, justify="left").pack(anchor="w", pady=(2, 4))
+                      text="Arming UNLOCK only enables the Write… button — it changes "
+                      "nothing on its own. Every write backs up all settings, reads "
+                      "the value back to verify, and is journaled so you can Revert. "
+                      "Change one thing at a time. Rows below are the settings your "
+                      "bike actually reports that are safe to change.").pack(
+                          anchor="w", pady=(2, 6))
 
             cols = ("name", "current", "risk")
             self.tree = ttk.Treeview(f, columns=cols, show="headings", height=9)
