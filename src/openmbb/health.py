@@ -86,10 +86,12 @@ def health_snapshot(session):
 
     cap, rem = bms.get("capacity_ah"), bms.get("remaining_ah")
     if cap is not None:
-        val = "%g Ah" % cap + (" (%g Ah left)" % rem if rem is not None else "")
+        val = "%g Ah nominal" % cap + (" (%g Ah at this charge)" % rem
+                                       if rem is not None else "")
         out.append(_metric("Pack capacity", val, "info",
-                           "nominal is 52 Ah; deep tracking of learned capacity "
-                           "comes from the ride-log analysis"))
+                           "the design nominal (~52 Ah) and how much is left at the "
+                           "CURRENT charge — not a degradation measurement. Learned "
+                           "capacity comes from the ride-log analysis."))
     cyc = bms.get("cycles")
     if cyc is not None:
         out.append(_metric("Charge cycles", "%g" % cyc, "info"))
@@ -104,14 +106,16 @@ def health_snapshot(session):
         # single value) is never presented as a live read of this bike.
         def _lbl(v, live):
             return "%g C" % v if live else "%g C (default)" % v
-        note = "cutback stages at %s / %s" % (_lbl(s1, live1), _lbl(s2, live2))
+        note = ("highest EVER recorded, not the current temperature. Cutback "
+                "stages at %s / %s" % (_lbl(s1, live1), _lbl(s2, live2)))
         if not (live1 and live2):
             note += " — '(default)' = documented default, not read from this bike"
-        out.append(_metric("Max motor temp", "%g C" % mot_t, st, note))
+        out.append(_metric("Max motor temp (lifetime)", "%g C" % mot_t, st, note))
     batt_t = first_val(stats.get("max_batt_temp_c"), bms.get("pack_max_temp_c"))
     if batt_t is not None:
         st = "ok" if batt_t < 50 else ("watch" if batt_t < 60 else "alert")
-        out.append(_metric("Max battery temp", "%g C" % batt_t, st,
+        out.append(_metric("Max battery temp (lifetime)", "%g C" % batt_t, st,
+                           "highest EVER recorded, not the current temperature; "
                            "charge tapers ~43-50 C, operation stop ~50-60 C"))
 
     # F5: isolation resistance — healthy is megohms (>1000 kΩ). A low reading on

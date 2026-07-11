@@ -267,6 +267,53 @@ def test_listen_only_reports_without_connecting(app):
     assert "ZERO MBB>" in app.txt_probe.get("1.0", "end")   # sim greet detected
 
 
+def test_read_points_to_analyze_once(app):
+    # C1: the first read prints a one-time pointer to Analyze (don't nag every read).
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._read_cmd("status")
+    assert _pump(app, lambda: "Use current session" in app.txt_out.get("1.0", "end"))
+    before = app.txt_out.get("1.0", "end").count("Use current session")
+    app._read_cmd("bms")
+    assert _pump(app, lambda: "### bms" in app.txt_out.get("1.0", "end"))
+    assert app.txt_out.get("1.0", "end").count("Use current session") == before  # not repeated
+
+
+def test_health_note_seeded_with_hint(app):
+    # C3: the per-row explanations are discoverable (a visible hint, not a blank).
+    assert "click any metric row" in app.lbl_health_note.cget("text").lower()
+
+
+def test_write_options_guards_are_sim_aware(app, monkeypatch):
+    # C4: the guards header must not flatly claim "shows —" when the sim shows
+    # numbers — it explains the sim fills examples, so sim != bug.
+    captured = {}
+    monkeypatch.setattr(app, "_info_window", lambda t, x: captured.update(text=x))
+    app._show_write_options()
+    low = captured["text"].lower()
+    assert "simulator" in low and "if your bike exposes" in low
+
+
+def test_analyze_empty_folder_warns(app, monkeypatch, tmp_path):
+    # C6: loading a folder with no session data warns instead of silently n/a-ing.
+    import tkinter.messagebox as mb
+    from openmbb import sessions
+    warns = []
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: warns.append(a))
+    app._analyze_set(sessions.Session(str(tmp_path), {}, ""))
+    assert warns and "no readable OpenMBB session data" in str(warns[0])
+    assert "no readable data" in app.lbl_loaded.cget("text")
+
+
+def test_locked_writes_tab_explains(app, monkeypatch):
+    # C7: "Open Writes tab" / a locked tab must say what unlocks it, not no-op.
+    import tkinter.messagebox as mb
+    infos = []
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: infos.append(a))
+    app._goto_writes()                              # not logged in
+    assert infos and "Writes tab opens" in str(infos[-1])
+
+
 def test_read_tab_has_legend_and_tooltips(app):
     # B6: the bare firmware command buttons get a plain-language legend + a hover
     # tip for every read, so a first-timer isn't facing a wall of jargon.

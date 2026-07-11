@@ -220,6 +220,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._build_statusbar()
             self.nb = ttk.Notebook(self)
             self.nb.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+            # C7: a click on a locked tab is silently ignored by Tk — intercept it
+            # and say what unlocks that phase instead.
+            self.nb.bind("<Button-1>", self._on_tab_click)
             self._build_connect_tab()
             self._build_read_tab()
             self._build_login_tab()
@@ -393,8 +396,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 lines += row
             lines += ["-" * 60, "",
                       "Safety guards (shown read-only, NEVER writable):",
-                      "(documented / Sevcon-side thresholds — rev 41 does NOT expose "
-                      "these via `set`, so they show '—' on this bike)"]
+                      "(Sevcon-side / documented thresholds. A value appears only if "
+                      "your bike exposes it in `set`; the verified rev 41 usually "
+                      "doesn't, so you'll see '—'. In the SIMULATOR they're filled in "
+                      "with example values.)"]
             for gname, gdesc in READONLY_GUARDS:
                 gval = self.settings.get(gname, {}).get("value")
                 lines.append("    %-16s %-10s %s" % (gname, gval or "—", gdesc))
@@ -525,6 +530,39 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 text="logged in (level shown in Login tab)" if self.logged_in
                 else "not logged in",
                 foreground=P["green"] if self.logged_in else P["dim"])
+
+        def _tab_unlock_hint(self, idx):
+            # C7: plain-language "here's how to unlock this phase" for a locked tab.
+            if idx == 1:
+                return "The Read tab opens once you Connect & Probe on the Connect tab."
+            if idx == 2:
+                if not self.connected:
+                    return ("The Login tab opens after you Connect, then run ★ FULL "
+                            "BASELINE on the Read tab.")
+                return ("The Login tab opens after you run ★ FULL BASELINE on the Read "
+                        "tab (so a backup exists before any change).")
+            if idx == 3:
+                if not self.connected:
+                    return "The Writes tab opens after Connect → FULL BASELINE → Login."
+                if not self.baseline_done:
+                    return "The Writes tab opens after FULL BASELINE (Read tab) → Login."
+                return "The Writes tab opens after you log in on the Login tab."
+            return "That tab isn't available yet — finish the earlier phase first."
+
+        def _on_tab_click(self, event):
+            try:
+                idx = self.nb.index("@%d,%d" % (event.x, event.y))
+                disabled = str(self.nb.tab(idx, "state")) == "disabled"
+            except Exception:
+                return
+            if disabled:
+                messagebox.showinfo(APP_NAME, self._tab_unlock_hint(idx))
+
+        def _goto_writes(self):
+            if self.connected and self.baseline_done and self.logged_in:
+                self.nb.select(3)
+            else:
+                messagebox.showinfo(APP_NAME, self._tab_unlock_hint(3))
 
         def _reset_session_state(self):
             """Every connection re-earns its phases. Drop all prior phase state so
@@ -1009,6 +1047,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.lbl_prog.config(text="")
                 if not quiet:
                     self._out("\n### %s  (saved: %s)\n%s" % (cmd, os.path.basename(path), out))
+                    # C1: point first-timers at where the numbers get interpreted
+                    # (once — don't nag on every read).
+                    if not getattr(self, "_analyze_hint_shown", False):
+                        self._out("  → To interpret these (ok / watch / alert), open "
+                                  "the Analyze tab and click 'Use current session'.")
+                        self._analyze_hint_shown = True
                 if cmd == "set":
                     self._ingest_settings(out)
                 if cmd == "help" and not self.logged_in:
@@ -1123,6 +1167,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     if errors:
                         self._out("(%d command(s) failed; retry them with the read "
                                   "buttons: %s)" % (len(errors), ", ".join(errors)))
+                    # C1: a backup exists now — steer to interpretation + next phase.
+                    self._out("→ Open the Analyze tab and click 'Use current session' "
+                              "to see battery health, temps and gearing flagged "
+                              "ok / watch / alert.")
                     self._out("Phase 2 (Login) unlocked.")
                 else:
                     self.lbl_prog.config(text="baseline incomplete")
@@ -1331,9 +1379,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Button(wrow, text="Write…", style=self.sty["danger"],
                        command=self._write).pack(side="left")
 
-            ttk.Label(f, text="Safety guards (read-only; documented / Sevcon-side "
-                      "values that rev 41 does not expose via `set`):",
-                      foreground=P["dim"]).pack(anchor="w", pady=(10, 2))
+            ttk.Label(f, text="Safety guards (read-only, never writable) — Sevcon-side "
+                      "/ documented thresholds. A value shows only if your bike "
+                      "exposes it in `set`; rev 41 usually doesn't (you'll see "
+                      "'(not in live dump)'). The simulator fills in examples.",
+                      foreground=P["dim"], wraplength=940, justify="left").pack(
+                          anchor="w", pady=(10, 2))
             self.txt_guards = self._console_text(f, 6, fg=P["warn"])
             self.txt_guards.pack(fill="x")
 
@@ -1525,8 +1576,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.health_tree.tag_configure(tag, foreground=col)
             self.health_tree.pack(fill="both", expand=True)
             self.health_tree.bind("<<TreeviewSelect>>", self._health_note)
-            self.lbl_health_note = ttk.Label(hf, text="", wraplength=980,
-                                             foreground=P["dim"], justify="left")
+            # C3: make the per-row explanations discoverable — seed the note with a
+            # visible hint so nobody has to guess that clicking a row explains it.
+            self._health_hint = ("Tip: click any metric row for a plain-language "
+                                 "explanation of what it means and why it's "
+                                 "ok / watch / alert.")
+            self.lbl_health_note = ttk.Label(hf, text=self._health_hint,
+                                             wraplength=980, foreground=P["dim"],
+                                             justify="left")
             self.lbl_health_note.pack(anchor="w", pady=(6, 0))
 
             # Rides
@@ -1593,15 +1650,33 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Button(grow2, text="Copy spfront/sprear/rwhcirc",
                        command=self._gearing_copy).pack(side="left")
             ttk.Button(grow2, text="Open Writes tab",
-                       command=lambda: self.nb.select(3)).pack(side="left", padx=6)
+                       command=self._goto_writes).pack(side="left", padx=6)
             self._gearing_compute()   # populate with the default 22/88 plan
+
+        def _session_has_data(self, s):
+            if not s:
+                return False
+            if (s.settings_text or "").strip():
+                return True
+            return any((s.cmd(c) or "").strip()
+                       for c in ("bms", "stats", "status", "version"))
 
         def _analyze_set(self, session):
             self.analyze_session = session
-            self.lbl_loaded.config(text="loaded: %s" % session.name,
-                                   foreground=P["green"])
             self._render_health()
             self._render_rides()
+            # C6: a folder with no readable session data would render as all-n/a with
+            # no hint — flag it instead of silently "loading" nothing.
+            if self._session_has_data(session):
+                self.lbl_loaded.config(text="loaded: %s" % session.name,
+                                       foreground=P["green"])
+            else:
+                self.lbl_loaded.config(text="loaded: %s — no readable data"
+                                       % session.name, foreground=P["warn"])
+                messagebox.showwarning(APP_NAME, "That folder has no readable OpenMBB "
+                    "session data (it should contain per-command .txt files like "
+                    "bms.txt / stats.txt from a Read or FULL BASELINE). The metrics "
+                    "will show n/a — pick a session folder created by the app.")
 
         def _analyze_load(self):
             base = self._session_root()
@@ -1641,7 +1716,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _health_note(self, _evt=None):
             sel = self.health_tree.selection()
             note = self._health_notes.get(sel[0], "") if sel else ""
-            self.lbl_health_note.config(text=note)
+            self.lbl_health_note.config(text=note or self._health_hint)
 
         def _render_rides(self):
             # A1: rev-41 has no console command that streams ride telemetry as text

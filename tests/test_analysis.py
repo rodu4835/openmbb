@@ -349,20 +349,31 @@ def test_health_motor_temp_labels_documented_defaults(tmp_path):
     # cutback thresholds fall back to documented defaults — the note must mark each
     # value's provenance, never printing a default like a live read of this bike.
     no_stages = sessions.Session(str(tmp_path), {"stats": REAL_STATS}, "")
-    m = {x["label"]: x for x in health.health_snapshot(no_stages)}["Max motor temp"]
+    m = {x["label"]: x for x in health.health_snapshot(no_stages)}["Max motor temp (lifetime)"]
     assert "(default)" in m["note"] and "documented default" in m["note"]
     # when the dump DOES carry both, no default markers and the real values show
     both = sessions.Session(str(tmp_path), {"stats": REAL_STATS},
                             "motstage1 - warn : 110\nmotstage2 - cutback : 150")
-    m2 = {x["label"]: x for x in health.health_snapshot(both)}["Max motor temp"]
+    m2 = {x["label"]: x for x in health.health_snapshot(both)}["Max motor temp (lifetime)"]
     assert "(default)" not in m2["note"]
     assert "110" in m2["note"] and "150" in m2["note"]
     # REG-2 mixed case: only motstage1 is live -> only the defaulted motstage2 is
     # flagged, and the live 110 is NOT mislabelled as a default
     mixed = sessions.Session(str(tmp_path), {"stats": REAL_STATS}, "motstage1 - warn : 110")
-    m3 = {x["label"]: x for x in health.health_snapshot(mixed)}["Max motor temp"]
+    m3 = {x["label"]: x for x in health.health_snapshot(mixed)}["Max motor temp (lifetime)"]
     assert "110 C /" in m3["note"] and "110 C (default)" not in m3["note"]
     assert "145 C (default)" in m3["note"]
+
+
+def test_health_temps_labelled_lifetime(tmp_path):
+    # C2 (review A3): the max temps are LIFETIME maxima, not live readings — the
+    # label + note must say so, so a cold bike's historic 60 C doesn't read as a
+    # live emergency.
+    s = sessions.Session(str(tmp_path), {"stats": REAL_STATS}, "")
+    snap = {m["label"]: m for m in health.health_snapshot(s)}
+    assert "Max battery temp (lifetime)" in snap
+    assert "Max motor temp (lifetime)" in snap
+    assert "highest EVER recorded" in snap["Max battery temp (lifetime)"]["note"]
 
 
 def test_no_refuted_gauge_claim_in_safety_text():

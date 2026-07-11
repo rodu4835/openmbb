@@ -50,22 +50,22 @@ item; GUI tests standalone. Never open a real COM port. Commit per tier.
 
 ## Tier C — numbers with meaning  [obs-3, A2/A3/A4/A7/A8, obs-5, guards-pane]
 
-- [ ] **C1 Point reads at Analyze**: after a successful read / FULL BASELINE, append one line —
+- [x] **C1 Point reads at Analyze**: after a successful read / FULL BASELINE, append one line —
   "To interpret these (ok/watch/alert), open Analyze → Use current session."
-- [ ] **C2 Lifetime-max relabel**: "Max battery temp" / "Max motor temp" → "(lifetime)" with a
+- [x] **C2 Lifetime-max relabel**: "Max battery temp" / "Max motor temp" → "(lifetime)" with a
   note "highest ever recorded, not the current temperature"; same idea for the capacity row's
   degradation-looking wording.
-- [ ] **C3 Health explanations discoverable**: surface the per-row note without requiring a
+- [x] **C3 Health explanations discoverable**: surface the per-row note without requiring a
   click (inline, or a visible "select a row for details" hint) — and the charging-false-low
   explanation in plain language.
-- [ ] **C4 Guards pane contradiction**: the header says rev 41 doesn't expose these (they show
+- [x] **C4 Guards pane contradiction**: the header says rev 41 doesn't expose these (they show
   "—") but the sim shows numbers. Soften the header to "shown if your bike exposes them; on the
   verified rev 41 they're usually not in the `set` dump" so sim ≠ bug is clear.
-- [ ] **C5 Rides source path**: name the zero-log-parser project + what input it needs (and that
+- [x] **C5 Rides source path**: name the zero-log-parser project + what input it needs (and that
   OpenMBB's own event/error-log dumps are not that input), so the tab isn't a dead end.
-- [ ] **C6 Folder-load with no data**: warn ("no readable session data in that folder") instead
+- [x] **C6 Folder-load with no data**: warn ("no readable session data in that folder") instead
   of silently rendering all n/a.
-- [ ] **C7 Disabled tabs explain themselves**: clicking a locked Login/Writes tab (or "Open
+- [x] **C7 Disabled tabs explain themselves**: clicking a locked Login/Writes tab (or "Open
   Writes tab" before login) says what unlocks it, instead of a silent no-op.
 
 ## Tier D — login / writes trust  [login-level2, confirm-dialog, write-options jargon, unlock]
@@ -112,4 +112,12 @@ item; GUI tests standalone. Never open a real COM port. Commit per tier.
 - B4/C5: Rides guidance drops the phantom 'dumplogs' and names the real source (community zero-log-parser, decoded .txt; OpenMBB's own dumps are NOT that input).
 - B5: de-personalized the developer's bike data — spfront/sprear/rwhcirc/reserve_sw/fuelgaugepes effect text + WRITE_PANEL_CONTEXT are now generic; gearing defaults seed FX/FXS factory 20/90 (not the author's 22/88 re-gear); KNOWN_SETUPS labels generic. Two gearing tests updated to the new labels.
 - B6: Read tab gains a plain-language legend + a hover tooltip (READ_TIPS) for every read/heavy button.
+### Tier C — numbers with meaning (complete)
+- C1: first read prints a one-time '-> open Analyze -> Use current session' pointer; FULL BASELINE completion adds an Analyze pointer.
+- C2: max temps relabelled 'Max motor/battery temp (lifetime)' with 'highest EVER recorded, not the current temperature'; Pack capacity value/note clarified as design-nominal + current-charge, not degradation.
+- C3: the Health per-row explanation label is seeded with a visible 'click any metric row…' hint (was blank until clicked).
+- C4: both guards headers softened — a value shows only if the bike exposes it in `set`; rev 41 usually doesn't ('—'); the SIMULATOR fills examples (so sim != bug).
+- C5: (done in B4) Rides names the real zero-log-parser source.
+- C6: loading a folder with no readable session data warns + flags 'no readable data' instead of silent all-n/a.
+- C7: clicking a locked tab (or 'Open Writes tab' before login) explains what unlocks that phase.
 (append per item)
