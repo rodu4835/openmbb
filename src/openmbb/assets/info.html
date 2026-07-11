@@ -252,8 +252,11 @@ every command.</p>
   function show(t){ if(tabs.indexOf(t)<0)t='instructions';
     tabs.forEach(function(x){
       document.getElementById('tab-'+x).classList.toggle('on',x===t);});
+    var lbl='Info';
     [].forEach.call(document.querySelectorAll('.tabbtn'),function(b){
-      b.classList.toggle('on',b.getAttribute('data-t')===t);});
+      var on=b.getAttribute('data-t')===t; b.classList.toggle('on',on); if(on)lbl=b.textContent;});
+    var h=document.querySelector('h1'); if(h)h.textContent='OpenMBB — '+lbl;
+    document.title='OpenMBB — '+lbl;
     window.scrollTo(0,0);
   }
   document.getElementById('tabbar').addEventListener('click',function(e){
