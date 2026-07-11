@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenMBB — Cable Wiring</title>
+<style>
+  :root{
+    --pink:#ff5fd2; --cyan:#22d3ee; --mint:#5cffb1; --yellow:#fff59d;
+    --ink:#e8e6f0; --muted:#b9b2d8; --edge:#3a2d6e; --panel:rgba(23,15,56,.7);
+    --ui:'Segoe UI',system-ui,sans-serif; --mono:'Cascadia Mono','Consolas',monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; color:var(--ink); font-family:var(--ui); font-size:18px; line-height:1.6;
+    background:linear-gradient(180deg,#120a24,#1c1440 55%,#0a0f2e) fixed;
+  }
+  .wrap{max-width:1200px; margin:0 auto; padding:34px 24px 80px}
+  h1{
+    font-size:34px; margin:0 0 4px; font-weight:600;
+    background:linear-gradient(92deg,var(--pink),var(--cyan));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    text-shadow:0 0 26px rgba(255,95,210,.3);
+  }
+  .sub{color:var(--muted); font-size:18px; margin:0 0 22px}
+  .figure{
+    background:var(--panel); border:1px solid var(--edge); border-radius:18px;
+    padding:14px; box-shadow:0 16px 44px rgba(6,3,20,.5);
+  }
+  .figure svg{width:100%; height:auto; display:block; border-radius:10px}
+  h2{
+    font-size:24px; color:var(--pink); text-shadow:0 0 16px rgba(255,95,210,.35);
+    margin:40px 0 10px; font-weight:600;
+  }
+  table{width:100%; border-collapse:collapse; font-size:18px; margin-top:10px}
+  th,td{padding:12px 14px; text-align:left; border-bottom:1px solid rgba(176,107,255,.18)}
+  th{color:var(--cyan); font-size:15px; letter-spacing:.05em; text-transform:uppercase}
+  td.c{font-family:var(--mono)}
+  .sw{display:inline-block; width:14px; height:14px; border-radius:4px; margin-right:9px;
+      vertical-align:-2px; border:1px solid rgba(255,255,255,.35)}
+  .no{color:#ff8fa3; font-weight:600}
+  .dir{color:var(--mint); font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Diagnostic Cable Wiring</h1>
+  <p class="sub">FTDI TTL-232R-3V3 &rarr; Zero OBD-II / J1962 (2017+ FX/FXS: data port under the seat)</p>
+
+  <div class="figure">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 900" font-family="Segoe UI, system-ui, sans-serif">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#150c30"/><stop offset="0.55" stop-color="#1c1440"/><stop offset="1" stop-color="#0a0f2e"/>
+        </linearGradient>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M40 0H0V40" fill="none" stroke="#2a2350" stroke-width="1" opacity="0.45"/>
+        </pattern>
+      </defs>
+      <rect width="1320" height="900" fill="url(#bg)"/>
+      <rect width="1320" height="900" fill="url(#grid)"/>
+
+      <text x="60" y="60" font-size="32" font-weight="700" fill="#22d3ee" letter-spacing="1">OPENMBB · DIAGNOSTIC CABLE WIRING</text>
+      <text x="62" y="94" font-size="18" fill="#b9b2d8">FTDI TTL-232R-3V3  &#8594;  Zero OBD-II / J1962   ·   2017+ FX/FXS: data port under the seat</text>
+      <rect x="1006" y="34" width="254" height="40" rx="10" fill="#170f38" stroke="#3a2d6e"/>
+      <text x="1133" y="60" font-size="17" font-weight="700" fill="#5cffb1" text-anchor="middle">38400 · 8-N-1 · 3.3 V TTL</text>
+      <line x1="60" y1="116" x2="1260" y2="116" stroke="#3a2d6e" stroke-width="1.5"/>
+
+      <text x="60" y="152" font-size="20" font-weight="700" fill="#ff5fd2">1 · CONNECTIONS</text>
+      <text x="470" y="150" font-size="14" fill="#9a93b8">arrowheads show signal (data) direction</text>
+
+      <text x="225" y="196" font-size="18" font-weight="700" fill="#e8e6f0" text-anchor="middle">FTDI USB &#8594; TTL</text>
+      <rect x="40" y="318" width="58" height="44" rx="4" fill="#2a2350" stroke="#8b7fd0" stroke-width="2"/>
+      <rect x="52" y="330" width="34" height="8" fill="#6b62a8"/>
+      <rect x="52" y="342" width="22" height="8" fill="#6b62a8"/>
+      <text x="69" y="382" font-size="12" fill="#9a93b8" text-anchor="middle">USB-A</text>
+      <path d="M98 340 H150" stroke="#8b7fd0" stroke-width="6" fill="none"/>
+      <rect x="150" y="210" width="150" height="260" rx="14" fill="#241a4d" stroke="#8b7fd0" stroke-width="2"/>
+      <text x="225" y="236" font-size="13" fill="#9a93b8" text-anchor="middle">6-pin header</text>
+
+      <circle cx="300" cy="262" r="8" fill="#c3c8dc" stroke="#0a0620"/>
+      <text x="286" y="267" font-size="16" fill="#e8e6f0" text-anchor="end">1 · GND · Blk</text>
+      <circle cx="300" cy="300" r="8" fill="#7a5a3a" stroke="#0a0620"/>
+      <text x="286" y="305" font-size="15" fill="#7c7699" text-anchor="end">2 · CTS · Brn (n/c)</text>
+      <circle cx="300" cy="338" r="8" fill="#ff5566" stroke="#0a0620"/>
+      <text x="286" y="343" font-size="15" fill="#ff8fa3" text-anchor="end">3 · +5V · Red</text>
+      <circle cx="300" cy="376" r="8" fill="#ff9a3c" stroke="#0a0620"/>
+      <text x="286" y="381" font-size="16" fill="#e8e6f0" text-anchor="end">4 · TXD · Org</text>
+      <circle cx="300" cy="414" r="8" fill="#ffe14d" stroke="#0a0620"/>
+      <text x="286" y="419" font-size="16" fill="#e8e6f0" text-anchor="end">5 · RXD · Yel</text>
+      <circle cx="300" cy="452" r="8" fill="#5cd6a0" stroke="#0a0620"/>
+      <text x="286" y="457" font-size="15" fill="#7c7699" text-anchor="end">6 · RTS · Grn (n/c)</text>
+
+      <path d="M300 262 H520 V239 H700" stroke="#c3c8dc" stroke-width="5" fill="none"/>
+      <path d="M300 338 H470" stroke="#ff5566" stroke-width="4" fill="none" stroke-dasharray="9 7"/>
+      <line x1="470" y1="330" x2="482" y2="346" stroke="#ff8fa3" stroke-width="2"/>
+      <line x1="482" y1="330" x2="470" y2="346" stroke="#ff8fa3" stroke-width="2"/>
+      <text x="496" y="343" font-size="15" font-weight="700" fill="#ff8fa3">TAPED OFF — never connect (+5 V)</text>
+      <path d="M300 376 H520 V370 H700" stroke="#ff9a3c" stroke-width="5" fill="none"/>
+      <polygon points="486,362 508,370 486,378" fill="#ff9a3c"/>
+      <path d="M300 414 H700" stroke="#ffe14d" stroke-width="5" fill="none"/>
+      <polygon points="514,406 492,414 514,422" fill="#ffe14d"/>
+
+      <rect x="700" y="217" width="236" height="46" rx="9" fill="#201a3e" stroke="#c3c8dc" stroke-width="1.5"/>
+      <text x="716" y="239" font-size="18" font-weight="700" fill="#e8e6f0">OBD PIN 5</text>
+      <text x="716" y="257" font-size="14" fill="#b9b2d8">diagnostic ground (GND)</text>
+      <rect x="700" y="348" width="236" height="44" rx="9" fill="#201a3e" stroke="#ff9a3c" stroke-width="1.5"/>
+      <text x="716" y="369" font-size="18" font-weight="700" fill="#e8e6f0">OBD PIN 9</text>
+      <text x="716" y="386" font-size="13" fill="#ffc99a">bike Rx  ·  FTDI TX &#8594;</text>
+      <rect x="700" y="394" width="236" height="44" rx="9" fill="#201a3e" stroke="#ffe14d" stroke-width="1.5"/>
+      <text x="716" y="415" font-size="18" font-weight="700" fill="#e8e6f0">OBD PIN 8</text>
+      <text x="716" y="432" font-size="13" fill="#fff0a0">bike Tx  ·  &#8594; FTDI RX</text>
+
+      <text x="1130" y="184" font-size="16" font-weight="700" fill="#e8e6f0" text-anchor="middle">OBD-II / J1962 — looking into the port</text>
+      <rect x="1108" y="196" width="44" height="10" rx="2" fill="#17123a" stroke="#8b7fd0"/>
+      <polygon points="990,206 1270,206 1254,322 1006,322" fill="#17123a" stroke="#8b7fd0" stroke-width="2"/>
+      <g font-size="12" text-anchor="middle" fill="#cfd3e0">
+        <circle cx="1018" cy="246" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1018" y="250">1</text>
+        <circle cx="1050" cy="246" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1050" y="250">2</text>
+        <circle cx="1082" cy="246" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1082" y="250">3</text>
+        <circle cx="1114" cy="246" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1114" y="250">4</text>
+        <circle cx="1146" cy="246" r="10" fill="#123a2e" stroke="#5cffb1" stroke-width="2.5"/><text x="1146" y="250" fill="#c9ffe6">5</text>
+        <circle cx="1178" cy="246" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1178" y="250">6</text>
+        <circle cx="1210" cy="246" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1210" y="250">7</text>
+        <circle cx="1242" cy="246" r="10" fill="#123a2e" stroke="#5cffb1" stroke-width="2.5"/><text x="1242" y="250" fill="#c9ffe6">8</text>
+      </g>
+      <g font-size="12" text-anchor="middle" fill="#cfd3e0">
+        <circle cx="1018" cy="294" r="10" fill="#123a2e" stroke="#5cffb1" stroke-width="2.5"/><text x="1018" y="298" fill="#c9ffe6">9</text>
+        <circle cx="1050" cy="294" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1050" y="298">10</text>
+        <circle cx="1082" cy="294" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1082" y="298">11</text>
+        <circle cx="1114" cy="294" r="10" fill="#3a3410" stroke="#fff59d" stroke-width="2.5"/><text x="1114" y="298" fill="#fff6c2">12</text>
+        <circle cx="1146" cy="294" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1146" y="298">13</text>
+        <circle cx="1178" cy="294" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1178" y="298">14</text>
+        <circle cx="1210" cy="294" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1210" y="298">15</text>
+        <circle cx="1242" cy="294" r="10" fill="#2a2350" stroke="#6b62a8"/><text x="1242" y="298">16</text>
+      </g>
+      <circle cx="998" cy="352" r="8" fill="#123a2e" stroke="#5cffb1" stroke-width="2.5"/>
+      <text x="1014" y="357" font-size="14" fill="#c9ffe6">used by this cable (5, 8, 9)</text>
+      <circle cx="998" cy="378" r="8" fill="#3a3410" stroke="#fff59d" stroke-width="2.5"/>
+      <text x="1014" y="383" font-size="14" fill="#fff6c2">pin 12 — wiring varies by model year</text>
+
+      <rect x="60" y="505" width="1200" height="350" rx="16" fill="#170f38" stroke="#3a2d6e"/>
+      <text x="84" y="546" font-size="20" font-weight="700" fill="#ff5fd2">NOTES &amp; SAFETY</text>
+      <g font-size="17" fill="#e8e6f0">
+        <circle cx="92" cy="582" r="5" fill="#22d3ee"/><text x="108" y="588">3.3 V TTL logic levels ONLY — never connect 5 V or 12 V to these lines.</text>
+        <circle cx="92" cy="618" r="5" fill="#22d3ee"/><text x="108" y="624">FTDI Red (+5 V) lead is taped off — do NOT back-power the bus.</text>
+        <circle cx="92" cy="654" r="5" fill="#22d3ee"/><text x="108" y="660">Serial: 38400 baud, 8-N-1, no flow control, newline CR-LF.</text>
+        <circle cx="92" cy="690" r="5" fill="#22d3ee"/><text x="108" y="696">Orange (TXD) idles ~3.3 V vs Black (GND) — that is a valid idle-high.</text>
+        <circle cx="92" cy="726" r="5" fill="#22d3ee"/><text x="108" y="732">Pin 12 wiring varies by model year; on 2017+ FX/FXS the port is under the seat.</text>
+        <circle cx="92" cy="762" r="5" fill="#22d3ee"/><text x="108" y="768">Isolation-resistance readings are only valid OFF the charger.</text>
+        <circle cx="92" cy="798" r="5" fill="#22d3ee"/><text x="108" y="804">Garbage at 38400 usually means TX/RX are swapped — stop and recheck the wiring.</text>
+      </g>
+    </svg>
+  </div>
+
+  <h2>Pin table</h2>
+  <table>
+    <thead><tr><th>FTDI lead</th><th>OBD-II pin</th><th>Signal</th><th>Data direction</th></tr></thead>
+    <tbody>
+      <tr><td><span class="sw" style="background:#c3c8dc"></span>Black — GND (pin 1)</td><td class="c">5</td><td>Diagnostic ground</td><td>—</td></tr>
+      <tr><td><span class="sw" style="background:#ffe14d"></span>Yellow — RXD (pin 5)</td><td class="c">8</td><td>bike MBB Tx</td><td class="dir">bike &rarr; FTDI</td></tr>
+      <tr><td><span class="sw" style="background:#ff9a3c"></span>Orange — TXD (pin 4)</td><td class="c">9</td><td>bike MBB Rx</td><td class="dir">FTDI &rarr; bike</td></tr>
+      <tr><td><span class="sw" style="background:#ff5566"></span>Red — +5 V (pin 3)</td><td class="c">—</td><td class="no">NOT CONNECTED — taped off</td><td>—</td></tr>
+    </tbody>
+  </table>
+</div>
+</body>
+</html>

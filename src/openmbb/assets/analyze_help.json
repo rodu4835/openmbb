@@ -1,0 +1,93 @@
+[
+  {
+    "key": "Firmware rev",
+    "label": "Firmware Revision",
+    "what": "The version number of the software running on the Main Battery Board (MBB) \u2014 the bike's central computer. OpenMBB reads this from the 'stats' or 'bms' console output and displays it as a plain number (e.g., 41).",
+    "how_it_fits": "The MBB is the brain of the bike: it monitors the battery pack, controls the Sevcon motor controller, manages charging, and enforces all safety limits. The firmware revision tells you exactly which version of Zero's software is running those jobs. OpenMBB's safety lists and parsers were verified against rev 41 specifically; a different number means reads are still fine but writes should be treated with extra caution.",
+    "healthy_note": "Any number is informational \u2014 there is no 'wrong' firmware rev to see on your own bike. If it does not match the verified rev (41), the app will warn you before you attempt any writes."
+  },
+  {
+    "key": "Displayed SOC",
+    "label": "State of Charge (SOC)",
+    "what": "The battery's charge level as a percentage, exactly as the bike's BMS reports it \u2014 the same number you see on the instrument cluster gauge.",
+    "how_it_fits": "The BMS (Battery Management System) inside the pack continuously estimates remaining energy using a voltage-vs-SOC curve and reports this over the CAN bus to the MBB. A careful firmware-matched analysis of MBB rev 12 vs rev 41 confirmed the SOC curve and the 100% top voltage (116.9 V) are unchanged between those revisions, so the displayed number is accurate as-is.",
+    "healthy_note": "Read the displayed number at face value. Do not mentally add to a low reading \u2014 the analysis found no systematic under-reporting bias in the firmware transition."
+  },
+  {
+    "key": "Pack voltage",
+    "label": "Pack Voltage",
+    "what": "The total voltage across the entire battery pack in volts \u2014 the sum of all cell voltages in series.",
+    "how_it_fits": "The BMS measures this directly. Pack voltage rises as the pack charges and falls as you ride. It is the primary input the BMS uses to enforce over-voltage and under-voltage cutoffs, and it is what the Sevcon motor controller sees on its high-voltage bus.",
+    "healthy_note": "For the ZF6.5 pack a fully charged pack reads around 116-117 V; a pack approaching empty will be in the mid-90s V. The exact numbers are chemistry- and temperature-dependent, so use this in context with SOC rather than as a standalone threshold."
+  },
+  {
+    "key": "SOC vs voltage",
+    "label": "SOC vs Voltage Cross-Check",
+    "what": "This row simply shows the SOC percentage and pack voltage together on one line, so you can sanity-check that the two agree with each other.",
+    "how_it_fits": "Because SOC is derived from the voltage curve, a large mismatch (e.g., 50% SOC but a near-full pack voltage) can hint at a BMS calibration drift or a cell-balance problem. Showing them side by side is a quick plausibility check.",
+    "healthy_note": "The numbers should be broadly consistent: higher voltage at higher SOC, lower voltage at lower SOC. A modest mismatch in the middle of the charge range is normal; a large mismatch at either extreme is worth investigating."
+  },
+  {
+    "key": "Cell balance",
+    "label": "Cell Balance (mV spread)",
+    "what": "The difference in millivolts between the highest and lowest individual cell voltage in the pack \u2014 a measure of how evenly the 46 cells are charged.",
+    "how_it_fits": "The BMS monitors each cell individually. When one or a few cells drift away from the rest, the pack as a whole can only charge or discharge to the limits of the weakest cell, reducing usable range. The balancer in the BMS bleeds down the higher cells during charging to keep the pack uniform.",
+    "healthy_note": "Under 30 mV is healthy. 30-59 mV is worth watching. 60 mV or more triggers an alert \u2014 at that spread the BMS has to cut charge or discharge short to protect the outlier cell, and the pack is delivering less than its rated capacity."
+  },
+  {
+    "key": "Lowest cell",
+    "label": "Lowest Cell Voltage",
+    "what": "The voltage of the single weakest cell in the pack, in millivolts.",
+    "how_it_fits": "The BMS enforces an under-voltage limit per cell (not just total pack). If any one cell drops below that floor the BMS cuts power, even if the rest of the pack has energy to spare. Tracking the lowest cell helps you spot a developing weak cell before it becomes a problem.",
+    "healthy_note": "Displayed as informational \u2014 the app does not flag a threshold here because the healthy floor depends on where you are in the discharge curve. A very low reading near the bottom of charge is expected; a low reading when the pack is supposedly mid-charged warrants attention."
+  },
+  {
+    "key": "Pack capacity",
+    "label": "Pack Capacity",
+    "what": "Two numbers: the nominal (design) capacity of the pack in amp-hours, and how many amp-hours are estimated to remain at the current charge level.",
+    "how_it_fits": "The BMS stores and reports the nominal pack size (approximately 52 Ah for the ZF6.5). The 'remaining' figure is just the fraction of that nominal figure corresponding to the current SOC \u2014 it is not a learned measurement of actual battery health or degradation.",
+    "healthy_note": "The nominal figure should match the factory spec for your pack size. The remaining figure will naturally vary with charge level. True capacity degradation over time is tracked in the Compare tab (multiple sessions), not from this single snapshot."
+  },
+  {
+    "key": "Charge cycles",
+    "label": "Charge Cycles",
+    "what": "The total number of full charge cycles the BMS has counted since the pack was new.",
+    "how_it_fits": "The BMS increments this counter whenever the pack completes a charge. Lithium cells have a finite cycle life, so this number gives you a sense of how much the pack has been used. Zero rates the ZF6.5 for several hundred cycles to 80% capacity.",
+    "healthy_note": "This is informational \u2014 a higher number means more use, but there is no single threshold where a pack suddenly fails. Context matters: a pack with 500 cycles that still balances well and holds full charge is healthier than one with 200 cycles and a large cell-balance spread."
+  },
+  {
+    "key": "Max motor temp (lifetime)",
+    "label": "Maximum Motor Temperature (Lifetime)",
+    "what": "The single highest temperature the motor has ever reached, in degrees Celsius, recorded across the entire life of the bike \u2014 not the current temperature.",
+    "how_it_fits": "The MBB reads motor temperature from the motor's NTC sensor and stores the all-time peak in non-volatile stats. The motor runs hotter under sustained hard acceleration or hill climbing. When motor temperature rises the MBB commands the Sevcon controller to reduce available power in two stages: a first cutback around 100 C and a harder cutback around 145 C (these are the documented defaults; the exact thresholds for your bike come from the live settings dump if available, otherwise the app labels them '(default)').",
+    "healthy_note": "A lifetime peak under 100 C is shown as ok. 100-144 C is watch (the motor has reached the first power-reduction stage at least once). 145 C or above is alert. A high lifetime peak is not necessarily a current problem \u2014 it just records that the motor was worked hard at some point."
+  },
+  {
+    "key": "Max battery temp (lifetime)",
+    "label": "Maximum Battery Temperature (Lifetime)",
+    "what": "The highest temperature the battery pack has ever reached, in degrees Celsius \u2014 again, lifetime peak, not current.",
+    "how_it_fits": "The BMS monitors pack temperature via multiple sensors and enforces temperature-based charge and discharge limits to protect the lithium cells. Heat accelerates cell degradation, and above about 50-60 C the BMS will throttle or stop charging entirely.",
+    "healthy_note": "Under 50 C is ok. 50-59 C is watch \u2014 the pack has reached the range where charge taper begins. 60 C or above is alert. Seeing a high lifetime peak on a bike that lives in a hot climate or has been charged in direct sun is common; it does not mean the pack is damaged, but repeated high-temp cycles do accelerate aging."
+  },
+  {
+    "key": "Isolation resistance",
+    "label": "Isolation Resistance",
+    "what": "The electrical resistance in kilohms between the high-voltage pack and the chassis ground. A healthy pack is well insulated from the frame; a low reading means some of that insulation has broken down.",
+    "how_it_fits": "This is a safety measurement that the BMS performs continuously. The high-voltage bus (up to ~117 V) must remain isolated from the chassis to prevent shock hazard and stray currents. The BMS will flag a fault if isolation falls too low. Importantly, measuring isolation while the bike is plugged into the AC charger produces a known false-low reading due to the charger's filter capacitors \u2014 the reading is only reliable when the bike is unplugged and dry.",
+    "healthy_note": "1000 kOhm (1 megohm) or above is healthy. 500-999 kOhm off-charger is worth watching. Below 500 kOhm off-charger is an alert and a real diagnostic to investigate. A low reading while charging is almost always a false positive \u2014 the app will say so explicitly and tell you to re-read unplugged."
+  },
+  {
+    "key": "Warning",
+    "label": "Active Warning Message",
+    "what": "A live warning message that the MBB console was actively reporting at the time of the read \u2014 for example a BMS fault code, a sensor alarm, or a system alert.",
+    "how_it_fits": "The 'status' command returns a Warning Messages section; the app surfaces each non-empty warning as its own row flagged 'watch'. These come directly from the MBB's internal fault-detection logic, which watches the BMS, motor controller, charger, and sensors.",
+    "healthy_note": "A healthy bike with no active issues shows no Warning rows. Any warning present is worth looking up in the Zero service documentation for your model year."
+  },
+  {
+    "key": "Effective gearing",
+    "label": "Effective Gearing Ratio",
+    "what": "The calculated transmission ratio derived from the bike's lifetime odometer \u2014 specifically, the motor revolution count divided by the wheel distance traveled. Expressed as motor turns per wheel turn (e.g., 4.00:1).",
+    "how_it_fits": "The Zero FXS has a fixed-ratio chain drive (no gearbox). The ratio is set by the front and rear sprocket tooth counts. The MBB stores a cumulative odometer in both motor revolutions and kilometers, and the ratio between them \u2014 corrected for wheel circumference \u2014 reveals the effective drive ratio. This is a cross-check on the sprocket settings stored in the MBB and can confirm whether a re-gear has been correctly programmed.",
+    "healthy_note": "This is informational, not pass/fail. The number should match your actual sprocket ratio (e.g., 14 front / 56 rear = 4.00:1 for the stock FXS setup). Because it is a lifetime average derived from cumulative odometer data, it lags a recent re-gear by thousands of kilometers \u2014 the app notes this explicitly so you are not misled if you have recently changed sprockets."
+  }
+]
