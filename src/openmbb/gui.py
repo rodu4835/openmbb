@@ -865,6 +865,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 text="logged in (level shown in Login tab)" if self.logged_in
                 else "not logged in",
                 foreground=P["green"] if self.logged_in else P["dim"])
+            self._refresh_dash_header()   # T2: keep the dashboard banner in sync
 
         def _tab_unlock_hint(self, idx):
             # C7: plain-language "here's how to unlock this phase" for a locked tab.
@@ -1298,73 +1299,113 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             f = ttk.Frame(self.nb, padding=10)
             self.nb.add(f, text=" 1 · Read ")
 
-            ttk.Label(f, text="One-shot reads — each grabs a snapshot of the bike's "
-                      "own data. Hover a button for what it shows; interpret the "
-                      "numbers on the Analyze tab. Or run ★ FULL BASELINE to capture "
-                      "everything at once.", foreground=P["dim"], wraplength=940,
-                      justify="left").pack(anchor="w", pady=(0, 6))
-            btns = ttk.Frame(f)
-            btns.pack(fill="x")
-            quick = READ_COMMANDS + DUMP_COMMANDS
-            for i, cmd in enumerate(quick):
-                b = ttk.Button(btns, text=cmd, width=14,
-                               command=lambda c=cmd: self._read_cmd(c))
-                b.grid(row=i // 7, column=i % 7, padx=2, pady=2, sticky="w")
-                self._add_tooltip(b, READ_TIPS.get(cmd, ""))
-            self.btn_baseline = ttk.Button(
-                btns, text="★ FULL BASELINE", width=18,
-                style=self.sty["accent"], command=self._baseline)
-            self.btn_baseline.grid(row=2, column=0, columnspan=2, padx=2, pady=(6, 2),
-                                   sticky="w")
-            self.prg = ttk.Progressbar(btns, mode="determinate", length=260)
-            self.prg.grid(row=2, column=2, columnspan=3, padx=8, sticky="w")
-            self.lbl_prog = ttk.Label(btns, text="")
-            self.lbl_prog.grid(row=2, column=5, columnspan=2, sticky="w")
-            # A2: the heavy log dumps get their OWN row with a warning-colored label
-            # and go through a confirm dialog — they can make the BMS drop the
-            # drivetrain contactor, so they must never be run casually or in baseline.
-            hrow = ttk.Frame(f)
-            hrow.pack(fill="x", pady=(4, 0))
-            ttk.Label(hrow, text="Heavy (⚠ may open the contactor):",
-                      foreground=P["warn"]).pack(side="left", padx=(0, 6))
-            for cmd in HEAVY_COMMANDS:
-                hb = ttk.Button(hrow, text=cmd, width=14,
-                                command=lambda c=cmd: self._read_heavy(c))
-                hb.pack(side="left", padx=2)
-                self._add_tooltip(hb, READ_TIPS.get(cmd, ""))
+            # T2 dashboard: a connected/identity header, then a two-column body —
+            # LEFT the output/status console, RIGHT the action column (primary
+            # "Pull full database" on top, raw box, quick reads, heavy at bottom).
+            header = ttk.Frame(f)
+            header.pack(fill="x", pady=(0, 8))
+            self.dash_header = ttk.Label(header, text="", style="Good.TLabel")
+            self.dash_header.pack(side="left")
 
-            # E1: live "Watch" — repeat one light read on a timer (reads only, so it
-            # stays fully inside the safety model). Great for a charge session.
-            wrow = ttk.Frame(f)
-            wrow.pack(fill="x", pady=(4, 0))
+            body = ttk.Frame(f)
+            body.pack(fill="both", expand=True)
+
+            # RIGHT action column (packed first so it keeps its fixed width)
+            right = ttk.Frame(body, width=300)
+            right.pack(side="right", fill="y", padx=(12, 0))
+            right.pack_propagate(False)
+
+            self.btn_baseline = ttk.Button(right, text="★ Pull full database",
+                                           style=self.sty["accent"],
+                                           command=self._baseline)
+            self.btn_baseline.pack(fill="x")
+            self._add_tooltip(self.btn_baseline,
+                              "Reads everything at once (health, settings, errors, "
+                              "gearing) and saves a backup — the smart first move.")
+            ttk.Label(right, text="reads everything + saves a backup",
+                      style="Muted.TLabel", wraplength=280).pack(anchor="w", pady=(1, 6))
+            prow = ttk.Frame(right)
+            prow.pack(fill="x", pady=(0, 12))
+            self.prg = ttk.Progressbar(prow, mode="determinate")
+            self.prg.pack(fill="x")
+            self.lbl_prog = ttk.Label(prow, text="", style="Muted.TLabel")
+            self.lbl_prog.pack(anchor="w")
+
+            ttk.Label(right, text="Raw command", style="Heading.TLabel").pack(anchor="w")
+            self.raw_var = tk.StringVar()
+            ent = ttk.Entry(right, textvariable=self.raw_var)
+            ent.pack(fill="x", pady=(2, 2))
+            ent.bind("<Return>", lambda e: self._raw_send())
+            ttk.Button(right, text="Send", command=self._raw_send).pack(anchor="w")
+            ttk.Label(right, text="read-only intent · blocklist enforced",
+                      style="Muted.TLabel", wraplength=280).pack(anchor="w", pady=(1, 12))
+
+            ttk.Label(right, text="Quick reads", style="Heading.TLabel").pack(anchor="w")
+            quick = ttk.Frame(right)
+            quick.pack(fill="x", pady=(2, 0))
+            quick.columnconfigure(0, weight=1)
+            quick.columnconfigure(1, weight=1)
+            for i, cmd in enumerate(READ_COMMANDS + DUMP_COMMANDS):
+                b = ttk.Button(quick, text=cmd, width=12,
+                               command=lambda c=cmd: self._read_cmd(c))
+                b.grid(row=i // 2, column=i % 2, padx=2, pady=2, sticky="ew")
+                self._add_tooltip(b, READ_TIPS.get(cmd, ""))
+
+            # E1: live "Watch" — repeat one light read on a timer (reads only, so
+            # it stays fully inside the safety model). Great for a charge session.
+            wrow = ttk.Frame(right)
+            wrow.pack(fill="x", pady=(8, 0))
             self.watch_var = tk.BooleanVar(value=False)
-            ttk.Checkbutton(wrow, text="Watch (repeat a read)",
-                            variable=self.watch_var,
+            ttk.Checkbutton(wrow, text="Watch", variable=self.watch_var,
                             command=self._toggle_watch).pack(side="left")
             self.watch_cmd = tk.StringVar(value="status")
-            ttk.Combobox(wrow, textvariable=self.watch_cmd, width=9, state="readonly",
+            ttk.Combobox(wrow, textvariable=self.watch_cmd, width=8, state="readonly",
                          values=["status", "bms", "inputs", "sevcon", "dash",
-                                 "chargers"]).pack(side="left", padx=6)
-            ttk.Label(wrow, text="every").pack(side="left")
+                                 "chargers"]).pack(side="left", padx=4)
             self.watch_secs = tk.StringVar(value="5")
-            ttk.Combobox(wrow, textvariable=self.watch_secs, width=4, state="readonly",
-                         values=["3", "5", "10", "30"]).pack(side="left", padx=4)
-            ttk.Label(wrow, text="s").pack(side="left")
+            ttk.Combobox(wrow, textvariable=self.watch_secs, width=3, state="readonly",
+                         values=["3", "5", "10", "30"]).pack(side="left")
+            ttk.Label(wrow, text="s", style="Muted.TLabel").pack(side="left", padx=(2, 0))
 
-            self.txt_out = self._console_text(f, 20)
-            self.txt_out.pack(fill="both", expand=True, pady=(8, 4))
+            # heavy / special commands — set apart at the bottom
+            ttk.Separator(right).pack(fill="x", pady=(12, 8))
+            ttk.Label(right, text="⚠ Heavy — may open the contactor",
+                      foreground=P["warn"], wraplength=280).pack(anchor="w")
+            for cmd in HEAVY_COMMANDS:
+                hb = ttk.Button(right, text=cmd,
+                                command=lambda c=cmd: self._read_heavy(c))
+                hb.pack(fill="x", pady=2)
+                self._add_tooltip(hb, READ_TIPS.get(cmd, ""))
 
-            raw = ttk.Frame(f)
-            raw.pack(fill="x")
-            ttk.Label(raw, text="Raw command (blocklist enforced):").pack(side="left")
-            self.raw_var = tk.StringVar()
-            ent = ttk.Entry(raw, textvariable=self.raw_var, width=44)
-            ent.pack(side="left", padx=6)
-            ent.bind("<Return>", lambda e: self._raw_send())
-            ttk.Button(raw, text="Send", command=self._raw_send).pack(side="left")
-            ttk.Label(raw, foreground=P["warn"],
-                      text="  undocumented commands: read-only intent, at your own risk"
-                      ).pack(side="left")
+            # LEFT: output + status (fills the remaining space)
+            left = ttk.Frame(body)
+            left.pack(side="left", fill="both", expand=True)
+            ttk.Label(left, text="Output & status", style="Heading.TLabel").pack(anchor="w")
+            self.txt_out = self._console_text(left, 20)
+            self.txt_out.pack(fill="both", expand=True, pady=(4, 0))
+
+            self._refresh_dash_header()
+
+        def _refresh_dash_header(self):
+            """Update the dashboard's connected/identity banner from known state.
+            VIN comes from a settings read (Pull full database), so it shows a
+            nudge until then. VIN is display-only — never written to a saved file."""
+            lbl = getattr(self, "dash_header", None)
+            if lbl is None:
+                return
+            if not self.connected:
+                lbl.config(text="○ Not connected — connect on the Connect tab",
+                           style="Muted.TLabel")
+                return
+            where = "SIMULATOR" if sim else self.port_var.get()
+            bits = ["● CONNECTED (%s)" % where]
+            mm = re.search(r"Firmware Rev\s*:?\s*(\w+)", self.version_text or "")
+            if mm:
+                bits.append("MBB rev %s" % mm.group(1))
+            vin = self.settings["vin"].get("value") if self.settings.get("vin") else None
+            bits.append(("VIN %s" % vin) if vin else "VIN: run Pull full database")
+            bits.append("logged in" if self.logged_in else "read-only")
+            lbl.config(text="   ·   ".join(bits), style="Good.TLabel")
 
         def _read_heavy(self, cmd):
             # A2: a heavy log dump can make the BMS open the drivetrain contactor

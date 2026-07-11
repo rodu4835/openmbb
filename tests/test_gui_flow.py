@@ -234,6 +234,18 @@ def test_landing_is_front_door(app):
     assert app.nb.index(app.nb.select()) == 0          # on the Connect tab
 
 
+def test_dashboard_layout(app):
+    # T2: the connected view has a status header + the primary "Pull full
+    # database" accent action, and the header tracks connection state.
+    assert hasattr(app, "dash_header")
+    assert "Pull full database" in str(app.btn_baseline.cget("text"))
+    assert str(app.btn_baseline.cget("style")) == app.sty["accent"]
+    assert "Not connected" in str(app.dash_header.cget("text"))
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    assert "CONNECTED" in str(app.dash_header.cget("text"))
+
+
 def test_menu_dialogs_open(app):
     app._connect()
     assert _pump(app, lambda: app.connected)
