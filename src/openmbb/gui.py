@@ -974,16 +974,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _build_bottom_bar(self):
             bar = ttk.Frame(self, padding=(8, 6))
             bar.pack(side="bottom", fill="x")
+            # T3: the buttons are created here but HIDDEN until usable (owner: not
+            # visible until you actually connect) — _refresh_action_buttons packs /
+            # forgets them; no availability text needed.
             self.btn_safequit = ttk.Button(bar, text="Safely disconnect & quit",
                                             command=self._safe_quit)
-            self.btn_safequit.pack(side="right")
             self.btn_done = ttk.Button(bar, text="Done — what's next?",
                                        style=self.sty["accent"],
                                        command=self._show_done_dialog)
-            self.btn_done.pack(side="right", padx=(0, 8))
-            ttk.Label(bar, text="Available once connected — and only when nothing "
-                      "is running.", foreground=P["dim"]).pack(side="left")
-            self._refresh_action_buttons()   # disabled until connected
+            self._refresh_action_buttons()   # hidden until connected + idle
 
         def _set_busy(self, flag):
             """Single busy toggle; refresh the action-bar button states."""
@@ -991,18 +990,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._refresh_action_buttons()
 
         def _refresh_action_buttons(self):
-            """The safe-quit / done affordances are usable only when CONNECTED and
-            not mid-operation — nothing to be 'done' with or to safely disconnect
-            from until you connect, and 'unclickable during a process that would
-            cause damage' (write / heavy dump / baseline)."""
-            state = "normal" if (self.connected and not self._busy) else "disabled"
-            for name in ("btn_safequit", "btn_done"):
-                b = getattr(self, name, None)
-                if b is not None:
-                    try:
-                        b.config(state=state)
-                    except Exception:
-                        pass
+            """Show the safe-quit / done affordances only when CONNECTED and not
+            mid-operation — HIDDEN otherwise (owner: not visible until you actually
+            connect; gone during a process that would be unsafe to interrupt —
+            write / heavy dump / baseline)."""
+            sq = getattr(self, "btn_safequit", None)
+            dn = getattr(self, "btn_done", None)
+            if sq is None or dn is None:
+                return
+            sq.pack_forget()
+            dn.pack_forget()
+            if self.connected and not self._busy:
+                sq.pack(side="right")
+                dn.pack(side="right", padx=(0, 8))
 
         def _select_tab(self, needle):
             if getattr(self, "landing", None) is not None \

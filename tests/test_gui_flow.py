@@ -246,26 +246,26 @@ def test_dashboard_layout(app):
     assert "CONNECTED" in str(app.dash_header.cget("text"))
 
 
-def test_action_bar_gated_until_connected(app):
-    # T3: the global safe-quit + "done" affordances are DISABLED until connected,
-    # enabled once connected + idle, and re-disabled during any op unsafe to
-    # interrupt (busy); safe-quit refuses (doesn't close) while busy.
+def test_action_bar_hidden_until_connected(app):
+    # T3 (owner feedback): the global safe-quit + "done" affordances are HIDDEN
+    # until connected, shown once connected + idle, and hidden again during any op
+    # unsafe to interrupt (busy); safe-quit still refuses (doesn't close) if busy.
     assert hasattr(app, "btn_safequit") and hasattr(app, "btn_done")
-    # before connecting: nothing to disconnect from -> disabled
-    assert str(app.btn_safequit.cget("state")) == "disabled"
-    assert str(app.btn_done.cget("state")) == "disabled"
+    # before connecting: not shown at all
+    assert app.btn_safequit.winfo_manager() == ""
+    assert app.btn_done.winfo_manager() == ""
     app._connect()
     assert _pump(app, lambda: app.connected)
-    # connected + idle: enabled
-    assert str(app.btn_safequit.cget("state")) == "normal"
-    assert str(app.btn_done.cget("state")) == "normal"
-    # busy: disabled again
+    # connected + idle: visible
+    assert app.btn_safequit.winfo_manager() == "pack"
+    assert app.btn_done.winfo_manager() == "pack"
+    # busy: hidden again
     app._set_busy(True)
-    assert str(app.btn_safequit.cget("state")) == "disabled"
+    assert app.btn_safequit.winfo_manager() == ""
     app._safe_quit()                      # must refuse while busy
     assert app.winfo_exists()
     app._set_busy(False)
-    assert str(app.btn_safequit.cget("state")) == "normal"
+    assert app.btn_safequit.winfo_manager() == "pack"
 
 
 def test_done_dialog_routes_to_analyze(app, monkeypatch):
