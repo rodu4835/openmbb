@@ -345,19 +345,24 @@ def test_health_isolation_megohm_is_ok(tmp_path):
 
 
 def test_health_motor_temp_labels_documented_defaults(tmp_path):
-    # C3 (review FID-3): rev 41 doesn't expose motstage1/2 in `set`, so the cutback
-    # thresholds fall back to documented defaults — the note must SAY so, not print
-    # 100/145 in the same format as a live read of this bike.
+    # C3 (review FID-3/REG-2): rev 41 doesn't expose motstage1/2 in `set`, so the
+    # cutback thresholds fall back to documented defaults — the note must mark each
+    # value's provenance, never printing a default like a live read of this bike.
     no_stages = sessions.Session(str(tmp_path), {"stats": REAL_STATS}, "")
     m = {x["label"]: x for x in health.health_snapshot(no_stages)}["Max motor temp"]
-    assert "documented defaults" in m["note"]
-    # when the dump DOES carry them, the disclaimer is absent and the real values show
-    settings_text = ("motstage1 - Motor temp warn : 110\n"
-                     "motstage2 - Motor temp cutback : 150")
-    with_stages = sessions.Session(str(tmp_path), {"stats": REAL_STATS}, settings_text)
-    m2 = {x["label"]: x for x in health.health_snapshot(with_stages)}["Max motor temp"]
-    assert "documented defaults" not in m2["note"]
+    assert "(default)" in m["note"] and "documented default" in m["note"]
+    # when the dump DOES carry both, no default markers and the real values show
+    both = sessions.Session(str(tmp_path), {"stats": REAL_STATS},
+                            "motstage1 - warn : 110\nmotstage2 - cutback : 150")
+    m2 = {x["label"]: x for x in health.health_snapshot(both)}["Max motor temp"]
+    assert "(default)" not in m2["note"]
     assert "110" in m2["note"] and "150" in m2["note"]
+    # REG-2 mixed case: only motstage1 is live -> only the defaulted motstage2 is
+    # flagged, and the live 110 is NOT mislabelled as a default
+    mixed = sessions.Session(str(tmp_path), {"stats": REAL_STATS}, "motstage1 - warn : 110")
+    m3 = {x["label"]: x for x in health.health_snapshot(mixed)}["Max motor temp"]
+    assert "110 C /" in m3["note"] and "110 C (default)" not in m3["note"]
+    assert "145 C (default)" in m3["note"]
 
 
 def test_no_refuted_gauge_claim_in_safety_text():

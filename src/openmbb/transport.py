@@ -294,10 +294,15 @@ class Transport:
         # print on this firmware) — say so instead of "asleep / keyed off".
         if not buf and head in READ_COMMANDS:
             if self.saw_any_response:
+                # review D4-AWAKE-MSG-STALE: earlier reads succeeded, but the flag
+                # never expires, so don't assert the console is awake NOW — it may
+                # have slept mid-session. Offer both readings + keep the re-probe.
                 raise ConsoleQuietError(
-                    "No response to '%s' — the console is awake (other reads "
-                    "succeeded this session), so this command may not produce "
-                    "output on this firmware." % cmd)
+                    "No response to '%s' — other reads succeeded earlier this "
+                    "session, so this may be a command with no output on this "
+                    "firmware; the console may also have gone to sleep (keyed off / "
+                    "sleep timeout) since. Re-probe on the Connect tab if other "
+                    "reads now fail too." % cmd)
             raise ConsoleQuietError(
                 "No response to '%s' — the console may be asleep or the bike keyed "
                 "off. Re-probe on the Connect tab." % cmd)
@@ -313,14 +318,15 @@ class Transport:
             result += ("\n### TRUNCATED: no console prompt seen before the read "
                        "ended (max_time/idle) - capture is incomplete ###")
         # D2: keep the known-settings cache current. A bare `set` dump defines the
-        # set of writable names; a `login <pw>` changes the login level and so what
-        # `set` would show, so it invalidates the cache (forcing a fresh read).
+        # set of writable names; a `login <pw>` or `logout` changes the login level
+        # and so what `set` would show, so it invalidates the cache (forcing a fresh
+        # read at the new level).
         stripped = str(cmd).strip()
         if stripped.lower() == "set" and result.strip():
             parsed, _ = parse_settings_dump(result)
             if parsed:
                 self.known_setting_names = set(parsed)
-        elif head == "login" and len(stripped.split()) >= 2:
+        elif head == "logout" or (head == "login" and len(stripped.split()) >= 2):
             self.known_setting_names = None
 
         # spec: every command response gets its own file (transport-level, so
@@ -350,7 +356,14 @@ class Transport:
         # this adds no extra traffic.)
         if self.known_setting_names is None:
             self.exec_command("set", idle_timeout=idle_timeout, max_time=max_time)
-        if self.known_setting_names is not None and name not in self.known_setting_names:
+            # fail CLOSED (review D2-FAILOPEN): if the `set` read still gave no
+            # parseable dump we cannot confirm the name exists, so refuse rather
+            # than let an unverifiable write reach the wire.
+            if self.known_setting_names is None:
+                raise BlockedCommandError(
+                    "could not read/parse the live settings dump - refusing to "
+                    "write (the console gave no usable `set` output).")
+        if name not in self.known_setting_names:
             raise BlockedCommandError(
                 "'%s' is not in the current settings dump - refusing to write "
                 "(log in first, or your bike may not expose this setting)." % name)

@@ -43,6 +43,18 @@ def _setting_num(settings, name, default=None):
     return default
 
 
+def _setting_num_live(settings, name, default):
+    """(value, is_live): the live parsed number if `name` is present AND numeric,
+    else the documented `default` flagged not-live. Used so a defaulted threshold
+    is never presented as a read of this bike (review REG-2)."""
+    if name in settings:
+        try:
+            return float(first_number(settings[name]["value"])), True
+        except (TypeError, ValueError):
+            pass
+    return float(default), False
+
+
 def health_snapshot(session):
     bms = parse_bms(session.cmd("bms"))
     stats = parse_stats(session.cmd("stats"))
@@ -84,16 +96,18 @@ def health_snapshot(session):
 
     mot_t = stats.get("max_motor_temp_c")
     if mot_t is not None:
-        s1 = _setting_num(settings, "motstage1", 100)
-        s2 = _setting_num(settings, "motstage2", 145)
+        s1, live1 = _setting_num_live(settings, "motstage1", 100)
+        s2, live2 = _setting_num_live(settings, "motstage2", 145)
         st = "ok" if mot_t < s1 else ("watch" if mot_t < s2 else "alert")
-        # C3: on rev 41 these thresholds are NOT in the `set` dump, so we fall back
-        # to documented defaults — label them so the note isn't mistaken for a live
-        # read of this bike's actual cutback points.
-        from_bike = "motstage1" in settings and "motstage2" in settings
-        src = "" if from_bike else " (documented defaults — not read from this bike)"
-        out.append(_metric("Max motor temp", "%g C" % mot_t, st,
-                           "cutback stages at %g / %g C%s" % (s1, s2, src)))
+        # C3/REG-2: rev 41 exposes NEITHER threshold in `set`, so both fall back to
+        # documented defaults — label each value's provenance so a mix (or a garbled
+        # single value) is never presented as a live read of this bike.
+        def _lbl(v, live):
+            return "%g C" % v if live else "%g C (default)" % v
+        note = "cutback stages at %s / %s" % (_lbl(s1, live1), _lbl(s2, live2))
+        if not (live1 and live2):
+            note += " — '(default)' = documented default, not read from this bike"
+        out.append(_metric("Max motor temp", "%g C" % mot_t, st, note))
     batt_t = first_val(stats.get("max_batt_temp_c"), bms.get("pack_max_temp_c"))
     if batt_t is not None:
         st = "ok" if batt_t < 50 else ("watch" if batt_t < 60 else "alert")

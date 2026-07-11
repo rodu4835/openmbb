@@ -195,6 +195,20 @@ def test_write_options_browser_honest_after_real_dump(app, monkeypatch):
     assert "NOT seen on the verified 2017 FXS rev 41" in text
 
 
+def test_write_options_no_read_after_login_once_logged_in(app, monkeypatch):
+    # REG-1: a REV41-verified name that is absent from the dump AFTER login must not
+    # still say "(read after login)" — login already happened and didn't reveal it.
+    app.logged_in = True
+    app.settings = {"sprear": {"value": "90"}}     # a post-login dump missing spfront etc.
+    captured = {}
+    monkeypatch.setattr(app, "_info_window",
+                        lambda title, text: captured.update(text=text))
+    app._show_write_options()
+    text = captured["text"]
+    assert "(read after login)" not in text        # never promised once logged in
+    assert "spfront" in text and "(not in the live dump)" in text
+
+
 # --- Phase C: connect/probe honesty -----------------------------------------
 
 def test_wake_retry_connects(app, monkeypatch):

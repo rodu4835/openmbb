@@ -88,16 +88,22 @@ def selftest():
         check("newline injection refused", False)
     except BlockedCommandError:
         check("newline injection refused", True)
-    # the gated write path still validates the value (0% coast regen refused)
+    # D2: while logged out the transport refuses the write outright (spfront isn't
+    # in the level-0 dump) — before it could reach the wire
+    try:
+        tr.write_setting("spfront", "22")
+        check("write refused while logged out", False)
+    except BlockedCommandError:
+        check("write refused while logged out", True)
+    out = tr.exec_command("login tpsreport")
+    check("login ok", "logged in" in out.lower())
+    # logged in (name now in the dump), the gated write path still validates the
+    # value (0% coast regen refused)
     try:
         tr.write_setting("maxcustregcotq_allow", "0")
         check("write_setting validates value", False)
     except BlockedCommandError:
         check("write_setting validates value", True)
-    denied = tr.write_setting("spfront", "22")
-    check("write denied while logged out", "denied" in denied.lower())
-    out = tr.exec_command("login tpsreport")
-    check("login ok", "logged in" in out.lower())
     tr.write_setting("spfront", "22")
     s2, _ = parse_settings_dump(tr.exec_command("set"))
     check("write verified (spfront=22)", first_number(s2["spfront"]["value"]) == "22")

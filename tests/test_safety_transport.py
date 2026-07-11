@@ -58,6 +58,32 @@ class ScriptedPort:
         pass
 
 
+class PromptOnlyPort:
+    """A live wire that answers EVERY command with just the prompt — no parseable
+    `set` dump (models an unrecognized firmware whose `set` format the parser can't
+    read). Used to prove write_setting fails closed on a cold, unparseable cache."""
+
+    def __init__(self):
+        self._buf = b""
+        self.written = b""
+
+    def read(self, n=1):
+        out, self._buf = self._buf, b""
+        return out
+
+    @property
+    def in_waiting(self):
+        return len(self._buf)
+
+    def write(self, data):
+        self.written += data
+        self._buf = b"\r\nZERO MBB> "        # prompt only, no settings table
+        return len(data)
+
+    def close(self):
+        pass
+
+
 class TimedPort:
     """Delivers each scripted chunk only after its scheduled delay; read()
     returns b'' until then. Lets a test create a real idle gap on the wire."""
@@ -286,6 +312,31 @@ def test_write_setting_refuses_name_absent_from_live_dump():
         tr.write_setting("brakeregen", "Yes")        # ...but absent -> refused
     # a name that IS in the live dump still writes fine
     assert "spfront set to 22" in tr.write_setting("spfront", "22").lower()
+
+
+def test_write_setting_fails_closed_on_unparseable_dump():
+    # review D2-FAILOPEN: if the live `set` read yields no parseable dump (cold
+    # cache stays None), the write must be REFUSED — never slip through the
+    # cold-cache path onto the wire.
+    tr = Transport(PromptOnlyPort(),
+                   SessionLogger(base_dir=tempfile.mkdtemp(prefix="zfc_"), tag="t"))
+    with pytest.raises(BlockedCommandError, match="could not read/parse"):
+        tr.write_setting("spfront", "22")
+    assert b"set spfront 22" not in tr.port.written   # nothing reached the wire
+
+
+def test_logout_invalidates_write_cache():
+    # review D2-STALE-CACHE-LOGOUT: after logout the cache must not still hold the
+    # logged-in names; a later write of a tunable is re-checked against the (now
+    # level-0) dump and refused.
+    tr = make_transport()
+    tr.exec_command("login tpsreport")
+    tr.exec_command("set")                           # cache the post-login names
+    assert tr.known_setting_names and "spfront" in tr.known_setting_names
+    tr.exec_command("logout")
+    assert tr.known_setting_names is None            # invalidated on logout
+    with pytest.raises(BlockedCommandError, match="not in the current settings dump"):
+        tr.write_setting("spfront", "22")            # level-0 re-read: spfront absent
 
 
 # --- A1: control characters / newline injection -----------------------------
@@ -529,7 +580,7 @@ def test_quiet_error_distinguishes_awake_console():
     tr = make_transport()
     assert tr.exec_command("version")           # a real sim reply -> saw_any_response
     tr.port = ScriptedPort([])                  # now the wire goes silent
-    with pytest.raises(ConsoleQuietError, match="awake"):
+    with pytest.raises(ConsoleQuietError, match="other reads succeeded earlier"):
         tr.exec_command("status", idle_timeout=0.5)
 
 

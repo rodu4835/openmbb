@@ -11,6 +11,7 @@ import re
 
 import pytest
 
+from _pii_shapes import find_pii_shapes
 from openmbb import parsers
 from openmbb.safety import WRITE_WHITELIST
 from openmbb.transport import parse_settings_dump
@@ -44,21 +45,14 @@ def _section(text, name):
 
 # B1: the fixtures MUST be redacted, but the guard tests must not themselves
 # carry the owner's real VIN/serials as literals (that just relocates the PII into
-# tracked source). Assert by SHAPE instead: the same-width placeholders are present
-# and no token matching a real VIN/serial shape survives. The VIN charset excludes
-# I/O/Q, and the placeholder REDACTEDVIN000000 contains an 'I', so it can never be a
-# 17-char VIN-shape false positive.
-_VIN_SHAPE = re.compile(r"\b[0-9A-HJ-NPR-Z]{17}\b")
-_MBB_SERIAL_SHAPE = re.compile(r"(?i)sj\d{4}zer\d{4}")     # e.g. an MBB/BMS serial
-_MODULE_SERIAL_SHAPE = re.compile(r"(?i)17gb\d{4}")        # e.g. a module serial
-
-
+# tracked source). Assert by SHAPE instead — using the SAME shared detectors as the
+# repo-wide release gate (tests/_pii_shapes.py) so the two can't drift apart
+# (review PII-HYG-2): the same-width placeholders are present and no token matching
+# a real VIN/serial shape survives.
 def _assert_redacted(text):
     assert "REDACTEDVIN000000" in text        # the VIN placeholder is present
     assert "REDACTEDMBB00" in text            # the serial placeholder is present
-    assert not _VIN_SHAPE.findall(text)       # no real 17-char VIN-shape token
-    assert _MBB_SERIAL_SHAPE.search(text) is None
-    assert _MODULE_SERIAL_SHAPE.search(text) is None
+    assert not find_pii_shapes(text)          # no real VIN/serial-shape token
 
 
 def test_fixture_carries_no_pii():

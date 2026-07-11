@@ -335,13 +335,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             for name, (label, effect, risk, _v, _w) in WRITE_WHITELIST.items():
                 cur = self.settings.get(name, {}).get("value")
                 verified = name in REV41_FXS_SETTINGS
-                # C3: be honest about the two "no value yet" states. A verified
-                # rev-41 name genuinely appears after login; a name the verified
-                # bike never exposes must NOT be labelled "(read after login)" —
-                # that implies login will reveal it when it won't on this bike.
+                # C3/REG-1: be honest about the "no value yet" states. A verified
+                # rev-41 name genuinely appears after login — but ONLY promise that
+                # BEFORE login; once logged in, a name still absent won't appear, and
+                # a name the verified bike never exposes must never say "read after
+                # login" (that implies login reveals it when it won't on this bike).
                 if cur:
                     cur_line = cur
-                elif verified:
+                elif verified and not self.logged_in:
                     cur_line = "(read after login)"
                 else:
                     cur_line = "(not in the live dump)"
