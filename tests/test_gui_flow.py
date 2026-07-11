@@ -281,6 +281,19 @@ def test_analyze_help_enriches_notes(app):
     assert app._enrich_note({"label": "zzz", "note": "x"}, hm) == "x"
 
 
+def test_write_help_enriches_setting(app):
+    # T5: write-options explanations load and produce plain-language help for a
+    # whitelisted setting (shown on the row + in the confirm popup); unknown -> none.
+    from openmbb.safety import WRITE_WHITELIST
+    wm = app._write_help_map()
+    assert wm, "write_options_help.json should load"
+    present = [n for n in WRITE_WHITELIST if n.lower() in wm]
+    assert present, "at least one whitelisted setting should have help"
+    lines = app._write_help_lines(present[0])
+    assert lines and any(("What it does" in l) or ("Caution" in l) for l in lines)
+    assert app._write_help_lines("zzz_nope") == []
+
+
 def test_menu_dialogs_open(app):
     app._connect()
     assert _pump(app, lambda: app.connected)

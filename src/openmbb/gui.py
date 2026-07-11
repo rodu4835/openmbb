@@ -1913,6 +1913,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _build_write_tab(self):
             f = self._scrollable_tab(" 3 · Writes ")     # D3: visible scrollbar
 
+            ttk.Label(f, text="Change a setting (advanced)",
+                      style="Heading.TLabel").pack(anchor="w", pady=(0, 6))
             self.unlock_var = tk.BooleanVar(value=False)
             ttk.Checkbutton(f, text="UNLOCK WRITES (master gate)",
                             style=self.sty["toggle"],
@@ -1993,14 +1995,53 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_guards.insert("end", "\n".join(lines))
             self.txt_guards.config(state="disabled")
 
+        def _write_help_map(self):
+            """T5: lazy-load the write-options explanations
+            (assets/write_options_help.json), keyed by setting token. Empty dict if
+            unavailable — enrichment is additive, so a missing file never breaks
+            Writes."""
+            cached = getattr(self, "_write_help_cache", None)
+            if cached is not None:
+                return cached
+            data = {}
+            try:
+                from importlib.resources import files
+                import json
+                raw = (files("openmbb") / "assets" / "write_options_help.json"
+                       ).read_text(encoding="utf-8")
+                for it in json.loads(raw):
+                    k = str(it.get("name") or "").strip().lower()
+                    if k:
+                        data[k] = it
+            except Exception:
+                data = {}
+            self._write_help_cache = data
+            return data
+
+        def _write_help_lines(self, name):
+            """Plain-language help for a write setting (what it does / caution /
+            rev-41 note) — shared by the row description and the confirm dialog."""
+            it = self._write_help_map().get(str(name).strip().lower())
+            if not it:
+                return []
+            out = []
+            if it.get("what_it_does"):
+                out.append("What it does — %s" % it["what_it_does"])
+            if it.get("caution"):
+                out.append("Caution — %s" % it["caution"])
+            if it.get("seen_on_rev41") is False:
+                out.append("Note — not confirmed on the verified rev-41 bike.")
+            return out
+
         def _show_effect(self, _evt=None):
             sel = self.tree.selection()
             if not sel:
                 return
             name = sel[0]
             label, effect, risk, _v, _w = WRITE_WHITELIST[name]
-            self.lbl_effect.config(text="%s — %s\nEFFECT: %s\nRISK: %s"
-                                   % (name, label, effect, risk))
+            parts = ["%s — %s" % (name, label), "EFFECT: %s" % effect,
+                     "RISK: %s" % risk] + self._write_help_lines(name)
+            self.lbl_effect.config(text="\n".join(parts))
 
         def _write(self):
             sel = self.tree.selection()
@@ -2034,6 +2075,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
             def confirm_and_send(result):
                 dump, old_val = result
+                notes = "".join("%s\n" % ln for ln in self._write_help_lines(name))
+                if warn:
+                    notes += "WARNING: %s\n" % warn
                 text = ("%s — %s\n\n%s  ->  %s\n\nEFFECT: %s\nRISK: %s\n%s\n"
                         "What happens when you click OK:\n"
                         "  1. a full backup of ALL current settings is saved to the "
@@ -2042,8 +2086,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         "  3. it's recorded in the writes journal — select it and "
                         "click 'Revert selected' (below the table) to undo it.\n\n"
                         "Proceed?"
-                        % (name, label, old_val, new_val, effect, risk,
-                           ("\nWARNING: %s\n" % warn) if warn else ""))
+                        % (name, label, old_val, new_val, effect, risk, notes))
                 if not messagebox.askokcancel("Confirm write", text):
                     return
 
