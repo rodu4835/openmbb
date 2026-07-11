@@ -424,65 +424,115 @@ def test_dashboard_layout(app):
 
 
 def test_action_bar_hidden_until_connected(app):
-    # T3 (owner feedback): the global safe-quit + "done" affordances are HIDDEN
-    # until connected, shown once connected + idle, and hidden again during any op
-    # unsafe to interrupt (busy); safe-quit still refuses (doesn't close) if busy.
-    assert hasattr(app, "btn_safequit") and hasattr(app, "btn_done")
+    # T3 (owner feedback): the global safe-quit affordance is HIDDEN until
+    # connected, shown once connected + idle, and hidden again during any op unsafe
+    # to interrupt (busy); safe-quit still refuses (doesn't close) if busy.
+    assert hasattr(app, "btn_safequit")
+    assert not hasattr(app, "btn_done")   # the "Done — what's next?" hub was retired
     # before connecting: not shown at all
     assert app.btn_safequit.winfo_manager() == ""
-    assert app.btn_done.winfo_manager() == ""
     app._connect()
     assert _pump(app, lambda: app.connected)
-    # connected + idle: visible
-    assert app.btn_safequit.winfo_manager() == "pack"
-    assert app.btn_done.winfo_manager() == "pack"
-    # busy: hidden again
+    assert app.btn_safequit.winfo_manager() == "pack"     # connected + idle: visible
     app._set_busy(True)
-    assert app.btn_safequit.winfo_manager() == ""
+    assert app.btn_safequit.winfo_manager() == ""         # busy: hidden again
     app._safe_quit()                      # must refuse while busy
     assert app.winfo_exists()
     app._set_busy(False)
     assert app.btn_safequit.winfo_manager() == "pack"
 
 
-def test_done_dialog_routes_to_analyze(app, monkeypatch):
-    # T3: the "are you done?" hub routes to the chosen destination.
-    from openmbb import dialogs
-    monkeypatch.setattr(dialogs, "_dialog", lambda *a, **k: "analyze")
-    app._show_done_dialog()
-    assert "analyze" in str(app.nb.tab(app.nb.select(), "text")).lower()
-
-
-def test_done_hub_login_lands_on_writes(app, monkeypatch):
-    # request: "Log in for Writes" in the completion hub logs in (no second click)
-    # and lands on the Writes tab.
-    from openmbb import dialogs
+def test_read_banner_analyze_button_navigates(app):
+    # the Read completion banner's "Analyze results" button loads the current
+    # session and navigates to the Analyze tab.
     app._connect()
     assert _pump(app, lambda: app.connected)
     app._baseline()
     assert _pump(app, lambda: app.baseline_done, timeout=120)
-    monkeypatch.setattr(dialogs, "_dialog", lambda *a, **k: "login")
-    app._show_done_dialog()
+    assert app.read_success.winfo_manager() == "pack"     # banner shown after pull
+    app._continue_to_analyze()
+    assert "analyze" in str(app.nb.tab(app.nb.select(), "text")).lower()
+
+
+def test_continue_to_analyze_no_session_does_not_navigate(app, monkeypatch):
+    # guard: if there's no live session, _continue_to_analyze must NOT strand the
+    # user on an empty Analyze tab — it stays put and the guidance message stands.
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: None)
+    app._leave_landing()
+    app.nb.select(0)                                   # Connect tab
+    assert not app.logger                              # no live session
+    app._continue_to_analyze()
+    assert app.nb.index(app.nb.select()) == 0          # did not navigate away
+
+
+def test_writes_flow_logs_in_and_lands_on_writes(app):
+    # _start_writes_flow (Read banner / Gearing "Set up writes") logs in with no
+    # extra click and lands on Writes when a backup already exists.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._start_writes_flow()
     assert _pump(app, lambda: app.logged_in)          # logged in without a 2nd click
     assert _pump(app, lambda: "writes" in
                  str(app.nb.tab(app.nb.select(), "text")).lower())
 
 
-def test_done_hub_writes_without_baseline_runs_backup_first(app, monkeypatch):
-    # flow fix: choosing "Set up Writes" with NO backup yet must run the baseline
-    # (saves a backup), then log in, then land on Writes — instead of dead-ending
-    # on a still-locked tab. askokcancel is True in the fixture, so it proceeds.
-    from openmbb import dialogs
+def test_writes_flow_without_baseline_runs_backup_first(app):
+    # _start_writes_flow with NO backup yet must run the pull (saves a backup),
+    # then log in, then land on Writes — instead of dead-ending on a locked tab.
+    # askokcancel is True in the fixture, so it proceeds.
     app._connect()
     assert _pump(app, lambda: app.connected)
     assert not app.baseline_done
-    monkeypatch.setattr(dialogs, "_dialog", lambda *a, **k: "login")
-    app._show_done_dialog()
+    app._start_writes_flow()
     assert _pump(app, lambda: app.baseline_done, timeout=120)   # backup ran first
     assert _pump(app, lambda: app.logged_in)                    # then logged in
     assert _pump(app, lambda: "writes" in
                  str(app.nb.tab(app.nb.select(), "text")).lower())
     assert str(app.nb.tab(3, "state")) == "normal"              # Writes now unlocked
+
+
+def test_writes_flow_offline_asks_to_connect(app, monkeypatch):
+    # from the offline Gearing tab, _start_writes_flow with no live session must
+    # guide the user to connect (not try to run a pull with no transport).
+    from openmbb import dialogs as mb
+    infos = []
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: infos.append(a))
+    assert not app.connected
+    app._start_writes_flow()
+    assert infos and "Connect" in str(infos[0])
+
+
+def test_home_screen_is_reachable_again(app):
+    # P3: the Home screen is a place, not a one-shot splash — File -> Home screen
+    # re-shows it after startup, and it's listed in the File menu.
+    assert any(s[0] == "cmd" and "home" in s[1].lower() for s in app._file_menu())
+    app._leave_landing()
+    assert app.landing.winfo_manager() != "pack"      # left Home
+    app._show_landing()
+    assert app.landing.winfo_manager() == "pack"      # back on Home
+    assert app.nb.winfo_manager() != "pack"           # notebook hidden behind it
+
+
+def test_home_connect_button_returns_to_live_session(app):
+    # the Home 'Connect & probe' button while ALREADY connected must not reconnect (tear
+    # down the live session) — it just returns to the Read tab.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    tr = app.transport
+    app._show_landing()
+    app._landing_connect()                             # already connected
+    assert app.transport is tr                         # same live session, not reset
+    assert app.nb.index(app.nb.select()) == 1          # Read tab
+    assert app.landing.winfo_manager() != "pack"
+
+
+def test_landing_offers_offline_analyze(app):
+    # P3: the Home screen has a no-bike lane into Analyze (a past session).
+    labels = _all_label_text(app.landing)
+    assert any("analyze a past session" in t.lower() for t in labels)
 
 
 def test_read_command_line_clears_and_history(app):
@@ -692,12 +742,16 @@ def test_failed_probe_closes_port(app, monkeypatch):
     assert not app.connected
 
 
-def test_listen_only_reports_without_connecting(app):
-    # C4: Stage-1 listen reports bytes + banner signature and never connects
-    app._listen_only()
-    assert _pump(app, lambda: "STAGE-1 LISTEN" in app.txt_probe.get("1.0", "end"))
-    assert not app.connected
-    assert "ZERO MBB>" in app.txt_probe.get("1.0", "end")   # sim greet detected
+def test_cable_verify_is_the_wizard(app):
+    # verification lives in ONE place now: the Connect-tab "Test your cable" button
+    # opens the cable wizard (no separate inline listen path).
+    from openmbb.gui import VERIFY_LABEL
+    assert app.btn_verify.cget("text") == VERIFY_LABEL
+    assert not hasattr(app, "btn_listen")          # the old inline-verify button is gone
+    assert not hasattr(app, "_listen_only")        # and its method
+    app._show_cable_wizard()                       # the wizard builds without a bike
+    app.update()
+    assert not app._errors
 
 
 def test_watch_requires_connection_then_runs(app):
@@ -913,7 +967,7 @@ def test_simulator_is_a_toggle_not_a_port(monkeypatch):
     # Connect button reads "Connect & Probe" (not the literal "&&").
     import tempfile
     tk = pytest.importorskip("tkinter")
-    from openmbb.gui import build_gui, SIM_CHOICE, CONNECT_LABEL
+    from openmbb.gui import build_gui, CONNECT_LABEL
     from openmbb.sim import SimPort
     try:
         app = build_gui(sim=False, log_dir=tempfile.mkdtemp(prefix="a1_"))
@@ -921,22 +975,23 @@ def test_simulator_is_a_toggle_not_a_port(monkeypatch):
         pytest.skip("no display available for Tk")
     try:
         assert hasattr(app, "sim_var") and app.sim_var.get() is False  # off in real mode
-        assert SIM_CHOICE not in app.cbo_port.cget("values")           # not a port entry
+        assert not any("SIM" in str(v).upper()                          # not a port entry
+                       for v in app.cbo_port.cget("values"))
         assert isinstance(app._make_port("", True), SimPort)           # sim -> SimPort
-        assert app.btn_connect.cget("text") == CONNECT_LABEL      # "2 · Connect & Probe"
+        assert app.btn_connect.cget("text") == CONNECT_LABEL           # "Connect & probe"
     finally:
         app.destroy()
 
 
 def test_refresh_ports_reports_when_none_found(app, monkeypatch):
     # A2: a refresh that finds no COM ports must give feedback (not a silent blank
-    # list) and point to the Tools-menu simulator toggle.
+    # list) and point to the simulator toggle at its real location.
     monkeypatch.setattr("openmbb.gui.list_serial_ports", lambda: [])
     app._refresh_ports()
     app.update()
     log = app.txt_probe.get("1.0", "end")
     assert "No COM ports found" in log and "Device Manager" in log
-    assert "Simulator mode" in log and "Tools menu" in log
+    assert "Simulator mode" in log and "Settings" in log
 
 
 def test_no_port_selected_error_points_to_simulator(app, monkeypatch):
@@ -953,19 +1008,6 @@ def test_no_port_selected_error_points_to_simulator(app, monkeypatch):
     assert "Simulator mode" in str(errs[0]) and "--sim" not in str(errs[0])
 
 
-def test_listen_only_announces_and_counts_down(app):
-    # A4: the listen window announces itself immediately (not silent) and the button
-    # shows it's working, so the wait can't be mistaken for a hang.
-    app._listen_only()
-    app.update()
-    assert "Listening (Stage 1" in app.txt_probe.get("1.0", "end")   # announced up front
-    assert str(app.btn_listen.cget("state")) == "disabled"     # busy signal
-    # ...and it recovers to a normal, clickable button once the window closes
-    assert _pump(app, lambda: str(app.btn_listen.cget("state")) == "normal")
-    from openmbb.gui import VERIFY_LABEL
-    assert app.btn_listen.cget("text") == VERIFY_LABEL
-
-
 def _all_label_text(widget):
     out = []
     try:
@@ -978,24 +1020,17 @@ def _all_label_text(widget):
 
 
 def test_connect_guidance_is_cable_agnostic(app):
-    # C4: the Connect-tab checklist and the Stage-1 listen result must not tell
-    # the owner to physically disconnect/reconnect the FTDI Orange (TX). Listen
-    # is TX-silent in software and the owner's harness is a fixed 3-wire cable,
-    # so unplugging TX is optional, not a required step. (The status bar's
-    # "● DISCONNECTED" is a different, legitimate use — target the checklist.)
-    checklist = next((t for t in _all_label_text(app)
-                      if "two quick steps" in t.lower()), None)
-    assert checklist is not None                   # sanity: found the checklist
-    low = checklist.lower()
+    # C4: the Connect-tab guidance must not tell the owner to physically
+    # disconnect/reconnect the FTDI Orange (TX) — the harness is a fixed 3-wire
+    # cable. (The status bar's "● DISCONNECTED" is a different, legitimate use.)
+    guidance = next((t for t in _all_label_text(app)
+                     if "connect & probe" in t.lower()
+                     and "test your cable" in t.lower()), None)
+    assert guidance is not None                    # sanity: found the Connect blurb
+    low = guidance.lower()
     assert "disconnect" not in low
     assert "reconnect" not in low
     assert "orange (tx)" not in low
-    # the runtime listen-result guidance is clean too
-    app._listen_only()
-    assert _pump(app, lambda: "STAGE-1 LISTEN" in app.txt_probe.get("1.0", "end"))
-    result = app.txt_probe.get("1.0", "end").lower()
-    assert "connect & probe" in result             # sanity: got the GOOD guidance
-    assert "reconnect" not in result
 
 
 def test_instructions_text_matches_current_baseline_behavior():
@@ -1070,7 +1105,7 @@ def test_baseline_incomplete_stays_locked(app, monkeypatch):
 
     monkeypatch.setattr(app.transport, "exec_command", blank_set)
     app._baseline()
-    assert _pump(app, lambda: "BASELINE INCOMPLETE"
+    assert _pump(app, lambda: "DATABASE PULL INCOMPLETE"
                  in app.txt_out.get("1.0", "end"), timeout=120)
     assert not app.baseline_done
 

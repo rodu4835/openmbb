@@ -36,14 +36,10 @@ from .transport import (DUMP_COMMANDS, HEAVY_COMMANDS, LONG_COMMANDS,
                         first_number, list_serial_ports, looks_like_prompt,
                         nonprintable_ratio, open_real_port, parse_settings_dump)
 
-# The always-present dropdown choice that runs the built-in simulator (no bike /
-# cable needed). Selecting it makes _make_port hand back a SimPort.
-SIM_CHOICE = "SIMULATOR (no bike)"
-
-# Connect-tab button labels — the two-step flow reads verify-first so nobody has
-# to infer that the (receive-only) link check comes before the live connect.
-VERIFY_LABEL = "1 · Verify link"
-CONNECT_LABEL = "2 · Connect & Probe"
+# Connect-tab / cable-wizard button labels. Cable verification (receive-only) is
+# offered via the "Test your cable" wizard; the live connect is a single button.
+VERIFY_LABEL = "Test your cable"
+CONNECT_LABEL = "Connect & probe"
 
 # Plain-language description of each read command, shown as a hover tooltip so the
 # bare firmware button names aren't a wall of jargon to a first-timer.
@@ -92,38 +88,38 @@ def _looks_like_version(ver_text):
 INSTRUCTIONS_TEXT = """\
 HOW TO USE OPENMBB
 
-The app is phase-gated — each phase unlocks the next. You can stop after any
-phase; closing the window never loses data (everything is saved as you go).
+The app is staged — each stage unlocks the next. You can stop after any stage;
+closing the window never loses data (everything is saved as you go).
 
-PHASE 0 — CONNECT
-  Pick your COM port from the dropdown — or pick "SIMULATOR (no bike)" to explore
-  the whole tool with no bike or cable attached. Two steps, in order: click
-  "1 · Verify link" first — it only LISTENS (transmits nothing), so it safely
-  proves your cable + baud and that the bike is talking (power the bike during
-  the ~45 s window to catch the boot banner). Then "2 · Connect & Probe" wakes
-  the console prompt and reads the firmware version. Garbage output at 38400 baud
-  usually means the Tx/Rx wires are swapped — stop and recheck.
+CONNECT
+  Pick your COM port from the dropdown — or turn on Simulator mode (on the Home
+  screen, or Tools → Settings → Connection) to explore the whole tool with no
+  bike or cable attached. Optional but recommended first: "Test your cable" — it
+  only LISTENS (transmits nothing), so it safely proves your cable + baud and
+  that the bike is talking (power the bike during the ~45 s window to catch the
+  boot banner). Then "Connect & probe" wakes the console prompt and reads the
+  firmware version. Garbage output at 38400 baud usually means the Tx/Rx wires
+  are swapped — stop and recheck.
 
-PHASE 1 — READ
+READ
   Click any command button for a one-off read. To advance, click the blue
-  ★ FULL BASELINE button: it runs the quick reads + the full settings dump
+  ★ Pull full database button: it runs the quick reads + the full settings dump
   (your backup) + the small error log — NO heavy dumps. Individual reads do NOT
-  unlock Login — only FULL BASELINE does, so a backup exists before any change.
-  The heavy log reads (eventlogdump / dumpall) sit behind their OWN buttons and
-  confirm first: on a keyed-on bike a long ~1 MB dump can make the BMS briefly
-  OPEN the drivetrain contactor (a click + flashing dash; it recovers when the
-  read finishes). They are NOT part of the routine baseline.
+  unlock the writes flow — only Pull full database does, so a backup exists
+  before any change. The heavy log reads (eventlogdump / dumpall) sit behind
+  their OWN buttons and confirm first: on a keyed-on bike a long ~1 MB dump can
+  make the BMS briefly OPEN the drivetrain contactor (a click + flashing dash; it
+  recovers when the read finishes). They are NOT part of the routine pull.
 
-PHASE 2 — LOGIN
+LOGIN
   Explicit. "Try known passwords" attempts the community-known ones in order;
   or type a specific password and "Try this password" (it is masked in the logs
   and never saved to disk). Both failing is fine — the tool stays read-only.
   Success unlocks Writes. A password is masked in the logs and never written to
   disk unless YOU say yes when it offers to remember it after a successful login
-  (clear saved ones via Session → Forget saved login passwords) — nothing to
-  hand-edit.
+  (clear saved ones via Tools → Settings → Login) — nothing to hand-edit.
 
-PHASE 3 — WRITES
+WRITES
   Triple-gated: logged in + the master UNLOCK WRITES switch + a per-write
   confirm dialog. Only whitelisted settings that actually exist on your bike
   appear. Each write re-reads the current value, backs up all settings, sends
@@ -141,7 +137,7 @@ ANALYZE (always available, no bike needed)
     - Gearing: enter new front/rear teeth to get the ratio and the exact
                spfront/sprear/rwhcirc values to write.
 
-TIP: Session menu -> "Open session folder" jumps to where everything is saved.
+TIP: File → "Open session folder" jumps to where everything is saved.
 """
 
 WIRING_TEXT = """\
@@ -235,7 +231,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # closing the window must release the serial port (and, once writes
             # exist, guard an in-flight write) — route X and Exit through _on_close
             self.protocol("WM_DELETE_WINDOW", self._on_close)
-            # simulator mode is a Tools-menu toggle (not a port-dropdown entry);
+            # simulator mode toggles on the Home screen + Tools -> Settings ->
+            # Connection (not a port-dropdown entry);
             # starts on when launched with --sim.
             self.sim_var = tk.BooleanVar(value=sim)
             self._build_menubar()
@@ -312,7 +309,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             lf = ttk.Frame(self)
             self.landing = lf
             # persistent badge (place()d/forgotten by _refresh_sim_badge) so it
-            # tracks the Tools-menu simulator toggle, not just the startup state.
+            # tracks the simulator toggle, not just the startup state.
             self._sim_badge = ttk.Label(
                 lf, text="SIMULATOR MODE  —  no bike connected",
                 style="Accent.TLabel")
@@ -334,7 +331,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Button(brow, text="Test your cable", width=22,
                        command=self._show_cable_wizard
                        ).pack(side="left", padx=10, ipady=8)
-            ttk.Button(brow, text="Connect & read", width=22,
+            ttk.Button(brow, text=CONNECT_LABEL, width=22,
                        style=self.sty["accent"],
                        command=self._landing_connect
                        ).pack(side="left", padx=10, ipady=8)
@@ -343,11 +340,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             cap.pack(pady=(10, 0))
             ttk.Label(cap, text="check the link is healthy first", width=26,
                       anchor="center", style="Muted.TLabel").pack(side="left", padx=10)
-            ttk.Label(cap, text="connect + probe, then read", width=26,
+            ttk.Label(cap, text="connect + probe, then read when ready", width=26,
                       anchor="center", style="Muted.TLabel").pack(side="left", padx=10)
 
+            # third lane: no bike needed — review a saved session in Analyze
+            ttk.Button(inner, text="Analyze a past session…   (no bike needed)",
+                       command=self._open_recent_session).pack(pady=(22, 0))
             ttk.Button(inner, text="What is this?  —  Instructions",
-                       command=self._show_instructions).pack(pady=(30, 0))
+                       command=self._show_instructions).pack(pady=(10, 0))
 
             foot = ttk.Frame(lf)
             foot.place(relx=0.5, rely=0.9, anchor="center")
@@ -377,8 +377,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                        "  • your COM port is selected on this screen (click Refresh "
                        "if it's missing),\n"
                        "  • the bike is powered — key ON, or plug in the AC charger.\n\n"
-                       "No bike or cable yet? Cancel, then turn on 'Simulator mode "
-                       "(no bike)' in the Tools menu.\n\n")
+                       "No bike or cable yet? Cancel, then turn on Simulator mode "
+                       "(Home screen, or Tools → Settings → Connection).\n\n")
 
         def _show_cable_wizard(self):
             """Self-contained 'Test your cable' wizard: pick the COM port + read the
@@ -405,7 +405,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       "on any wiring.", style="Muted.TLabel").pack(anchor="w", pady=(1, 12))
 
             if self.sim_var.get():
-                ttk.Label(body, text="◆ Simulator mode is ON (Tools menu) — no cable "
+                ttk.Label(body, text="◆ Simulator mode is ON — no cable "
                           "or COM port needed.", style="Accent.TLabel").pack(
                               anchor="w", pady=(0, 8))
             else:
@@ -518,14 +518,23 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 pass
 
         def _landing_connect(self):
-            self._leave_landing()
+            # already connected (came Home mid-session)? just go back to it — don't
+            # tear down a live session by reconnecting.
+            if self.connected:
+                self._leave_landing()
+                self.nb.select(1)          # the Read tab
+                return
+            # only leave the Home screen once the user has actually committed to
+            # connecting — cancelling the confirm must leave them on Home.
             if self.sim_var.get():
+                self._leave_landing()
                 self._connect()
                 return
             if messagebox.askokcancel(
                     "Before you connect",
                     "Connecting wakes the bike's console and reads it.\n\n"
                     + self._PREP_STEPS + "Connect now?"):
+                self._leave_landing()
                 self._connect()
 
         # -- consistent page scaffold (owner: make tab pages match the landing) --
@@ -848,8 +857,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _file_menu(self):
             # save location + copy path now live in Tools -> Settings -> Session
             return [
-                ("cmd", "Save health report…", self._save_health_report),
+                ("cmd", "Home screen", self._show_landing),
                 ("sep",),
+                ("cmd", "Save health report…", self._save_health_report),
                 ("cmd", "Open recent session…", self._open_recent_session),
                 ("cmd", "Open session folder", self._open_session_folder),
                 ("sep",),
@@ -1164,7 +1174,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 win.destroy()
                 try:
                     self._analyze_set(sessions.load_session(folder))
-                    self.nb.select(self.nb.index("end") - 1)   # the Analyze tab
+                    # _select_tab leaves the Home screen first if it's showing —
+                    # a bare nb.select() would switch the HIDDEN notebook (owner:
+                    # opening a recent session from Home did nothing visible).
+                    self._select_tab("Analyze")
                 except Exception as e:
                     messagebox.showerror(APP_NAME, "Couldn't load session:\n%s" % e)
 
@@ -1253,6 +1266,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 ttk.Label(conn, text="Connected now to %s — a change here applies on "
                           "your next Connect." % where, style="Muted.TLabel",
                           wraplength=560).pack(anchor="w", pady=(8, 0))
+            # simulator toggle — also on the Home screen, but reachable here once the
+            # Home screen is dismissed (owner: it must not become unreachable).
+            ttk.Separator(conn).pack(fill="x", pady=12)
+            ttk.Checkbutton(conn, text="Simulator mode — explore with no bike or cable",
+                            variable=self.sim_var, command=self._on_sim_toggle,
+                            style=self.sty["toggle"]).pack(anchor="w")
+            ttk.Label(conn, text="When on, Verify & Connect use a built-in simulator "
+                      "and the COM port is ignored.", style="Muted.TLabel",
+                      wraplength=560).pack(anchor="w", pady=(2, 0))
 
             # --- Units ---
             units = page("Units")
@@ -1342,8 +1364,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 except Exception:
                     s = None
             if not self._session_has_data(s):
-                messagebox.showinfo(APP_NAME, "No session data to report yet — run a "
-                    "FULL BASELINE (or load a session on the Analyze tab) first.")
+                messagebox.showinfo(APP_NAME, "No session data to report yet — run "
+                    "★ Pull full database (or load a session on the Analyze tab) first.")
                 return
             path = filedialog.asksaveasfilename(
                 title="Save health report", defaultextension=".txt",
@@ -1385,10 +1407,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     lines.append("  %-18s : %s" % (k, v))
             elif not self.connected:
                 lines.append("Not connected. Connect on the Connect tab, then run")
-                lines.append("FULL BASELINE for model / serial / gearing details.")
+                lines.append("★ Pull full database for model / serial / gearing details.")
             else:
-                lines.append("Connected, but no baseline yet — click FULL BASELINE")
-                lines.append("on the Read tab to populate model / gearing / serials.")
+                lines.append("Connected, but no data pulled yet — click ★ Pull full")
+                lines.append("database on the Read tab for model / gearing / serials.")
             lines += ["", "Login level :", "  %s" % ("logged in"
                       if self.logged_in else "not logged in")]
             lines += ["", "Session folder:",
@@ -1492,22 +1514,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._refresh_action_buttons()   # T3: gate the action bar on connect/busy
 
         def _tab_unlock_hint(self, idx):
-            # C7: plain-language "here's how to unlock this phase" for a locked tab.
+            # C7: plain-language "here's how to unlock this stage" for a locked tab.
             if idx in (1, 2):     # Read + Login both just need a connection
-                return ("The %s tab opens once you Connect & Probe on the Connect tab."
+                return ("The %s tab opens once you Connect & probe on the Connect tab."
                         % ("Read" if idx == 1 else "Login"))
             if idx == 3:
                 if not self.connected:
                     return ("The Writes tab opens once you're connected, logged in, and "
-                            "have run ★ FULL BASELINE (a backup must exist before any "
-                            "write).")
+                            "have run ★ Pull full database (a backup must exist before "
+                            "any write).")
                 need = []
                 if not self.logged_in:
                     need.append("log in on the Login tab")
                 if not self.baseline_done:
-                    need.append("run ★ FULL BASELINE on the Read tab (saves a backup)")
+                    need.append("run ★ Pull full database on the Read tab (saves a backup)")
                 return "The Writes tab opens once you " + " and ".join(need) + "."
-            return "That tab isn't available yet — finish the earlier phase first."
+            return "That tab isn't available yet — finish the earlier stage first."
 
         def _on_tab_click(self, event):
             try:
@@ -1548,11 +1570,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if hasattr(self, "lst_journal"):
                 self.lst_journal.delete(0, "end")
             self._hide_connect_success()     # a new/broken session re-earns it
+            self._hide_read_success()
             self._refresh_write_rows()
             self._apply_gates()          # also refreshes the dashboard header
 
         def _on_close(self):
-            """Window X / Session→Exit: guard an in-flight operation, then release
+            """Window X / File→Exit: guard an in-flight operation, then release
             the serial port before quitting."""
             if self._busy:
                 if not messagebox.askokcancel(APP_NAME,
@@ -1573,39 +1596,35 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 pass
             self.destroy()
 
-        # -- global safe-quit + completion hub (T3) -------------------------
+        # -- global safe-quit bar --------------------------------------------
         def _build_bottom_bar(self):
             bar = ttk.Frame(self, padding=(8, 6))
             bar.pack(side="bottom", fill="x")
-            # T3: the buttons are created here but HIDDEN until usable (owner: not
-            # visible until you actually connect) — _refresh_action_buttons packs /
-            # forgets them; no availability text needed.
+            # T3: created here but HIDDEN until usable (owner: not visible until you
+            # actually connect) — _refresh_action_buttons packs/forgets it. The old
+            # "Done — what's next?" hub was retired: its choices all duplicated
+            # one-click affordances (Analyze tab, the Read completion banner's "Set
+            # up writes", and this button), so it was the last bit of a parallel
+            # navigation model.
             self.btn_safequit = ttk.Button(bar, text="Safely disconnect & quit",
                                             command=self._safe_quit)
-            self.btn_done = ttk.Button(bar, text="Done — what's next?",
-                                       style=self.sty["accent"],
-                                       command=self._show_done_dialog)
             self._refresh_action_buttons()   # hidden until connected + idle
 
         def _set_busy(self, flag):
-            """Single busy toggle; refresh the action-bar button states."""
+            """Single busy toggle; refresh the action-bar button state."""
             self._busy = flag
             self._refresh_action_buttons()
 
         def _refresh_action_buttons(self):
-            """Show the safe-quit / done affordances only when CONNECTED and not
-            mid-operation — HIDDEN otherwise (owner: not visible until you actually
-            connect; gone during a process that would be unsafe to interrupt —
-            write / heavy dump / baseline)."""
+            """Show 'Safely disconnect & quit' only when CONNECTED and not
+            mid-operation — HIDDEN otherwise (not visible until you connect; gone
+            during a write / heavy dump / pull that's unsafe to interrupt)."""
             sq = getattr(self, "btn_safequit", None)
-            dn = getattr(self, "btn_done", None)
-            if sq is None or dn is None:
+            if sq is None:
                 return
             sq.pack_forget()
-            dn.pack_forget()
             if self.connected and not self._busy:
                 sq.pack(side="right")
-                dn.pack(side="right", padx=(0, 8))
 
         def _select_tab(self, needle):
             if getattr(self, "landing", None) is not None \
@@ -1639,35 +1658,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                    if where else ""))
             self.destroy()
 
-        def _show_done_dialog(self):
-            """The 'are you done?' hub: review in Analyze, log in for Writes, or
-            save & disconnect. Reachable any time it's safe."""
-            if self._busy:
-                messagebox.showinfo(APP_NAME, "An operation is still running — "
-                                    "wait for it to finish.")
-                return
-            msg = ("What would you like to do next?\n\n"
-                   "•  Review the data you pulled — Analyze\n"
-                   "•  Set up to change a setting — Writes (does the backup + login)\n"
-                   "•  Save, disconnect and quit — safe to unplug after")
-            choice = messagebox._dialog(
-                "Are you done?", msg, "ask",
-                [("Review in Analyze", "analyze", False),
-                 ("Set up Writes", "login", False),
-                 ("Save & disconnect", "quit", True)],
-                default="stay")
-            if choice == "analyze":
-                self._select_tab("Analyze")
-            elif choice == "login":
-                self._start_writes_flow()
-            elif choice == "quit":
-                self._safe_quit()
-
         def _start_writes_flow(self):
             """Get the user to Writes doing only the MISSING prerequisites, in
             order, with no extra clicks. Writes needs BOTH a saved backup (Pull
             full database) AND a login — offering a bare 'log in' led to a dead end
             when no backup existed yet (owner: the flow was wrong)."""
+            if not self.connected:      # reachable from the offline Gearing tab
+                messagebox.showinfo(APP_NAME, "Connect to your bike first — changing a "
+                                    "setting needs a live session (a backup + login).")
+                return
             if self.connected and self.logged_in and self.baseline_done:
                 self._select_tab("Writes")
                 return
@@ -1689,17 +1688,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _continue_writes_login(self):
             """Second half of _start_writes_flow: log in if needed, then Writes.
-            Guard the tab-select on the real gate (connected + logged_in +
-            baseline_done) so it never silently no-ops on a disabled tab — if a
-            prerequisite is somehow missing, say why instead of stranding the user."""
+            _goto_writes guards the tab-select on the real gate (connected +
+            logged_in + baseline_done) so it never silently no-ops on a disabled
+            tab — if a prerequisite is somehow missing, it says why."""
             if self.logged_in:
-                if self.connected and self.baseline_done:
-                    self._select_tab("Writes")
-                else:
-                    messagebox.showinfo(APP_NAME, self._tab_unlock_hint(3))
+                self._goto_writes()
             else:
                 self._select_tab("Login")
-                self._login(then=lambda ok: ok and self._select_tab("Writes"))
+                self._login(then=lambda ok: ok and self._goto_writes())
 
         def _run_bg(self, fn, done=None):
             if self._busy:
@@ -1747,7 +1743,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             row.pack(fill="x")
             ttk.Label(row, text="Port:").pack(side="left")
             # The port list is real COM ports only. Exploring without a bike is the
-            # "Simulator mode (no bike)" toggle in the Tools menu (not a port entry).
+            # "Simulator mode" toggle (Home screen / Settings), not a port entry.
             real_ports = list_serial_ports()
             default = preselect_port or (real_ports[0] if real_ports else "")
             self.port_var = tk.StringVar(value=default)
@@ -1755,26 +1751,25 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                          values=real_ports, width=22)
             self.cbo_port.pack(side="left", padx=6)
             ttk.Button(row, text="Refresh", command=self._refresh_ports).pack(side="left")
-            self.btn_listen = ttk.Button(row, text=VERIFY_LABEL,
-                                         command=self._listen_only)
-            self.btn_listen.pack(side="left", padx=(12, 0))
+            # verification lives in ONE place — the "Test your cable" wizard (also on
+            # the Home screen). This button just opens it.
+            self.btn_verify = ttk.Button(row, text=VERIFY_LABEL,
+                                         command=self._show_cable_wizard)
+            self.btn_verify.pack(side="left", padx=(12, 0))
             self.btn_connect = ttk.Button(row, text=CONNECT_LABEL,
                                           style=self.sty["accent"],
                                           command=self._connect)
             self.btn_connect.pack(side="left", padx=12)
 
             ttk.Label(f, text=(
-                "Two quick steps — do them in order (Step 1 never transmits, so it's "
-                "safe on any cable):\n"
-                "  STEP 1 — click '1 · Verify link': it only LISTENS (sends nothing) "
-                "to confirm your cable + baud are good and the bike is talking. Power "
-                "the bike during the ~45 s window — key ON, or just plug in the AC "
-                "charger (the bike shows Mode: Charging).\n"
-                "  STEP 2 — click '2 · Connect & Probe' to open the live session.\n"
-                "  No bike yet? Turn on 'Simulator mode (no bike)' in the Tools menu "
-                "to explore everything at the desk.\n"
-                "  Cable wiring + pinout: Help → Wiring diagram. Isolation-resistance "
-                "reads are only valid OFF the charger."),
+                "Pick your COM port, then click Connect & probe — it wakes the console "
+                "and reads the firmware version. Not sure the cable is right? Click "
+                "Test your cable first: it only LISTENS (transmits nothing) to confirm "
+                "the wiring + baud before anything is sent. Power the bike during "
+                "connect — key ON, or plug in the AC charger (Mode: Charging).\n"
+                "No bike yet? Turn on Simulator mode on the Home screen (or Tools → "
+                "Settings → Connection). Cable wiring + pinout: Help → Wiring diagram. "
+                "Isolation-resistance reads are only valid OFF the charger."),
                 justify="left", padding=(0, 10),
                 foreground=P["warn"]).pack(anchor="w")
 
@@ -1803,6 +1798,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _continue_to_read(self):
             self.nb.select(1)      # the Read tab
 
+        def _continue_to_analyze(self):
+            # load the current session into Analyze and go there — but only navigate
+            # if it actually loaded (else the guidance message stands, no empty tab)
+            if self._analyze_use_current():
+                self._select_tab("Analyze")
+
+        def _show_read_success(self, text):
+            self.lbl_read_success.config(text=text)
+            self.read_success.pack(fill="x", pady=(0, 8), before=self.read_body)
+
+        def _hide_read_success(self):
+            if hasattr(self, "read_success"):
+                self.read_success.pack_forget()
+
         def _refresh_ports(self):
             real_ports = list_serial_ports()
             self.cbo_port.config(values=real_ports)
@@ -1815,11 +1824,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._probe_log(
                     "No COM ports found. Plug in the FTDI cable and click Refresh; if "
                     "it still doesn't appear, install the FTDI VCP driver (Windows: "
-                    "Device Manager -> Ports). Meanwhile you can turn on 'Simulator "
-                    "mode (no bike)' in the Tools menu to explore without a bike.")
+                    "Device Manager -> Ports). Meanwhile you can turn on Simulator "
+                    "mode (Home screen, or Tools → Settings → Connection) to explore.")
 
         def _on_sim_toggle(self):
-            """Tools-menu simulator toggle: affects the NEXT Verify/Connect."""
+            """Simulator toggle (Home screen / Settings): affects the NEXT connect."""
             on = self.sim_var.get()
             self._refresh_sim_badge()
             if hasattr(self, "txt_probe"):
@@ -1873,90 +1882,6 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     pass
             self._refresh_save_label()
 
-        def _listen_only(self):
-            """STAGE 1: open the port and only LISTEN (never transmit in software),
-            so it proves RX wiring/baud with zero risk on any fixed cable."""
-            if self._busy:
-                messagebox.showinfo(APP_NAME, "Busy — wait for the current operation.")
-                return
-            if self.connected:
-                messagebox.showinfo(APP_NAME, "Already connected. Stage-1 listen is "
-                                    "for BEFORE connecting. Restart the app to run it.")
-                return
-            port_name = self.port_var.get().strip()
-            if not self.sim_var.get() and not port_name:
-                messagebox.showerror(APP_NAME, "No port selected. Pick your COM port "
-                                     "(click Refresh after plugging in the cable), or "
-                                     "turn on 'Simulator mode (no bike)' in the Tools "
-                                     "menu to explore without a bike.")
-                return
-            is_simport = self.sim_var.get()
-            self._ensure_log_dir()          # G2: fall back if the save folder died
-
-            # A4: the listen window is silent for up to 45 s — say so up front + run
-            # a countdown on the button so it never looks like a hang.
-            secs = 2 if is_simport else 45
-            self._probe_log("\n=== Listening (Stage 1, no transmit) — power the bike "
-                            "NOW (key ON or plug in the AC charger); ~%d s… ===" % secs)
-            self.btn_listen.config(state="disabled")
-            self.btn_connect.config(state="disabled")
-
-            def job():
-                port = self._make_port(port_name, is_simport)
-                logger = SessionLogger(base_dir=self.log_dir, tag="listen")
-                try:
-                    data = Transport(port, logger).listen(secs)
-                finally:
-                    try:
-                        port.close()
-                    except Exception:
-                        pass
-                sigs = [s.decode() for s in (b"Zero Motorcycles MBB", b"Reset Source:",
-                        b"Checking EEPROM", b"ZERO MBB>") if s in data]
-                return len(data), sigs, logger.dir
-
-            def done(result):
-                nbytes, sigs, folder = result
-                self._probe_log("\n=== STAGE-1 LISTEN (no transmit) -> %s ===" % folder)
-                self._probe_log("  received %d bytes" % nbytes)
-                if sigs:
-                    self._probe_log("  banner signatures seen: %s" % ", ".join(sigs))
-                    self._probe_log("  Link verified — RX wiring + baud look GOOD. "
-                                    "Now click '2 · Connect & Probe' to start the "
-                                    "session.")
-                elif nbytes == 0:
-                    self._probe_log("  NOTHING received. Power the bike DURING the "
-                                    "listen window (key ON or plug in the charger); "
-                                    "check GND→pin 5 and the bike-Tx→FTDI-RXD wire.")
-                else:
-                    self._probe_log("  data received but no banner signature — if it "
-                                    "looks like garbage the baud is wrong or Tx/Rx "
-                                    "are swapped.")
-
-            self._run_bg(job, done)
-            self._listen_countdown(secs)
-
-        def _listen_countdown(self, remaining):
-            # A4: tick the Listen button while the (silent) listen window is open;
-            # restore both buttons the moment the job finishes — success OR error
-            # (done() only fires on success, so this also covers the error path).
-            if not self._busy:
-                for b in (self.btn_listen, self.btn_connect):
-                    try:
-                        b.config(state="normal")
-                    except Exception:
-                        pass
-                try:
-                    self.btn_listen.config(text=VERIFY_LABEL)
-                except Exception:
-                    pass
-                return
-            try:
-                self.btn_listen.config(text="Listening… %d s" % max(0, remaining))
-            except Exception:
-                pass
-            self.after(1000, lambda: self._listen_countdown(remaining - 1))
-
         def _connect(self):
             # T3: honor the busy guard BEFORE the destructive reset. _reset_session_state
             # closes the port + wipes the journal; running it ahead of the _busy check
@@ -1969,8 +1894,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if not self.sim_var.get() and not port_name:
                 messagebox.showerror(APP_NAME, "No port selected. Pick your COM port "
                                      "(click Refresh after plugging in the cable), or "
-                                     "turn on 'Simulator mode (no bike)' in the Tools "
-                                     "menu to explore without a bike.")
+                                     "turn on Simulator mode (Home screen, or Tools → "
+                                     "Settings → Connection) to explore without a bike.")
                 return
             # D1: every connection re-earns its phases (drops any --sim rehearsal
             # state and closes a previously-open port before reopening).
@@ -2016,7 +1941,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             "No prompt detected.\n"
                             "- Check the COM port and that the bike is powered "
                             "(key ON, or plug in the AC charger).\n"
-                            "- Click '1 · Verify link' to prove RX wiring first.\n"
+                            "- Click 'Test your cable' to prove RX wiring first.\n"
                             "- Garbage at 38400 usually means Tx/Rx swapped — STOP.\n"
                             "Raw bytes were logged to session_raw.log.")
                     # C3: the version banner must actually parse (positive proof
@@ -2108,8 +2033,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.dash_header = ttk.Label(header, text="", style="Good.TLabel")
             self.dash_header.pack(side="left")
 
+            # completion banner shown by _baseline done() on success — the primary
+            # "what next" signal (Analyze the data, or set up writes). Hidden until
+            # a full database pull succeeds; packed above the two-column body.
+            self.read_success = ttk.Frame(f)
+            self.lbl_read_success = ttk.Label(self.read_success, text="",
+                                              style="Good.TLabel")
+            self.lbl_read_success.pack(side="left")
+            ttk.Button(self.read_success, text="Analyze results  →",
+                       style=self.sty["accent"], command=self._continue_to_analyze
+                       ).pack(side="left", padx=(12, 0))
+            ttk.Button(self.read_success, text="Set up writes  →",
+                       command=self._start_writes_flow).pack(side="left", padx=8)
+
             body = ttk.Frame(f)
             body.pack(fill="both", expand=True)
+            self.read_body = body
 
             # RIGHT action column — a fixed-width SCROLLABLE panel so the heavy
             # reads at the bottom stay reachable at any window height (owner: the
@@ -2524,7 +2463,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 for i, cmd in enumerate(seq):
                     # B3: progress bar + label AND a live play-by-play line
                     self._cbq.put(lambda c=cmd, i=i: (
-                        self.lbl_prog.config(text="baseline: %s (%d/%d)"
+                        self.lbl_prog.config(text="pulling: %s (%d/%d)"
                                              % (c, i + 1, len(seq))),
                         self.prg.config(maximum=len(seq), value=i),
                         self._out("  [%d/%d] reading %s…" % (i + 1, len(seq), c))))
@@ -2533,7 +2472,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     if is_dump:
                         def prog(n, c=cmd):
                             self._cbq.put(lambda: self.lbl_prog.config(
-                                text="baseline: %s (%d KB)" % (c, n // 1024)))
+                                text="pulling: %s (%d KB)" % (c, n // 1024)))
                     # C6: each command tolerant — one failure doesn't discard the pass
                     try:
                         out = self.transport.exec_command(
@@ -2575,22 +2514,23 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if not missing:
                     self.baseline_done = True
                     self._apply_gates()
-                    self.lbl_prog.config(text="baseline complete")
-                    self._out("\n=== FULL BASELINE captured -> %s ===" % self.logger.dir)
+                    self.lbl_prog.config(text="database pull complete")
+                    self._out("\n=== Full database pulled -> %s ===" % self.logger.dir)
                     if errors:
                         self._out("(%d command(s) failed; retry them with the read "
                                   "buttons: %s)" % (len(errors), ", ".join(errors)))
-                    # C1: a backup exists now — steer to interpretation + next phase.
-                    self._out("→ Open the Analyze tab and click 'Use current session' "
-                              "to see battery health, temps and gearing flagged "
-                              "ok / watch / alert.")
-                    self._out("Backup saved — the Writes tab is now available after "
-                              "you log in (Login is open any time you're connected).")
+                    # C1: a backup exists now — the completion banner is the primary
+                    # next-step signal; this console line is a breadcrumb.
+                    self._out("→ Backup saved. Use the banner above to Analyze the "
+                              "results or set up writes.")
+                    self._show_read_success(
+                        "✓  Full database pulled & backed up — what next?")
                 else:
-                    self.lbl_prog.config(text="baseline incomplete")
-                    self._out("\n[!] BASELINE INCOMPLETE — essential reads missing/"
+                    self._hide_read_success()
+                    self.lbl_prog.config(text="database pull incomplete")
+                    self._out("\n[!] DATABASE PULL INCOMPLETE — essential reads missing/"
                               "unparsed: %s. No backup was saved, so Writes stays "
-                              "LOCKED; fix the link and re-run FULL BASELINE."
+                              "LOCKED; fix the link and re-run ★ Pull full database."
                               % ", ".join(missing))
                 if then:                 # continue a chained flow (e.g. -> Writes)
                     then(self.baseline_done)
@@ -2613,7 +2553,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if self.logger:
                 self.logger.save_named("session_meta.txt", "\n".join(meta) + "\n")
             if mode and "charg" in mode.lower():
-                self._out("[note] baseline captured while CHARGING — the isolation "
+                self._out("[note] data pulled while CHARGING — the isolation "
                           "reading and SOC context are NOT valid off-charger; "
                           "re-read unplugged + dry before acting on them.")
 
@@ -2760,11 +2700,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     if messagebox.askyesno(APP_NAME, "Remember this password so OpenMBB "
                             "tries it automatically next time? It is stored in your "
                             "config file (~/.openmbb/config.json). You can clear it via "
-                            "Session → Forget saved login passwords."):
+                            "Tools → Settings → Login."):
                         config.add_saved_password(used)
                         self._login_log("Password remembered — it'll be tried "
-                                        "automatically next session (Session menu → "
-                                        "Forget saved login passwords to clear).")
+                                        "automatically next session (clear it via "
+                                        "Tools → Settings → Login).")
                 if self.help_logged_out and post.get("help"):
                     diff = "\n".join(difflib.unified_diff(
                         self.help_logged_out.splitlines(),
@@ -2845,7 +2785,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             style=self.sty["toggle"],
                             variable=self.unlock_var).pack(anchor="w")
             # D2/D4: one concise line (no redundant options button — it duplicated the
-            # per-row description; the read-only reference lives in the Bike menu).
+            # per-row description; the read-only reference is Help → Command reference).
             ttk.Label(f, foreground=P["dim"], wraplength=940, justify="left",
                       text="Arming UNLOCK only enables the Write… button — it changes "
                       "nothing on its own. Every write backs up all settings, reads "
@@ -3216,8 +3156,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             grow2.pack(fill="x")
             ttk.Button(grow2, text="Copy spfront/sprear/rwhcirc",
                        command=self._gearing_copy).pack(side="left")
-            ttk.Button(grow2, text="Open Writes tab",
-                       command=self._goto_writes).pack(side="left", padx=6)
+            ttk.Button(grow2, text="Set up writes  →",
+                       command=self._start_writes_flow).pack(side="left", padx=6)
             self._gearing_compute()   # populate with the default 22/88 plan
 
         def _session_has_data(self, s):
@@ -3242,7 +3182,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                        % session.name, foreground=P["warn"])
                 messagebox.showwarning(APP_NAME, "That folder has no readable OpenMBB "
                     "session data (it should contain per-command .txt files like "
-                    "bms.txt / stats.txt from a Read or FULL BASELINE). The metrics "
+                    "bms.txt / stats.txt from a Read or Pull full database). The metrics "
                     "will show n/a — pick a session folder created by the app.")
 
         def _analyze_load(self):
@@ -3258,15 +3198,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 messagebox.showerror(APP_NAME, "Couldn't load session:\n%s" % e)
 
         def _analyze_use_current(self):
+            """Load the live session into Analyze. Returns True on success so
+            callers (e.g. the Read banner) only navigate when there's data."""
             if not self.logger:
                 messagebox.showinfo(APP_NAME, "No live session yet — connect and "
                                     "capture first, or load a saved folder.")
-                return
+                return False
             if self._busy:      # D7: a capture is mid-write; files are partial
                 messagebox.showinfo(APP_NAME, "A capture is still running — wait for "
                                     "it to finish before analyzing the current session.")
-                return
+                return False
             self._analyze_set(sessions.load_session(self.logger.dir))
+            return True
 
         def _render_health(self):
             self.health_tree.delete(*self.health_tree.get_children())
