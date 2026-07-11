@@ -95,7 +95,7 @@ item; GUI tests standalone. Never open a real COM port. Commit per tier.
   the app computes distances/speeds; note where values are the bike's own strings.
 
 ## Tier F — release
-- [ ] Bump to 0.11.0; full suite + selftest + smoketest green; rebuild exe + installer. Not
+- [x] Bump to 0.11.0; full suite + selftest + smoketest green; rebuild exe + installer. Not
   tagged/pushed.
 
 ## Progress log
@@ -132,4 +132,5 @@ item; GUI tests standalone. Never open a real COM port. Commit per tier.
 - E4: right-click Copy on every console (Copy selection / Copy all, + Ctrl+C) and 'Copy table' (TSV) on the Health/Rides/Writes tables and the info dialogs.
 - E5: config-backed opt-in password remember — a working typed password offers to be saved (asked after login), tried automatically next session (masked + logger-redacted so it never hits disk in clear), cleared via Session -> Forget saved login passwords.
 - E6: Session -> Distance units (km/mi) preference, applied to the Rides distance column + totals; default km (the bike's native unit).
-(append per item)
+### Tier F — release (complete)
+- Bumped to 0.11.0; full suite green (140 non-GUI + 61 GUI, 2 Tk-teardown flake-skips); --selftest + --smoketest green; frozen exe --selftest exit 0; rebuilt dist/openmbb.exe + installer via ISCC /DAppVersion=0.11.0. Not tagged/pushed.
