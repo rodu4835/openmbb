@@ -294,7 +294,12 @@ def test_write_help_enriches_setting(app):
     assert app._write_help_lines("zzz_nope") == []
 
 
-def test_menu_dialogs_open(app):
+def test_menu_dialogs_open(app, monkeypatch):
+    # T6b: Instructions + Wiring now open the stylized HTML in the browser; patch
+    # webbrowser.open so the test doesn't actually launch a browser.
+    import webbrowser
+    opened = []
+    monkeypatch.setattr(webbrowser, "open", lambda *a, **k: opened.append(a) or True)
     app._connect()
     assert _pump(app, lambda: app.connected)
     for opener in (app._show_instructions, app._show_wiring, app._show_safety,
@@ -305,6 +310,8 @@ def test_menu_dialogs_open(app):
     facts = dict(app._bike_facts())
     assert facts.get("MBB firmware rev") == "41"
     assert not app._errors
+    # Instructions + Wiring opened HTML pages (the other three stay in-app)
+    assert len(opened) >= 2
 
 
 def test_write_options_browser_needs_no_login(app, monkeypatch):

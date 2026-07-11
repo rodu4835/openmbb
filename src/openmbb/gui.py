@@ -818,11 +818,30 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       "  %s" % (self.logger.dir if self.logger else "(none yet)")]
             self._info_window("Bike info", "\n".join(lines))
 
+        def _open_html_help(self, filename, fallback_title, fallback_text):
+            """T6b: open a stylized, self-contained HTML help page in the browser.
+            Reads the packaged asset bytes and writes them to a stable temp file
+            (works in dev and in the frozen build), then launches the browser.
+            Falls back to the in-app text window if anything goes wrong."""
+            try:
+                import webbrowser, tempfile, os, pathlib
+                from importlib.resources import files
+                data = (files("openmbb") / "assets" / filename).read_bytes()
+                tmp = os.path.join(tempfile.gettempdir(), "openmbb_" + filename)
+                with open(tmp, "wb") as fh:
+                    fh.write(data)
+                if webbrowser.open(pathlib.Path(tmp).as_uri()):
+                    return
+            except Exception:
+                pass
+            self._info_window(fallback_title, fallback_text)
+
         def _show_instructions(self, _evt=None):
-            self._info_window("Instructions", INSTRUCTIONS_TEXT)
+            self._open_html_help("instructions.html", "Instructions",
+                                 INSTRUCTIONS_TEXT)
 
         def _show_wiring(self):
-            self._info_window("Wiring", WIRING_TEXT)
+            self._open_html_help("wiring.html", "Wiring", WIRING_TEXT)
 
         def _show_safety(self):
             self._info_window("Safety notes", SAFETY_TEXT)

@@ -23,4 +23,4 @@ openmbb = "openmbb.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-openmbb = ["assets/*.png"]
+openmbb = ["assets/*.png", "assets/*.html", "assets/*.svg", "assets/*.json"]
