@@ -189,6 +189,41 @@ def test_menubar_normalized_labels_no_chevrons(app):
     assert not has_indicator(style.layout(found["File"]))
 
 
+def test_menu_popup_builds_and_reorganized(app):
+    # The dropdown is a custom themed Toplevel (no native white border), and the
+    # menus are reorganized so Tools is no longer a single-item menu.
+    import tkinter as tk
+    import tkinter.ttk as ttk
+
+    # spec shapes are valid and the units radios live under Tools now
+    for specs in (app._file_menu(), app._tools_menu(), app._help_menu()):
+        assert specs and all(s[0] in ("cmd", "sep", "radio") for s in specs)
+    tools = app._tools_menu()
+    assert sum(1 for s in tools if s[0] in ("cmd", "radio")) >= 4   # not sparse
+    assert any(s[0] == "radio" for s in tools)                      # units moved here
+    assert any(s[0] == "cmd" and "issue" in s[1].lower() for s in app._help_menu())
+
+    # find the File menubutton and open its popup
+    mb = None
+
+    def walk(w):
+        nonlocal mb
+        for c in w.winfo_children():
+            if isinstance(c, ttk.Menubutton) and str(c.cget("text")) == "File":
+                mb = c
+            walk(c)
+
+    walk(app)
+    assert mb is not None
+    app._menu_popup(mb, app._file_menu())
+    pops = [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)]
+    assert pops                                    # a themed popup appeared
+    assert app._open_menu is not None
+    for w in pops:
+        w.destroy()
+    app._open_menu = None
+
+
 def test_themed_dialog_builds_and_centers(app):
     # T0.2: the REAL themed dialog (not the monkeypatched wrapper) builds,
     # centers on the app window, and tears down cleanly. Auto-dismiss it so the
@@ -344,6 +379,23 @@ def test_done_hub_login_lands_on_writes(app, monkeypatch):
     assert _pump(app, lambda: app.logged_in)          # logged in without a 2nd click
     assert _pump(app, lambda: "writes" in
                  str(app.nb.tab(app.nb.select(), "text")).lower())
+
+
+def test_done_hub_writes_without_baseline_runs_backup_first(app, monkeypatch):
+    # flow fix: choosing "Set up Writes" with NO backup yet must run the baseline
+    # (saves a backup), then log in, then land on Writes — instead of dead-ending
+    # on a still-locked tab. askokcancel is True in the fixture, so it proceeds.
+    from openmbb import dialogs
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    assert not app.baseline_done
+    monkeypatch.setattr(dialogs, "_dialog", lambda *a, **k: "login")
+    app._show_done_dialog()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)   # backup ran first
+    assert _pump(app, lambda: app.logged_in)                    # then logged in
+    assert _pump(app, lambda: "writes" in
+                 str(app.nb.tab(app.nb.select(), "text")).lower())
+    assert str(app.nb.tab(3, "state")) == "normal"              # Writes now unlocked
 
 
 def test_read_command_line_clears_and_history(app):

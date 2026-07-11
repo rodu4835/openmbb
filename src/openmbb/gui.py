@@ -205,6 +205,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.geometry("1080x760")
             self.minsize(900, 620)
             self.sty = apply_theme(self)
+            self._set_taskbar_app_id()   # before the icon so Windows uses ours
             self._set_window_icon()
             self._apply_dark_titlebar()
 
@@ -255,6 +256,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._show_landing()
 
         # -- helpers ---------------------------------------------------------
+        def _set_taskbar_app_id(self):
+            """Give the process an explicit AppUserModelID so Windows shows OUR
+            icon (and groups our own button) on the taskbar. Without it, a
+            `pythonw` launch inherits Python's default taskbar icon regardless of
+            the window icon. Cosmetic + Windows-only; never blocks launch."""
+            if sys.platform != "win32":
+                return
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                    "OpenMBB.ZeroMBBConsole")
+            except Exception as exc:         # cosmetic only — never block launch
+                print("taskbar app id unavailable: %s" % exc)
+
         def _set_window_icon(self):
             """Title-bar / taskbar / Alt-Tab icon (the gauge-bolt PNGs from
             openmbb/assets; the frozen .exe's own icon comes from the spec)."""
@@ -648,23 +663,79 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       foreground=P["dim"]).pack(side="right", padx=16)
 
         # -- menu bar --------------------------------------------------------
-        def _dark_menu(self, parent):
-            """A dropdown tk.Menu coloured to match the dark theme (dropdowns DO
-            honour bg/fg on Windows, unlike the native menubar strip)."""
-            return tk.Menu(parent, tearoff=0, bg="#26262b", fg=P["fg"],
-                           activebackground="#3a4150", activeforeground="#ffffff",
-                           disabledforeground=P["dim"], relief="flat", borderwidth=0,
-                           activeborderwidth=0, selectcolor="#5aa8ff",
-                           font=(self.sty["ui"], 10))
+        def _menu_popup(self, anchor, specs):
+            """A custom themed dropdown (an overrideredirect Toplevel) so there's no
+            native white border and full control over colours / spacing / hover —
+            tk.Menu on Windows can't be styled that far. `specs` is a list of
+            ("cmd", label, cb) / ("sep",) / ("radio", label, selected, cb)."""
+            existing = getattr(self, "_open_menu", None)
+            if existing is not None:
+                try:
+                    existing.destroy()
+                except Exception:
+                    pass
+                self._open_menu = None
+            border, menu_bg, hover = "#4a4470", "#1d1d26", "#33384a"
+            win = tk.Toplevel(self)
+            win.overrideredirect(True)
+            win.configure(bg=border)
+            self._open_menu = win
+            body = tk.Frame(win, bg=menu_bg)
+            body.pack(padx=1, pady=1)     # the 1px win bg shows as a thin accent edge
+
+            def close():
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+                if getattr(self, "_open_menu", None) is win:
+                    self._open_menu = None
+
+            def item(label, cb, mark=""):
+                row = tk.Frame(body, bg=menu_bg)
+                row.pack(fill="x")
+                mk = tk.Label(row, text=mark, bg=menu_bg, fg=P["green"], width=2,
+                              font=(self.sty["ui"], 10))
+                mk.pack(side="left")
+                tx = tk.Label(row, text=label, bg=menu_bg, fg=P["fg"], anchor="w",
+                              padx=6, pady=5, font=(self.sty["ui"], 10))
+                tx.pack(side="left", fill="x", expand=True)
+                parts = (row, mk, tx)
+                for w in parts:
+                    w.bind("<Enter>", lambda e: [p.config(bg=hover) for p in parts])
+                    w.bind("<Leave>", lambda e: [p.config(bg=menu_bg) for p in parts])
+                    w.bind("<Button-1>", lambda e, c=cb: (close(), c(), "break")[-1])
+
+            for spec in specs:
+                if spec[0] == "sep":
+                    tk.Frame(body, bg="#39394a", height=1).pack(fill="x", padx=8, pady=4)
+                elif spec[0] == "cmd":
+                    item(spec[1], spec[2])
+                elif spec[0] == "radio":
+                    item(spec[1], spec[3], mark="●" if spec[2] else "")
+
+            win.update_idletasks()
+            win.geometry("+%d+%d" % (anchor.winfo_rootx(),
+                                     anchor.winfo_rooty() + anchor.winfo_height()))
+            win.bind("<Escape>", lambda e: close())
+            try:
+                win.grab_set()            # so a click anywhere dismisses it
+            except Exception:
+                pass
+
+            def outside(e):
+                if 0 <= e.x < win.winfo_width() and 0 <= e.y < win.winfo_height():
+                    return
+                w = self.winfo_containing(e.x_root, e.y_root)
+                close()
+                fn = getattr(w, "_owl_menu_specs", None)
+                if fn is not None:        # clicked another menu button -> switch to it
+                    self._menu_popup(w, fn())
+            win.bind("<Button-1>", outside)
 
         def _build_menubar(self):
-            # A2: the native Tk menubar strip is OS-drawn white on Windows and
-            # ignores colours. Use a themed ttk Menubutton bar (dark) with dark
-            # dropdown menus instead.
-            # v0.13/T0.3: strip the down-chevron indicator from the menubuttons
-            # (owner: "the chevrons look weird") by registering a Menubutton
-            # layout with any *.indicator element removed; fall back to the plain
-            # style if the active theme's layout can't be introspected.
+            # A themed ttk Menubutton bar with custom popup dropdowns (no native
+            # white border). Strip the down-chevron indicator from the menubuttons.
             style = ttk.Style()
             mb_style = "Menubar.TMenubutton"
             try:
@@ -682,65 +753,77 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             except tk.TclError:
                 mb_style = "TMenubutton"
 
+            self.units_var = tk.StringVar(value=config.get_units())
             bar = ttk.Frame(self)
             bar.pack(side="top", fill="x")
 
-            def add_menu(text, build):
-                mb = ttk.Menubutton(bar, text=text, direction="below",
-                                    style=mb_style)
-                menu = self._dark_menu(mb)
-                build(menu)
-                mb["menu"] = menu
+            def add_menu(text, specs_fn):
+                mb = ttk.Menubutton(bar, text=text, style=mb_style)
+                mb._owl_menu_specs = specs_fn       # so a click switches menus
+                mb.bind("<Button-1>", lambda e, m=mb, f=specs_fn:
+                        (self._menu_popup(m, f()), "break")[-1])
                 mb.pack(side="left", padx=(4, 0), pady=1)
 
-            def build_session(sess):
-                sess.add_command(label="Set save location…",
-                                 command=self._set_log_dir)
-                sess.add_command(label="Open session folder",
-                                 command=self._open_session_folder)
-                sess.add_command(label="Open recent session…",          # E3
-                                 command=self._open_recent_session)
-                sess.add_command(label="Copy session path",
-                                 command=self._copy_session_path)
-                sess.add_separator()
-                sess.add_command(label="Save health report…",           # E2
-                                 command=self._save_health_report)
-                units = self._dark_menu(sess)                           # E6
-                self.units_var = tk.StringVar(value=config.get_units())
-                units.add_radiobutton(label="Kilometers (km)", value="km",
-                                      variable=self.units_var,
-                                      command=self._apply_units)
-                units.add_radiobutton(label="Miles (mi)", value="mi",
-                                      variable=self.units_var,
-                                      command=self._apply_units)
-                sess.add_cascade(label="Distance units", menu=units)
-                sess.add_command(label="Forget saved login passwords",  # E5
-                                 command=self._forget_passwords)
-                sess.add_separator()
-                sess.add_command(label="Refresh COM ports",
-                                 command=self._refresh_ports)
-                sess.add_separator()
-                sess.add_command(label="Exit", command=self._on_close)
-
-            def build_bike(bike):
-                bike.add_command(label="Bike info…", command=self._show_bike_info)
-
-            def build_help(hlp):
-                hlp.add_command(label="Instructions   (F1)",
-                                command=self._show_instructions)
-                hlp.add_command(label="Command reference",
-                                command=self._show_command_reference)
-                hlp.add_command(label="Wiring diagram", command=self._show_wiring)
-                hlp.add_command(label="Safety notes", command=self._show_safety)
-                hlp.add_separator()
-                hlp.add_command(label="About", command=self._show_about)
-
-            # v0.13/T0.3: conventional, less app-specific labels
-            # (owner: "less specific like file, edit, help, about").
-            add_menu("File", build_session)     # session / logs / save / exit
-            add_menu("Tools", build_bike)       # bike info / write options
-            add_menu("Help", build_help)        # instructions / wiring / about
+            add_menu("File", self._file_menu)
+            add_menu("Tools", self._tools_menu)
+            add_menu("Help", self._help_menu)
             self.bind("<F1>", lambda e: self._show_instructions())
+
+        def _file_menu(self):
+            return [
+                ("cmd", "Save health report…", self._save_health_report),
+                ("sep",),
+                ("cmd", "Open recent session…", self._open_recent_session),
+                ("cmd", "Open session folder", self._open_session_folder),
+                ("cmd", "Set save location…", self._set_log_dir),
+                ("cmd", "Copy session path", self._copy_session_path),
+                ("sep",),
+                ("cmd", "Exit", self._on_close),
+            ]
+
+        def _tools_menu(self):
+            u = self.units_var.get()
+            return [
+                ("cmd", "Bike info…", self._show_bike_info),
+                ("cmd", "Refresh COM ports", self._refresh_ports),
+                ("sep",),
+                ("radio", "Distance: kilometers", u == "km",
+                 lambda: self._set_units("km")),
+                ("radio", "Distance: miles", u == "mi",
+                 lambda: self._set_units("mi")),
+                ("sep",),
+                ("cmd", "Forget saved login passwords", self._forget_passwords),
+            ]
+
+        def _help_menu(self):
+            return [
+                ("cmd", "Instructions   (F1)", self._show_instructions),
+                ("cmd", "Command reference", self._show_command_reference),
+                ("cmd", "Wiring diagram", self._show_wiring),
+                ("cmd", "Safety notes", self._show_safety),
+                ("sep",),
+                ("cmd", "View project on GitHub", self._open_repo),
+                ("cmd", "Report an issue…", self._report_issue),
+                ("cmd", "About", self._show_about),
+            ]
+
+        def _set_units(self, u):
+            self.units_var.set(u)
+            self._apply_units()
+
+        def _open_repo(self):
+            try:
+                import webbrowser
+                webbrowser.open("https://github.com/rodu4835/openmbb")
+            except Exception:
+                pass
+
+        def _report_issue(self):
+            try:
+                import webbrowser
+                webbrowser.open("https://github.com/rodu4835/openmbb/issues")
+            except Exception:
+                pass
 
         def _info_window(self, title, text):
             from . import dialogs
@@ -1263,26 +1346,58 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 return
             msg = ("What would you like to do next?\n\n"
                    "•  Review the data you pulled — Analyze\n"
-                   "•  Log in for more access — unlocks Writes\n"
+                   "•  Set up to change a setting — Writes (does the backup + login)\n"
                    "•  Save, disconnect and quit — safe to unplug after")
             choice = messagebox._dialog(
                 "Are you done?", msg, "ask",
                 [("Review in Analyze", "analyze", False),
-                 ("Log in for Writes", "login", False),
+                 ("Set up Writes", "login", False),
                  ("Save & disconnect", "quit", True)],
                 default="stay")
             if choice == "analyze":
                 self._select_tab("Analyze")
             elif choice == "login":
-                if self.logged_in:
-                    self._select_tab("Writes")
-                else:
-                    # no second click: run the known-password login now, and land
-                    # on Writes on success (the Login tab shows progress either way).
-                    self._select_tab("Login")
-                    self._login(then=lambda ok: ok and self._select_tab("Writes"))
+                self._start_writes_flow()
             elif choice == "quit":
                 self._safe_quit()
+
+        def _start_writes_flow(self):
+            """Get the user to Writes doing only the MISSING prerequisites, in
+            order, with no extra clicks. Writes needs BOTH a saved backup (Pull
+            full database) AND a login — offering a bare 'log in' led to a dead end
+            when no backup existed yet (owner: the flow was wrong)."""
+            if self.connected and self.logged_in and self.baseline_done:
+                self._select_tab("Writes")
+                return
+            if not self.baseline_done:
+                steps = "run ★ Pull full database (saves a backup)"
+                if not self.logged_in:
+                    steps += ", then log you in"
+                if not messagebox.askokcancel(
+                        APP_NAME,
+                        "The Writes tab needs a saved backup before anything can be "
+                        "changed.\n\nI'll %s, then open Writes. This only reads the "
+                        "bike — nothing is written.\n\nContinue?" % steps):
+                    self._select_tab("Read")
+                    return
+                self._select_tab("Read")
+                self._baseline(then=lambda ok: ok and self._continue_writes_login())
+            else:
+                self._continue_writes_login()
+
+        def _continue_writes_login(self):
+            """Second half of _start_writes_flow: log in if needed, then Writes.
+            Guard the tab-select on the real gate (connected + logged_in +
+            baseline_done) so it never silently no-ops on a disabled tab — if a
+            prerequisite is somehow missing, say why instead of stranding the user."""
+            if self.logged_in:
+                if self.connected and self.baseline_done:
+                    self._select_tab("Writes")
+                else:
+                    messagebox.showinfo(APP_NAME, self._tab_unlock_hint(3))
+            else:
+                self._select_tab("Login")
+                self._login(then=lambda ok: ok and self._select_tab("Writes"))
 
         def _run_bg(self, fn, done=None):
             if self._busy:
@@ -1667,10 +1782,31 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             body = ttk.Frame(f)
             body.pack(fill="both", expand=True)
 
-            # RIGHT action column (packed first so it keeps its fixed width)
-            right = ttk.Frame(body, width=300)
-            right.pack(side="right", fill="y", padx=(12, 0))
-            right.pack_propagate(False)
+            # RIGHT action column — a fixed-width SCROLLABLE panel so the heavy
+            # reads at the bottom stay reachable at any window height (owner: the
+            # caution buttons weren't visible at the default size). Mirrors the
+            # Writes-tab scroll pattern (visible scrollbar + wheel/two-finger).
+            rightwrap = ttk.Frame(body, width=312)
+            rightwrap.pack(side="right", fill="y", padx=(12, 0))
+            rightwrap.pack_propagate(False)
+            rbg = ttk.Style().lookup("TFrame", "background") or P["bg"]
+            rcanvas = tk.Canvas(rightwrap, highlightthickness=0, bg=rbg, width=300)
+            rvsb = ttk.Scrollbar(rightwrap, orient="vertical", command=rcanvas.yview)
+            rcanvas.configure(yscrollcommand=rvsb.set)
+            rvsb.pack(side="right", fill="y")
+            rcanvas.pack(side="left", fill="both", expand=True)
+            right = ttk.Frame(rcanvas)
+            rwin = rcanvas.create_window((0, 0), window=right, anchor="nw")
+            right.bind("<Configure>",
+                       lambda e: rcanvas.configure(scrollregion=rcanvas.bbox("all")))
+            rcanvas.bind("<Configure>",
+                         lambda e: rcanvas.itemconfigure(rwin, width=e.width))
+
+            def _rwheel(e):
+                rcanvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                return "break"     # don't also cycle a combobox under the pointer
+            rcanvas.bind("<MouseWheel>", _rwheel)
+            right._owl_wheel = _rwheel
 
             self.btn_baseline = ttk.Button(right, text="★ Pull full database",
                                            style=self.sty["accent"],
@@ -1750,6 +1886,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       "read-only intent, blocklist enforced",
                       style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
 
+            # route wheel/two-finger scroll over the action column's buttons to
+            # its canvas (they'd otherwise swallow the event)
+            self._bind_page_wheel(right)
             self._refresh_dash_header()
 
         def _refresh_dash_header(self):
@@ -2044,7 +2183,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                  "Command reference (see the repo for the full page).",
                                  "reference")
 
-        def _baseline(self):
+        def _baseline(self, then=None):
             # D4: run `obd` LAST — after `set` (the backup) and errorlogdump —
             # because its output has never been captured live; if it stalls or
             # returns nothing, the settings backup is already safely on disk first.
@@ -2124,6 +2263,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                               "unparsed: %s. No backup was saved, so Writes stays "
                               "LOCKED; fix the link and re-run FULL BASELINE."
                               % ", ".join(missing))
+                if then:                 # continue a chained flow (e.g. -> Writes)
+                    then(self.baseline_done)
 
             self._run_bg(job, done)
 
