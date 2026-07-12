@@ -232,7 +232,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.help_logged_out = ""
             self.settings = {}
             self.settings_order = []
-            self.journal_entries = []   # (name, old, new)
+            self._baseline_settings = {}   # {name: value} from the last clean full read
             self._cmd_history = []      # raw command-line history (↑/↓)
             self._cmd_hist_idx = 0
             self._busy = False
@@ -668,9 +668,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.lbl_sim.pack(side="right")
 
         # -- menu bar --------------------------------------------------------
+        def _unbind_menu_dismiss(self):
+            """Drop the main-window click-to-dismiss binding that's live only while a
+            top menu is open (see _menu_popup — a specific-funcid unbind, never
+            unbind_all, so it can't churn the interpreter-global bindtag)."""
+            fid = getattr(self, "_menu_dismiss_id", None)
+            if fid is not None:
+                try:
+                    self.unbind("<Button-1>", fid)
+                except Exception:
+                    pass
+                self._menu_dismiss_id = None
+
         def _dismiss_open_menu(self):
             """Tear down the open top-menu popup + any fly-out (used when the main
             window moves — an absolute-positioned popup can't follow it)."""
+            self._unbind_menu_dismiss()
             for attr in ("_open_submenu", "_open_menu"):
                 win = getattr(self, attr, None)
                 if win is not None:
@@ -686,19 +699,29 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             tk.Menu on Windows can't be styled that far. Specs items:
             ("cmd", label, cb) / ("sep",) / ("radio", label, selected, cb) /
             ("submenu", label, subspecs_fn) — a fly-out side menu."""
+            # tear down any menu already open; if it was THIS button's menu, that's a
+            # toggle — close and stop (a re-click on an open menu button closes it).
             existing = getattr(self, "_open_menu", None)
-            if existing is not None:
-                try:
-                    existing.destroy()
-                except Exception:
-                    pass
-            self._open_menu = None
-            self._open_submenu = None
+            same = (existing is not None
+                    and getattr(self, "_open_menu_anchor", None) is anchor)
+            self._unbind_menu_dismiss()
+            for attr in ("_open_submenu", "_open_menu"):
+                win = getattr(self, attr, None)
+                if win is not None:
+                    try:
+                        win.destroy()
+                    except Exception:
+                        pass
+                setattr(self, attr, None)
+            if same:
+                self._open_menu_anchor = None
+                return
             border, menu_bg, hover = "#4a4470", "#1d1d26", "#33384a"
 
             def close_all():
                 # destroy the submenu FIRST, then the root — be explicit rather
                 # than relying on Tk to cascade, so no fly-out is left orphaned.
+                self._unbind_menu_dismiss()
                 for attr in ("_open_submenu", "_open_menu"):
                     win = getattr(self, attr, None)
                     if win is not None:
@@ -788,38 +811,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
             root = render(specs, self)
             self._open_menu = root
+            self._open_menu_anchor = anchor      # so a re-click on it toggles closed
             root.geometry("+%d+%d" % (anchor.winfo_rootx(),
                                       anchor.winfo_rooty() + anchor.winfo_height()))
             root.bind("<Escape>", lambda e: close_all())
-            try:
-                root.grab_set()              # so a click anywhere dismisses it
-            except Exception:
-                pass
-
-            def outside(e):
-                if 0 <= e.x < root.winfo_width() and 0 <= e.y < root.winfo_height():
-                    return
-                # click inside the open fly-out submenu? (it's a child of the grabbed
-                # root, so winfo_containing CAN see it — siblings it can't)
-                sm = getattr(self, "_open_submenu", None)
-                if sm is not None:
-                    w = self.winfo_containing(e.x_root, e.y_root)
-                    if w is not None and (str(w) == str(sm)
-                                          or str(w).startswith(str(sm) + ".")):
-                        return
-                close_all()
-                # clicked another menu button? winfo_containing can't see it while a
-                # grab is active (it's outside the grab subtree), so hit-test the
-                # menubar by screen coords — this makes switching menus ONE click.
-                for mb, fn in getattr(self, "_menubuttons", []):
-                    if not mb.winfo_ismapped():
-                        continue
-                    x0, y0 = mb.winfo_rootx(), mb.winfo_rooty()
-                    if x0 <= e.x_root < x0 + mb.winfo_width() and \
-                            y0 <= e.y_root < y0 + mb.winfo_height():
-                        self._menu_popup(mb, fn())
-                        break
-            root.bind("<Button-1>", outside)
+            self.bind("<Escape>", lambda e: close_all(), add="+")
+            # NO grab (owner: "still have to click twice to switch menus"). A local
+            # grab redirects/swallows a click on a SIBLING menu button, so the first
+            # click only closed the open menu and a second was needed to open the next.
+            # Instead: each menu button's own <Button-1> opens its menu directly and
+            # returns "break" (so it never reaches this handler), and _menu_popup closes
+            # any menu already open — one click switches. A click ANYWHERE ELSE in the
+            # main window reaches this dismissal and closes the menu; the popup and its
+            # fly-out are separate toplevels, so clicks inside them never bubble here.
+            self._unbind_menu_dismiss()
+            self._menu_dismiss_id = self.bind(
+                "<Button-1>", lambda e: close_all(), add="+")
 
         def _build_menubar(self):
             # A themed ttk Menubutton bar with custom popup dropdowns (no native
@@ -847,6 +854,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             bar.pack(side="top", fill="x")
 
             self._menubuttons = []              # (mb, specs_fn) — for one-click switch
+            self._menu_dismiss_id = None        # live only while a menu is open
+            self._open_menu_anchor = None       # which button's menu is open (toggle)
             def add_menu(text, specs_fn):
                 mb = ttk.Menubutton(bar, text=text, style=mb_style)
                 mb._owl_menu_specs = specs_fn       # so a click switches menus
@@ -1535,37 +1544,50 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 return -1
 
         def _flash_tab(self, idx):
-            """One accent-blue pulse along a tab header, to draw the eye when that tab
-            just unlocked. Cosmetic + best-effort: locates the header by scanning the
-            tab strip (ttk gives no per-tab bbox), no-ops if it can't (e.g. headless)."""
+            """One accent-blue pulse OUTLINING a tab header (a box around it), to draw
+            the eye when that tab just unlocked. Cosmetic + best-effort: locates the
+            header by hit-testing the tab strip (ttk exposes no per-tab bbox); no-ops
+            if it can't (e.g. headless)."""
             nb = self.nb
             try:
                 nb.update_idletasks()
-                # locate the tab header's x-range by scanning the strip at a y that
-                # lands inside the headers (ttk exposes no per-tab bbox)
-                xs = [x for x in range(0, max(1, nb.winfo_width()), 4)
+                # x-range: scan the strip at a y that lands inside the headers
+                xs = [x for x in range(0, max(1, nb.winfo_width()), 3)
                       if self._tab_at(x, 10) == idx]
                 if not xs:
                     return
-                x0, x1 = min(xs), max(xs) + 4
-                # derive the header's BOTTOM edge by hit-testing down its centre, so
-                # the underline sits ON the tab across themes/DPI (no hardcoded y)
+                x0, x1 = min(xs), max(xs) + 3
+                # y-range: hit-test down the header's centre for its top+bottom edges,
+                # so the box sits ON the tab across themes/DPI (no hardcoded y)
                 xc = (x0 + x1) // 2
                 ys = [y for y in range(0, 60, 2) if self._tab_at(xc, y) == idx]
-                y_bottom = max(0, (max(ys) if ys else 22) - 2)
-                bar = tk.Frame(nb, bg="#5aa8ff", height=3)
-                bar.place(x=x0, y=y_bottom, width=x1 - x0, height=3)
+                if not ys:
+                    return
+                y0, y1 = max(0, min(ys) - 1), max(ys) + 2
+                bw, blue, base = 2, "#5aa8ff", P["console"]
+                # four thin frames = a box outline hugging the whole tab header
+                edges = ((x0, y0, x1 - x0, bw),          # top
+                         (x0, y1 - bw, x1 - x0, bw),     # bottom
+                         (x0, y0, bw, y1 - y0),          # left
+                         (x1 - bw, y0, bw, y1 - y0))     # right
+                frames = []
+                for fx, fy, fw, fh in edges:
+                    fr = tk.Frame(nb, bg=blue)
+                    fr.place(x=fx, y=fy, width=fw, height=fh)
+                    frames.append(fr)
 
                 def step(n):
-                    if not bar.winfo_exists():
+                    if not frames or not frames[0].winfo_exists():
                         return
                     if n <= 0:
-                        bar.destroy()
+                        for fr in frames:
+                            fr.destroy()
                         return
-                    bar.config(bg="#5aa8ff" if bar.cget("bg") != "#5aa8ff"
-                               else P["console"])
+                    col = blue if n % 2 == 0 else base
+                    for fr in frames:
+                        fr.config(bg=col)
                     self.after(150, lambda: step(n - 1))
-                step(4)
+                step(5)
             except Exception:
                 pass
 
@@ -1641,15 +1663,24 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.help_logged_out = ""
             self.settings = {}
             self.settings_order = []
-            self.journal_entries = []
+            self._baseline_settings = {}
+            # a disconnect returns to a truly clean slate: drop the loaded analysis and
+            # the pull's green command borders so a reconnect doesn't LOOK pre-pulled.
+            self.analyze_session = None
+            self._trend_cache = None
             if hasattr(self, "unlock_var"):
                 self.unlock_var.set(False)
-            if hasattr(self, "lst_journal"):
-                self.lst_journal.delete(0, "end")
+            self._baseline_reset_marks()
             self._hide_connect_success()     # a new/broken session re-earns it
             self._set_login_status(False)
             if hasattr(self, "lbl_prog"):
                 self.lbl_prog.config(text="", foreground=P["dim"])
+            if hasattr(self, "lbl_loaded"):
+                self.lbl_loaded.config(text="no session loaded", foreground=P["dim"])
+            for tname in ("health_tree", "ride_tree"):
+                t = getattr(self, tname, None)
+                if t is not None:
+                    t.delete(*t.get_children())
             self._refresh_write_rows()
             self._apply_gates()          # also refreshes the dashboard header
 
@@ -2677,7 +2708,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         self._out("  [FAILED] %s: %s" % (cmd, errors[cmd]))
                 if results.get("help") and not self.logged_in:
                     self.help_logged_out = results["help"]
-                self._ingest_settings(results.get("set", ""))
+                self._ingest_settings(results.get("set", ""), snapshot_baseline=True)
                 # C6/C17: unlock Phase 2 only if the ESSENTIAL reads succeeded and
                 # the settings dump actually parsed — not on empty/garbage captures
                 st_settings, _ = parse_settings_dump(results.get("set", ""))
@@ -2738,7 +2769,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                           "reading and SOC context are NOT valid off-charger; "
                           "re-read unplugged + dry before acting on them.")
 
-        def _ingest_settings(self, dump_text):
+        def _ingest_settings(self, dump_text, snapshot_baseline=False):
             settings, order = parse_settings_dump(dump_text)
             if not settings:
                 # never silently keep a stale dict: say so when a non-empty dump
@@ -2750,6 +2781,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                               "the raw capture is saved.")
                 return
             self.settings, self.settings_order = settings, order
+            # a "clean full read" (Pull full database / post-login set) defines the
+            # reset-to-default target; a write-verify or a one-off `set` read does NOT
+            # move it, so '↺ Reset' always points back to before you changed things.
+            if snapshot_baseline:
+                self._baseline_settings = {n: settings[n]["value"] for n in settings}
             self._out("[parsed %d settings from live dump]" % len(settings))
             if len(settings) < 10:
                 self._out("[note] only %d settings parsed — this looks like a "
@@ -2931,7 +2967,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                            post["set"])
                     self._login_log("post-login settings baseline saved — the "
                                     "authoritative pre-change backup.")
-                    self._ingest_settings(post["set"])
+                    self._ingest_settings(post["set"], snapshot_baseline=True)
                 self._apply_gates()
                 self._login_log("\nPhase 3 (Writes) unlocked — writes still require the "
                                 "master unlock toggle + per-write confirmation.")
@@ -3006,12 +3042,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # D2/D4: one concise line (no redundant options button — it duplicated the
             # per-row description; the read-only reference is Help → Command reference).
             ttk.Label(f, foreground=P["dim"], wraplength=940, justify="left",
-                      text="Arming UNLOCK only enables the Write… button — it changes "
-                      "nothing on its own. Every write backs up all settings, reads "
-                      "the value back to verify, and is journaled so you can Revert. "
-                      "Change one thing at a time. Rows below are the settings your "
-                      "bike actually reports that are safe to change.").pack(
-                          anchor="w", pady=(2, 6))
+                      text="Arming UNLOCK only enables writing — it changes nothing on "
+                      "its own. Every write backs up all settings first, then reads the "
+                      "value back to verify. Change one thing at a time. If you change a "
+                      "setting, that row shows a ↺ Reset to put it back to the last full "
+                      "read. Rows below are the settings your bike reports as safe to "
+                      "change.").pack(anchor="w", pady=(2, 6))
 
             # owner: edit in the table — double-click a row's "New value" to type a
             # value, then click "Write" on that same row. No separate input box.
@@ -3032,35 +3068,21 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.tree.tag_configure("safe", foreground="#7fe0a0")
             self.tree.tag_configure("caution", foreground=P["warn"])
             self.tree.tag_configure("pending", foreground=P["green"])
+            self.tree.tag_configure("reset", foreground="#8fd0ff")   # changed-from-read
             self.tree.bind("<<TreeviewSelect>>", self._show_effect)
             self.tree.bind("<Double-1>", self._writes_edit_cell)
             self.tree.bind("<Button-1>", self._writes_action_click)
             self._pending_writes = {}
 
-            self.lbl_effect = ttk.Label(
-                f, text="Click a row's 'New value' cell and type a value (or "
-                "double-click anywhere on the row). A '✎ Write →' appears on that "
-                "row — arm UNLOCK WRITES (top-right), then click it to apply.",
-                wraplength=1000, justify="left", padding=(0, 4))
-            self.lbl_effect.pack(anchor="w")
+            # a styled description panel (rebuilt per selection) — readable rows with
+            # a colour-coded RISK chip + keyworded paragraphs, not one wall of text.
+            self.effect_panel = ttk.Frame(f)
+            self.effect_panel.pack(anchor="w", fill="x", pady=(4, 0))
+            self._show_effect_hint()
 
-            # (the read-only Sevcon safety guards moved off this action page — they
-            # are documented context, available in Help -> Command reference and the
-            # "Write options (read-only)" reference, not editable here.)
-
-            ttk.Label(f, text="Writes journal (select an entry to revert):",
-                      foreground=P["dim"]).pack(anchor="w", pady=(10, 2))
-            jrow = ttk.Frame(f)
-            jrow.pack(fill="both", expand=True)
-            self.lst_journal = tk.Listbox(
-                jrow, height=5, font=(self.sty["mono"], 9), bg=P["console"],
-                fg=P["termfg"], selectbackground=P["sel"],
-                selectforeground="#eafff2", relief="flat",
-                highlightthickness=1, highlightbackground=P["panel"],
-                highlightcolor=P["panel"])
-            self.lst_journal.pack(side="left", fill="both", expand=True)
-            ttk.Button(jrow, text="Revert selected", command=self._revert).pack(
-                side="left", padx=8, anchor="n")
+            # (No separate revert journal (owner): a changed row shows '↺ Reset' inline,
+            # which restores the last full read's value through the same safe write
+            # flow. The on-disk journal is still written as the audit trail.)
 
             self._bind_page_wheel(f)   # wheel/two-finger scroll over the whole page
 
@@ -3071,11 +3093,34 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._pending_writes = {}
             for name in self.settings_order:
                 if name in WRITE_WHITELIST and name in self.settings:
-                    label, effect, risk, _v, _w = WRITE_WHITELIST[name]
-                    tag = "safe" if risk.startswith("SAFE") else "caution"
-                    self.tree.insert("", "end", iid=name, tags=(tag,), values=(
-                        name, self.settings[name]["value"], risk.split(" - ")[0],
-                        "", ""))
+                    self.tree.insert("", "end", iid=name, values=(name, "", "", "", ""))
+                    self._render_write_row(name)
+
+        def _row_differs_from_baseline(self, name):
+            """True when the live value differs from the last clean full read — i.e.
+            the user has changed this setting and a reset-to-default is offered."""
+            base = self._baseline_settings.get(name)
+            cur = self.settings.get(name, {}).get("value")
+            if base is None or cur is None:
+                return False
+            return first_number(base) != first_number(cur)
+
+        def _render_write_row(self, name):
+            """Paint a row's cells + action from state: a staged '✎ Write →', or a
+            '↺ Reset' when it differs from the last full read, else nothing."""
+            if name not in WRITE_WHITELIST or name not in self.settings:
+                return
+            _l, _e, risk, _v, _w = WRITE_WHITELIST[name]
+            cur = self.settings.get(name, {}).get("value", "")
+            base = (name, cur, risk.split(" - ")[0])
+            if name in self._pending_writes:
+                self.tree.item(name, values=base + (self._pending_writes[name],
+                               "✎ Write →"), tags=("pending",))
+            elif self._row_differs_from_baseline(name):
+                self.tree.item(name, values=base + ("", "↺ Reset"), tags=("reset",))
+            else:
+                tag = "safe" if risk.startswith("SAFE") else "caution"
+                self.tree.item(name, values=base + ("", ""), tags=(tag,))
 
         def _write_help_map(self):
             """T5: lazy-load the write-options explanations
@@ -3115,15 +3160,64 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 out.append("Note — not confirmed on the verified rev-41 bike.")
             return out
 
+        def _write_help_parts(self, name):
+            """Structured (keyword, body, colour) rows for the styled description
+            panel (the string form _write_help_lines still feeds the confirm dialog)."""
+            it = self._write_help_map().get(str(name).strip().lower())
+            if not it:
+                return []
+            out = []
+            if it.get("what_it_does"):
+                out.append(("What it does", it["what_it_does"], "#7fe0a0"))
+            if it.get("caution"):
+                out.append(("Caution", it["caution"], P["warn"]))
+            if it.get("seen_on_rev41") is False:
+                out.append(("Note", "not confirmed on the verified rev-41 bike.",
+                            P["dim"]))
+            return out
+
+        def _clear_effect(self):
+            for w in self.effect_panel.winfo_children():
+                w.destroy()
+
+        def _effect_line(self, keyword, text, color):
+            """A keyworded paragraph: a bold colour-coded label + an indented, wrapped
+            body — scannable, unlike a run-on line."""
+            row = ttk.Frame(self.effect_panel)
+            row.pack(anchor="w", fill="x", pady=(4, 0))
+            ttk.Label(row, text=keyword, foreground=color,
+                      font=(self.sty["ui"], 9, "bold")).pack(anchor="w")
+            ttk.Label(row, text=text, wraplength=980, justify="left",
+                      foreground=P["fg"]).pack(anchor="w", padx=(12, 0))
+
+        def _show_effect_hint(self):
+            self._clear_effect()
+            ttk.Label(self.effect_panel, wraplength=1000, justify="left",
+                      foreground=P["dim"],
+                      text="Select a setting to see what it does. Click its 'New value' "
+                      "cell to type a value (a '✎ Write →' appears); arm UNLOCK WRITES "
+                      "(top-right) and click it to apply. Changed a setting? Its row "
+                      "shows '↺ Reset' to restore the last full read.").pack(anchor="w")
+
         def _show_effect(self, _evt=None):
             sel = self.tree.selection()
             if not sel:
                 return
+            self._clear_effect()
             name = sel[0]
             label, effect, risk, _v, _w = WRITE_WHITELIST[name]
-            parts = ["%s — %s" % (name, label), "EFFECT: %s" % effect,
-                     "RISK: %s" % risk] + self._write_help_lines(name)
-            self.lbl_effect.config(text="\n".join(parts))
+            ttk.Label(self.effect_panel, text="%s — %s" % (name, label),
+                      style="Heading.TLabel").pack(anchor="w")
+            safe = risk.upper().startswith("SAFE")
+            chip = ttk.Frame(self.effect_panel)
+            chip.pack(anchor="w", pady=(3, 0))
+            tk.Label(chip, text=" RISK ", bg=(P["green"] if safe else P["warn"]),
+                     fg="#0d0d0d", font=(self.sty["ui"], 8, "bold")).pack(side="left")
+            ttk.Label(chip, text="  " + risk,
+                      foreground=(P["green"] if safe else P["warn"])).pack(side="left")
+            self._effect_line("EFFECT", effect, "#8fd0ff")
+            for keyword, body, color in self._write_help_parts(name):
+                self._effect_line(keyword, body, color)
 
         def _writes_edit_cell(self, event):
             """Double-click ANYWHERE on a whitelisted row -> inline editor over its
@@ -3186,33 +3280,32 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ent.bind("<Escape>", cancel)
 
         def _set_pending_write(self, name, val):
-            """Stage/clear an inline pending write for a row: show the new value + a
-            'Write' affordance in that row when it differs from the current value."""
+            """Stage/clear an inline pending write for a row, then repaint it."""
             if name not in WRITE_WHITELIST or name not in self.settings:
                 return
-            _l, _e, risk, _v, _w = WRITE_WHITELIST[name]
             cur = self.settings.get(name, {}).get("value", "")
-            base = (name, cur, risk.split(" - ")[0])
-            tag = "safe" if risk.startswith("SAFE") else "caution"
             if not val or first_number(val) == first_number(cur):
                 self._pending_writes.pop(name, None)
-                self.tree.item(name, values=base + ("", ""), tags=(tag,))
             else:
                 self._pending_writes[name] = val
-                self.tree.item(name, values=base + (val, "✎ Write →"),
-                               tags=("pending",))
+            self._render_write_row(name)
 
         def _writes_action_click(self, event):
-            """Single click: the 'Write' cell (#5) applies a pending value; the 'New
-            value' cell (#4) opens the inline editor — so a plain click in that
-            column starts editing (no need to know it's a double-click)."""
+            """Single click on the action cell (#5): apply a staged '✎ Write →', or
+            '↺ Reset' the row back to the last full read's value. A click on the 'New
+            value' cell (#4) opens the inline editor."""
             row = self.tree.identify_row(event.y)
             if not row or row not in WRITE_WHITELIST or row not in self.settings:
                 return
             col = self.tree.identify_column(event.x)
-            if col == "#5" and row in self._pending_writes:
-                self._write_value(row, self._pending_writes[row])
-                return "break"
+            if col == "#5":
+                if row in self._pending_writes:
+                    self._write_value(row, self._pending_writes[row])
+                    return "break"
+                base = self._baseline_settings.get(row)
+                if base is not None and self._row_differs_from_baseline(row):
+                    self._write_value(row, first_number(base))   # reset to default
+                    return "break"
             if col == "#4":                      # New-value cell -> start editing
                 self._open_new_editor(row)
                 return "break"
@@ -3250,10 +3343,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         "What happens when you click OK:\n"
                         "  1. a full backup of ALL current settings is saved to the "
                         "session folder,\n"
-                        "  2. the change is sent, then read back to VERIFY it took,\n"
-                        "  3. it's recorded in the writes journal — select it and "
-                        "click 'Revert selected' (below the table) to undo it.\n\n"
-                        "Proceed?"
+                        "  2. the change is sent, then read back to VERIFY it took.\n\n"
+                        "Afterward, that row shows '↺ Reset' to put it back to the last "
+                        "full read. Proceed?"
                         % (name, label, old_val, new_val, effect, risk, notes))
                 if not messagebox.askokcancel("Confirm write", text):
                     return
@@ -3261,14 +3353,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 def job2():
                     stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
                     self.logger.save_named("settings_backup_%s.txt" % stamp, dump)
-                    # D4: journal INTENT before the write reaches the wire, so a
-                    # failure between send and verify still records that the bike
-                    # may have changed. Then, once the write is out, show a revert
-                    # entry immediately (before verify) so a verify error can't
-                    # lose it — the journal is the audit trail the design leans on.
+                    # D4: journal INTENT before the write reaches the wire, so a failure
+                    # between send and verify still records that the bike may have
+                    # changed — the on-disk journal is the audit trail the design leans
+                    # on (the UI's revert is now the inline '↺ Reset' on the row).
                     self.logger.journal_write(name, old_val, new_val, ok=None)  # PENDING
                     self.transport.write_setting(name, new_val, idle_timeout=2.5)
-                    self._cbq.put(lambda: self._record_write(name, old_val, new_val))
                     verify = self.transport.exec_command("set", idle_timeout=4.0,
                                                          max_time=120.0)
                     live2, _ = parse_settings_dump(verify)
@@ -3279,65 +3369,23 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
                 def done2(r2):
                     got, verified, verify_dump = r2
-                    self._set_last_journal_status(got, verified)
-                    self._ingest_settings(verify_dump)
+                    self._ingest_settings(verify_dump)   # current now reflects the write
                     if not verified:
-                        # F8: offer an immediate revert rather than only warning —
-                        # esp. important for booleans, whose accepted token on rev
-                        # 41 is unverified (a "Yes" might land as its opposite)
-                        if messagebox.askyesno(APP_NAME,
-                                "Read-back mismatch for %s: you wrote %r but the bike "
-                                "reports %r. Stage a revert to the previous value (%s) "
-                                "now?" % (name, new_val, got, old_val)):
-                            self._stage_revert(name, old_val)
+                        # the row now differs from the last read, so it shows '↺ Reset'
+                        # — point the user at it (esp. for booleans, whose accepted
+                        # token on rev 41 is unverified — a "Yes" might land inverted).
+                        messagebox.showwarning(APP_NAME,
+                            "Read-back mismatch for %s: you wrote %r but the bike reports "
+                            "%r. That row now shows '↺ Reset' — click it to restore the "
+                            "last-read value (%s)." % (name, new_val, got, old_val))
+                        try:
+                            self.tree.selection_set(name)
+                            self.tree.see(name)
+                        except Exception:
+                            pass
                 self._run_bg(job2, done2)
 
             self._run_bg(job, confirm_and_send)
-
-        def _record_write(self, name, old, new):
-            """Add a revert entry the instant a write goes out (before verify)."""
-            self.journal_entries.append((name, old, new))
-            self.lst_journal.insert("end", "%s: %s -> %s  [pending verify]"
-                                    % (name, old, new))
-
-        def _set_last_journal_status(self, got, verified):
-            """Update the just-added entry's label after the read-back verify."""
-            if not self.journal_entries:
-                return
-            idx = len(self.journal_entries) - 1
-            name, old, new = self.journal_entries[idx]
-            label = ("%s: %s -> %s  [%s]"
-                     % (name, old, new, "verified" if verified
-                        else "READBACK MISMATCH: %r" % got))
-            try:
-                self.lst_journal.delete(idx)
-                self.lst_journal.insert(idx, label)
-            except Exception:
-                pass
-
-        def _stage_revert(self, name, old):
-            """Stage a revert as an inline pending write on the setting's row; the
-            user clicks 'Write' on that row to apply it (normal confirm/backup).
-            Always give feedback — never fail silently if the row is missing."""
-            if name in self.tree.get_children():
-                self._set_pending_write(name, first_number(old))
-                self.tree.selection_set(name)
-                self.tree.see(name)
-                messagebox.showinfo(APP_NAME, "Revert staged in the table: %s → %s. "
-                                    "Click 'Write' on that row to apply (same "
-                                    "confirm/backup flow)." % (name, old))
-            else:
-                messagebox.showwarning(APP_NAME, "Couldn't stage the revert for '%s' "
-                                       "(its row isn't in the write table right now). "
-                                       "Re-read the settings, then set it back to %s "
-                                       "yourself." % (name, old))
-
-        def _revert(self):
-            sel = self.lst_journal.curselection()
-            if not sel:
-                return
-            name, old, new = self.journal_entries[sel[0]]
-            self._stage_revert(name, old)
 
         # -- Console tab (raw commands — doesn't fit the phased flow) ---------
         def _build_console_tab(self):

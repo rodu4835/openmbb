@@ -91,18 +91,20 @@ def test_full_flow(app):
     assert _pump(app, lambda: len(app.settings) >= 30)
     assert len(app.tree.get_children()) == len(WRITE_WHITELIST)
 
-    # write blocked without the unlock toggle
+    # write blocked without the unlock toggle -> value unchanged from the last read
     app._write_value("spfront", "22")
     app.update()
-    assert not app.journal_entries      # refused
+    assert not app._row_differs_from_baseline("spfront")     # refused
 
-    # unlock and write for real — the write is async (send -> verify -> ingest),
-    # so wait for the read-back value to actually land, not just the journal entry
+    # unlock and write for real — the write is async (send -> verify -> ingest), so
+    # wait for the read-back value to land; then the row differs from the last read
+    # (so it offers '↺ Reset') and the on-disk journal recorded it.
     app.unlock_var.set(True)
     app._write_value("spfront", "22")
     assert _pump(app, lambda: first_number(
         app.settings.get("spfront", {}).get("value", "")) == "22")
-    assert len(app.journal_entries) > 0
+    assert app._row_differs_from_baseline("spfront")
+    assert os.path.exists(os.path.join(app.logger.dir, "writes_journal.txt"))
     backups = [f for f in os.listdir(app.logger.dir)
                if f.startswith("settings_backup")]
     assert backups
@@ -902,7 +904,7 @@ def test_writes_tab_scrollbar_trimmed_and_no_redundant_button(app, monkeypatch):
     writes_tab = app.nb.nametowidget(app.nb.tabs()[3])
     assert has_scrollbar(writes_tab)                              # D3
     labels = " ".join(_all_label_text(app))
-    assert "Arming UNLOCK only enables the Write" in labels       # D2 trimmed text
+    assert "Arming UNLOCK only enables writing" in labels         # D2 trimmed text
     assert "What can I change?" not in labels                     # D4 button removed
     captured = {}
     monkeypatch.setattr(app, "_info_window", lambda t, x: captured.update(text=x))
@@ -912,8 +914,8 @@ def test_writes_tab_scrollbar_trimmed_and_no_redundant_button(app, monkeypatch):
 
 
 def test_write_confirm_explains_backup_verify_revert(app, monkeypatch):
-    # D2: the write-confirm dialog spells out the backup -> verify -> journal/Revert
-    # story at the moment of the (nervous) first write.
+    # D2: the write-confirm dialog spells out the backup -> verify -> Reset story at
+    # the moment of the (nervous) first write.
     app._connect()
     assert _pump(app, lambda: app.connected)
     app._baseline()
@@ -928,7 +930,75 @@ def test_write_confirm_explains_backup_verify_revert(app, monkeypatch):
     app._write_value("spfront", "22")
     assert _pump(app, lambda: seen)                    # the confirm fired
     low = seen[-1].lower()
-    assert "backup" in low and "verify" in low and "revert" in low
+    assert "backup" in low and "verify" in low and "reset" in low
+
+
+def test_writes_reset_to_default(app, monkeypatch):
+    # owner: after changing a setting, its row offers '↺ Reset', which restores the
+    # last full read's value through the same safe write flow — no revert journal.
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: "spfront" in app.tree.get_children())
+    base = first_number(app._baseline_settings["spfront"])
+    app.unlock_var.set(True)
+    app._write_value("spfront", "22")
+    assert _pump(app, lambda: first_number(app.settings["spfront"]["value"]) == "22")
+    assert app._row_differs_from_baseline("spfront")
+    assert "Reset" in app.tree.item("spfront", "values")[4]      # inline affordance
+
+    # click the action cell (#5) with no pending -> resets to the last-read value
+    monkeypatch.setattr(app.tree, "identify_row", lambda y: "spfront")
+    monkeypatch.setattr(app.tree, "identify_column", lambda x: "#5")
+
+    class E:
+        x = y = 5
+    app._writes_action_click(E())
+    assert _pump(app, lambda: first_number(app.settings["spfront"]["value"]) == base)
+    assert not app._row_differs_from_baseline("spfront")         # back to default
+
+
+def test_safe_disconnect_resets_to_clean_slate(app):
+    # owner: after Safely disconnect, a reconnect must NOT look pre-pulled — the
+    # green command borders, loaded analysis, and last-read snapshot all clear.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._analyze_use_current()
+    assert app.analyze_session is not None
+    app._baseline_mark("status", "ok")
+    assert str(app.cmd_cells["status"].cget("bg")) == app._cell_color("ok")
+
+    app._safe_disconnect()
+    app.update()
+    assert not app.connected and not app.baseline_done
+    assert app._baseline_settings == {}
+    assert app.analyze_session is None
+    assert str(app.cmd_cells["status"].cget("bg")) == str(app._cell_bg)  # cleared
+
+
+def test_top_menu_switches_in_one_action_without_grab(app):
+    # owner: switching top menus must not need two clicks. No local grab (a grab
+    # swallows the sibling-button click); each button's click opens its menu directly
+    # (closing any open one), and a re-click toggles it closed.
+    app.update()
+    (mb_a, fn_a), (mb_b, fn_b) = app._menubuttons[0], app._menubuttons[1]
+    app._menu_popup(mb_a, fn_a())
+    assert app._open_menu is not None and app._open_menu_anchor is mb_a
+    assert app._menu_dismiss_id is not None            # click-to-dismiss armed
+    assert not app.grab_current()                      # NO grab held
+
+    app._menu_popup(mb_b, fn_b())                      # switch in one action
+    assert app._open_menu is not None and app._open_menu_anchor is mb_b
+
+    app._menu_popup(mb_b, fn_b())                      # re-click toggles closed
+    assert app._open_menu is None and app._menu_dismiss_id is None
 
 
 def test_writes_inline_edit_stages_and_writes(app):
@@ -1598,12 +1668,12 @@ def test_rides_parses_session_eventlogdump(app):
     assert "event log" in app.lbl_ride_totals.cget("text").lower()  # sourced from it
 
 
-def test_write_mismatch_offers_revert(app, monkeypatch):
-    # F8: a read-back mismatch OFFERS an immediate revert to the old value
+def test_write_mismatch_warns_and_points_to_reset(app, monkeypatch):
+    # F8: a read-back mismatch WARNS (and the row's inline '↺ Reset' restores the
+    # last-read value — no separate revert journal).
     from openmbb import dialogs as mb
-    offered = []
-    monkeypatch.setattr(mb, "askyesno",
-                        lambda *a, **k: offered.append(a) or False)   # see the offer
+    warned = []
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: warned.append(a))
     app._connect()
     assert _pump(app, lambda: app.connected)
     app._baseline()
@@ -1615,22 +1685,22 @@ def test_write_mismatch_offers_revert(app, monkeypatch):
     monkeypatch.setattr(app.transport, "write_setting", lambda *a, **k: "no-op")
     app.unlock_var.set(True)
     app._write_value("spfront", "22")
-    assert _pump(app, lambda: offered)                        # the revert offer fired
-    assert "mismatch" in str(offered[-1]).lower()
+    assert _pump(app, lambda: warned)                        # the mismatch warning fired
+    assert "mismatch" in str(warned[-1]).lower()
 
 
 def test_connect_while_busy_does_not_reset_state(app):
     # T3: Connect during an in-flight op must be refused BEFORE the destructive
-    # reset — the port and revert trail must survive
+    # reset — the port and the last-read baseline must survive
     app._connect()
     assert _pump(app, lambda: app.connected)
     tr = app.transport
-    app.journal_entries.append(("spfront", "20", "22"))     # pretend a prior write
+    app._baseline_settings = {"spfront": "20"}              # pretend a prior clean read
     app._busy = True
     app._connect()                                          # must refuse, not reset
     app.update()
     assert app.transport is tr and app.connected            # port not yanked
-    assert app.journal_entries                              # revert trail intact
+    assert app._baseline_settings == {"spfront": "20"}      # state not wiped
     app._busy = False
 
 
@@ -1950,8 +2020,8 @@ def test_load_ride_log_from_file(app, monkeypatch, tmp_path):
 
 
 def test_write_records_before_verify_failure(app, monkeypatch):
-    # D4/C8: a glitch AFTER the write but before verify must still leave a
-    # revert entry + a PENDING journal line (the bike may have changed)
+    # D4/C8: a glitch AFTER the write but before verify must still leave a PENDING
+    # line in the on-disk journal (the bike may have changed)
     app._connect()
     assert _pump(app, lambda: app.connected)
     app._baseline()
@@ -1972,6 +2042,6 @@ def test_write_records_before_verify_failure(app, monkeypatch):
 
     monkeypatch.setattr(app.transport, "exec_command", flaky)
     app._write_value("spfront", "22")
-    assert _pump(app, lambda: len(app.journal_entries) > 0)
+    assert _pump(app, lambda: os.path.exists(app.transport.logger.journal_path))
     journal = open(app.transport.logger.journal_path, encoding="utf-8").read()
     assert "PENDING" in journal
