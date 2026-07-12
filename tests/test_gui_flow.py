@@ -984,6 +984,9 @@ def test_safe_disconnect_resets_to_clean_slate(app):
     app._analyze_hint_shown = True
     gwin = app._show_gearing_calc()           # a stray helper window
     assert gwin.winfo_exists()
+    mb, fn = app._menubuttons[0]              # an open top-menu, too
+    app._menu_popup(mb, fn())
+    assert app._open_menu is not None
 
     app._safe_disconnect()
     app.update()
@@ -999,6 +1002,7 @@ def test_safe_disconnect_resets_to_clean_slate(app):
     assert app._cmd_history == [] and app.compare_list == []
     assert app._analyze_hint_shown is False
     assert not [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)]
+    assert app._open_menu is None and app._menu_dismiss_id is None   # menu refs cleared
 
 
 def test_top_menu_switches_in_one_action_without_grab(app):

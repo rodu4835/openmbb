@@ -1721,6 +1721,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _close_transient_toplevels(self):
             """Destroy any open helper windows (gearing calculator, recent-sessions
             picker, settings, info popups) so a disconnect leaves nothing behind."""
+            # tear down an open top-menu FIRST so its refs (_open_menu/_open_submenu/
+            # _menu_dismiss_id) are nulled — destroying its Toplevel below would else
+            # leave dangling references (review v0.18.1).
+            self._dismiss_open_menu()
             for w in list(self.winfo_children()):
                 if isinstance(w, tk.Toplevel):
                     try:
