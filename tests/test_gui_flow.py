@@ -1102,6 +1102,46 @@ def test_sim_trend_synthesizes_year_labeled(app):
     assert any("SIMULATED" in t for t in texts)
 
 
+def test_trends_exclude_sim_and_listen_sessions(app, tmp_path, monkeypatch):
+    # owner data-integrity: the real-hardware trend must NOT fold in --sim or
+    # cable-test (_listen) folders — they save fake bms/stats that would poison it.
+    root = tmp_path / "openmbb-sessions"
+    root.mkdir()
+
+    def mkfolder(name, cap):
+        d = root / name
+        d.mkdir()
+        (d / "007_bms.txt").write_text(
+            "# command: bms\n\nPack capacity: %s Ah\n" % cap, encoding="utf-8")
+    mkfolder("2026-01-01_000000_000000_COM4", 6.4)
+    mkfolder("2026-01-02_000000_000000_sim", 9.9)
+    mkfolder("2026-01-03_000000_000000_listen", 1.1)
+    monkeypatch.setattr(app, "log_dir", str(tmp_path))
+    app._trend_cache = None
+    names = [n for _mt, n, _b, _s in app._load_trend_sessions()]
+    assert any(n.endswith("_COM4") for n in names)
+    assert not any(n.endswith(("_sim", "_listen")) for n in names)
+
+
+def test_trend_note_says_real_pulls(app, monkeypatch):
+    # the chart note calls out that a trend is built from REAL pulls (so the
+    # sim-exclusion is visible), and is not the SIMULATED preview.
+    import datetime as dt
+    now = dt.datetime.now().timestamp()
+    monkeypatch.setattr(app, "_load_trend_sessions", lambda: [
+        (now - 40 * 86400, "a_COM4", {"capacity_ah": 6.5}, {}),
+        (now - 5 * 86400, "b_COM4", {"capacity_ah": 6.4}, {})])
+    app.sim_var.set(False)
+    app.chart_metric.set("Trend: pack capacity")
+    app.chart_range.set("All")
+    app._render_charts()
+    app.update()
+    cv = app.chart_canvas
+    texts = [cv.itemcget(i, "text") for i in cv.find_all() if cv.type(i) == "text"]
+    assert any("real pull" in t for t in texts)
+    assert not any("SIMULATED" in t for t in texts)
+
+
 def test_read_points_to_analyze_once(app):
     # C1: the first read prints a one-time pointer to Analyze (don't nag every read).
     app._connect()

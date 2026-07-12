@@ -3740,9 +3740,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                            font=(self.sty["ui"], 10))
 
         def _load_trend_sessions(self):
-            """Saved sessions (oldest->newest) parsed to (mtime, name, bms, stats),
-            cached so a chart resize doesn't re-read the folders each frame.
-            Invalidated when a new pull is saved (see _baseline)."""
+            """REAL-hardware saved sessions (oldest->newest) parsed to
+            (mtime, name, bms, stats), cached so a chart resize doesn't re-read the
+            folders each frame. Invalidated when a new pull is saved (see _baseline).
+
+            Simulator (`_sim`) and cable-test (`_listen`) folders are EXCLUDED — the
+            trend line is your bike's real history, and a --sim rehearsal saves fake
+            bms/stats that would otherwise poison it (owner)."""
             cached = getattr(self, "_trend_cache", None)
             if cached is not None:
                 return cached
@@ -3750,6 +3754,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             try:
                 root, names = self._recent_sessions(limit=60)
                 for name in reversed(names):     # oldest first
+                    if name.endswith(("_sim", "_listen")):
+                        continue                 # not real-hardware data
                     try:
                         folder = os.path.join(root, name)
                         s = sessions.load_session(folder)
@@ -3849,8 +3855,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     return ""
             self._chart_line(cv, [(metric.replace("Trend: ", ""), P["green"], pts)],
                              "date", ylabel, dots=True, xfmt=_datefmt)
-            note = "%d pull%s · %s" % (len(pts), "" if len(pts) == 1 else "s",
-                                       self.chart_range.get())
+            note = "%d %spull%s · %s" % (
+                len(pts), "" if synthetic else "real ",
+                "" if len(pts) == 1 else "s", self.chart_range.get())
             self._chart_note(cv, ("SIMULATED · " + note) if synthetic else note)
 
         def _render_charts(self):
