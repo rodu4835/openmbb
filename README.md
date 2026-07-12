@@ -114,7 +114,8 @@ read falsely low), so OpenMBB flags any isolation reading taken while charging.
 1. **Read** — per-command buttons; **FULL BASELINE** captures the quick reads +
    the settings dump (your backup) + the small `errorlogdump`. The heavy log
    reads (`eventlogdump`/`dumpall`, ~1 MB, minutes at 38400) are **not** in the
-   baseline — they sit behind their own buttons with a confirm dialog, because on
+   default baseline — they sit behind their own buttons with a confirm dialog (you
+   can opt in to fold `eventlogdump` into a pull with a checkbox), because on
    a keyed-on bike a long dump can starve the MBB's CAN servicing enough that the
    BMS briefly **opens the drivetrain contactor** (a click + a flashing dash that
    recovers when the read finishes; observed live). One failed command no longer
@@ -141,13 +142,18 @@ session folder — or the current one:
 
 - **Health** — SOC vs pack voltage, cell balance, capacity, temps, charge
   cycles, and the effective gearing ratio, each flagged ok / watch / alert.
-- **Rides** — per-ride distance, SOC%/km, and temps. Rev 41 doesn't stream ride
-  telemetry as console text, so this reads a ride log you **Load ride log
-  (.txt)** — e.g. the decoded output of the community `zero-log-parser`.
-- **Compare** — pick 2+ sessions to see settings changes and capacity / gearing
-  trends over time (battery-degradation tracking).
-- **Gearing** — enter new front/rear teeth to get the ratio and the exact
-  `spfront` / `sprear` / `rwhcirc` values to write.
+- **Rides** — per-ride distance, SOC%/km, and temps, read **straight off the
+  bike**: `eventlogdump` prints the full event log as decoded text (including
+  per-sample riding entries — SOC, pack/motor temp, voltage, rpm, odometer), which
+  OpenMBB parses directly. No Zero app, no `.bin` files, no external decoder. Pull
+  it with **Pull ride log from bike**, or **Load ride log (.txt)** for a log you
+  already have.
+- **Charts** — dependency-free plots of the ride-log series, plus `Trend:` metrics
+  across your saved **real-hardware** pulls (pack capacity, charge cycles, temps,
+  effective gearing) on a dated timeline. Pick a date **Range**, or **drag to
+  zoom** any x-window (double-click resets).
+- **Compare** — pick 2+ sessions to see exactly which **settings changed** between
+  them; the over-time trends live on the Charts tab.
 
 The analysis parsers are deliberately tolerant: fields the capture doesn't
 include show `n/a` rather than failing.
