@@ -416,7 +416,7 @@ def test_cable_wizard_verifies_and_offers_connect(app):
     start = find_btn("Start test")
     assert start is not None
     start.invoke()
-    assert _pump(app, lambda: find_btn("Connect & probe") is not None, timeout=20)
+    assert _pump(app, lambda: find_btn("Connect") is not None, timeout=20)
     for w in [x for x in app.winfo_children() if isinstance(x, tk.Toplevel)]:
         w.destroy()
 
@@ -1128,6 +1128,35 @@ def test_connect_hides_controls_then_restores_on_failure(app, monkeypatch):
     assert "try again" in app.txt_probe.get("1.0", "end").lower()
 
 
+def test_connect_button_says_connect(app):
+    # owner: the button (and the wizard's) should say "Connect", not "Connect & probe".
+    from openmbb.gui import CONNECT_LABEL
+    assert CONNECT_LABEL == "Connect"
+    assert app.btn_connect.cget("text") == "Connect"
+
+
+def test_set_has_a_command_button(app):
+    # owner: the pull's "[12/15] reading set" step had no button — now it does (in its
+    # pull position), so its cell lights green during a pull like every other command.
+    assert "set" in app.cmd_btns and "set" in app.cmd_cells
+    assert app.cmd_btns["set"].cget("text") == "set"
+
+
+def test_tooltips_are_dark_themed(app):
+    # owner: hover hints were the OS pale-yellow — restyle to the dark panel theme.
+    import tkinter as tk
+    from openmbb.theme import PALETTE as _P
+    btn = app.cmd_btns["status"]
+    btn.event_generate("<Enter>")
+    app.update()
+    tips = [w for w in btn.winfo_children() if isinstance(w, tk.Toplevel)]
+    assert tips, "hovering a command shows a tooltip"
+    lbl = tips[0].winfo_children()[0]
+    assert str(lbl.cget("bg")) == _P["panel"]        # dark surface, not #ffffe0
+    assert str(lbl.cget("fg")) == _P["fg"]           # light text
+    btn.event_generate("<Leave>")
+
+
 def test_connect_page_copy_is_calm_and_current(app):
     # owner: the connect-fail fallback had stale text + orange-warning styling. The
     # help is now muted (not P['warn']) and uses the ACTUAL button labels; the
@@ -1492,7 +1521,7 @@ def test_simulator_is_a_toggle_not_a_port(monkeypatch):
         assert not any("SIM" in str(v).upper()                          # not a port entry
                        for v in app.cbo_port.cget("values"))
         assert isinstance(app._make_port("", True), SimPort)           # sim -> SimPort
-        assert app.btn_connect.cget("text") == CONNECT_LABEL           # "Connect & probe"
+        assert app.btn_connect.cget("text") == CONNECT_LABEL           # "Connect"
     finally:
         app.destroy()
 
@@ -1538,8 +1567,8 @@ def test_connect_guidance_is_cable_agnostic(app):
     # disconnect/reconnect the FTDI Orange (TX) — the harness is a fixed 3-wire
     # cable. (The status bar's "● DISCONNECTED" is a different, legitimate use.)
     guidance = next((t for t in _all_label_text(app)
-                     if "connect & probe" in t.lower()
-                     and "test your cable" in t.lower()), None)
+                     if "test your cable" in t.lower()
+                     and "isolation" in t.lower()), None)
     assert guidance is not None                    # sanity: found the Connect blurb
     low = guidance.lower()
     assert "disconnect" not in low

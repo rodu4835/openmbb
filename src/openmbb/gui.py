@@ -39,7 +39,7 @@ from .transport import (DUMP_COMMANDS, HEAVY_COMMANDS, LONG_COMMANDS,
 # Connect-tab / cable-wizard button labels. Cable verification (receive-only) is
 # offered via the "Test your cable" wizard; the live connect is a single button.
 VERIFY_LABEL = "Test your cable"
-CONNECT_LABEL = "Connect & probe"
+CONNECT_LABEL = "Connect"
 
 # Plain-language description of each read command, shown as a hover tooltip so the
 # bare firmware button names aren't a wall of jargon to a first-timer.
@@ -56,6 +56,8 @@ READ_TIPS = {
     "outputs": "Output states (DC/DC, warning light, contactor enable…).",
     "dash": "Instrument-cluster data (clock, odometer, CAN age).",
     "obd": "OBD summary (protocol, DTCs).",
+    "set": "All tunable settings — the backup source a write reads first. Shows "
+           "identity only until you log in; the tunables appear after login.",
     "errorlogdump": "The small error log (~1 KB, safe).",
     "eventlogdump": "The FULL event log (~1 MB, minutes) — can briefly OPEN the "
                     "drivetrain contactor. Park the bike first.",
@@ -111,7 +113,7 @@ CONNECT
   bike or cable attached. Optional but recommended first: "Test your cable" — it
   only LISTENS (transmits nothing), so it safely proves your cable + baud and
   that the bike is talking (power the bike during the ~45 s window to catch the
-  boot banner). Then "Connect & probe" wakes the console prompt and reads the
+  boot banner). Then "Connect" wakes the console prompt and reads the
   firmware version. Garbage output at 38400 baud usually means the Tx/Rx wires
   are swapped — stop and recheck.
 
@@ -386,8 +388,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _show_cable_wizard(self):
             """Self-contained 'Test your cable' wizard: pick the COM port + read the
-            prep info, run the (listen-only) test, then offer Connect & probe /
-            Retry / Cancel — no jumping to the Connect tab with its own buttons."""
+            prep info, run the (listen-only) test, then offer Connect / Retry /
+            Cancel — no jumping to the Connect tab with its own buttons."""
             if self._busy:
                 messagebox.showinfo(APP_NAME, "Busy — wait for the current operation.")
                 return
@@ -502,7 +504,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                    "%s)." % (nbytes, ", ".join(sigs)), P["green"])
                         set_buttons([("Cancel", close, False),
                                      ("Retry", start_test, False),
-                                     ("Connect & probe", on_connect, True)])
+                                     (CONNECT_LABEL, on_connect, True)])
                     else:
                         set_status("✗ No recognizable signal (%d bytes). Check the "
                                    "cable, the COM port, and that the bike is powered, "
@@ -1598,7 +1600,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _tab_unlock_hint(self, idx):
             # C7: plain-language "here's how to unlock this stage" for a locked tab.
             if idx in (1, 2):     # Read + Login both just need a connection
-                return ("The %s tab opens once you Connect & probe on the Connect tab."
+                return ("The %s tab opens once you Connect on the Connect tab."
                         % ("Read" if idx == 1 else "Login"))
             if idx == 3:
                 if not self.connected:
@@ -1898,7 +1900,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         # -- Phase 0: Connect --------------------------------------------------
         def _build_connect_tab(self):
             f = self._new_tab(" Connect ", "Connect to your bike",
-                              "verify the cable, then connect & probe")
+                              "verify the cable, then connect")
             # the pre-connect controls (port row + how-to blurb) are hidden once
             # connected — the success banner is all that's relevant then.
             row = self.connect_row = ttk.Frame(f)
@@ -2186,10 +2188,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 win = tk.Toplevel(widget)
                 win.wm_overrideredirect(True)
                 win.wm_geometry("+%d+%d" % (x, y))
-                tk.Label(win, text=text, background="#ffffe0", foreground="#222",
-                         relief="solid", borderwidth=1, justify="left",
-                         wraplength=340, padx=6, pady=3,
-                         font=(self.sty["mono"], 8)).pack()
+                # themed to match the dark UI (was a pale-yellow OS default): a dark
+                # panel surface, light text, a thin accent-grey border (the 1px win bg
+                # showing through the label's pad — same trick as the menu popups).
+                win.configure(bg="#4a4470")
+                tk.Label(win, text=text, background=P["panel"], foreground=P["fg"],
+                         justify="left", wraplength=320, padx=8, pady=5,
+                         font=(self.sty["ui"], 9)).pack(padx=1, pady=1)
                 state["win"] = win
 
             def hide(_e=None):
@@ -2288,7 +2293,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # 'border' — a pull lights it blue (running) then green (captured) so you
             # can see the database fill in, per command. cmd_cells maps command->frame.
             self.cmd_cells, self.cmd_btns = {}, {}
-            for i, cmd in enumerate(READ_COMMANDS + DUMP_COMMANDS):
+            # `set` (the settings dump) IS part of a Pull full database — it just had
+            # no button, so the pull's "[12/15] reading set…" looked like a missing
+            # command (owner). Give it one, in its pull position (after the reads).
+            for i, cmd in enumerate(READ_COMMANDS + ["set"] + DUMP_COMMANDS):
                 cell = tk.Frame(quick, bg=self._cell_bg)
                 cell.grid(row=i // 2, column=i % 2, padx=2, pady=2, sticky="ew")
                 b = ttk.Button(cell, text=cmd, width=12,
