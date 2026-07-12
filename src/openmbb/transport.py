@@ -74,14 +74,25 @@ LONG_COMMANDS = set(DUMP_COMMANDS) | set(HEAVY_COMMANDS)
 class SessionLogger:
     def __init__(self, base_dir=None, tag="session"):
         # microsecond precision so two connects in the same second (a fast
-        # failed-probe retry) never share a folder and overwrite each other
+        # failed-probe retry) never share a folder and overwrite each other.
+        # Two creations CAN still land in the SAME microsecond (fast hardware /
+        # CI), so don't rely on the timestamp alone: create with exist_ok=False
+        # and fall back to an incrementing suffix until the folder is unique.
         stamp = _dt.datetime.now().strftime("%Y-%m-%d_%H%M%S_%f")
         # sessions always live in a self-contained "openmbb-sessions" folder
         # under the chosen base (or cwd), so picking any directory never
         # scatters timestamped folders loose into it.
         root = os.path.join(base_dir or os.getcwd(), "openmbb-sessions")
-        self.dir = os.path.join(root, "%s_%s" % (stamp, tag))
-        os.makedirs(self.dir, exist_ok=True)
+        os.makedirs(root, exist_ok=True)
+        base = os.path.join(root, "%s_%s" % (stamp, tag))
+        path, n = base, 1
+        while True:
+            try:
+                os.makedirs(path, exist_ok=False)   # atomically claims a UNIQUE dir
+                break
+            except FileExistsError:                  # same-microsecond collision
+                path, n = "%s_%d" % (base, n), n + 1
+        self.dir = path
         self.raw_path = os.path.join(self.dir, "session_raw.log")
         self.journal_path = os.path.join(self.dir, "writes_journal.txt")
         self._seq = 0

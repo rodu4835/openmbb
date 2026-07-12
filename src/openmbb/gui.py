@@ -2269,6 +2269,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             widget.bind("<Enter>", show)
             widget.bind("<Leave>", hide)
             widget.bind("<Destroy>", hide)
+            # expose the show/hide callables so tests can drive the tooltip WITHOUT
+            # a synthetic <Enter> — X11/xvfb (no window manager) drops crossing
+            # events to a non-viewable widget, so event_generate is unreliable on CI.
+            widget._owl_tip_show = show
+            widget._owl_tip_hide = hide
 
         def _build_read_tab(self):
             # no tab header + no dashboard row here (owner): the single status line

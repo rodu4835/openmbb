@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openmbb"
-version = "0.20.0"
+version = "0.20.1"
 description = "Phase-gated serial console & diagnostics for Gen2 MBB-based Zero electric motorcycles (2013-2019: S/SR/DS/DSR/FX/FXS/FXE)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -14,7 +14,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pyinstaller>=6", "pillow>=10"]  # pillow: icon regeneration only
+# pytest-timeout: a per-test hard cap so a headless/xvfb GUI hang (e.g. a modal
+# nested loop that never dismisses on a WM-less CI runner) fails FAST with the
+# offending test named, instead of stalling the CI job for hours with no readable
+# log. pillow: icon regeneration only.
+dev = ["pytest>=7", "pytest-timeout>=2", "pyinstaller>=6", "pillow>=10"]
+
+[tool.pytest.ini_options]
+# generous — every real test finishes in well under a minute; this only trips a
+# genuine deadlock (see pytest-timeout note above).
+timeout = 300
 
 [project.scripts]
 openmbb = "openmbb.cli:main"
