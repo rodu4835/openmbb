@@ -35,52 +35,72 @@ different baud and a different command set, so OpenMBB is a Gen2 tool by design.
 
 Runs on **Windows and Linux** (and macOS from source).
 
-## Download — single-file executable (no Python needed)
+## Install & update
 
-Grab the binary for your OS from the repo's **Releases** page — one self-contained
-file that bundles Python, Tk, and all dependencies:
+### Windows — installer (easiest)
 
-- **Windows (installer):** `openmbb-setup-windows-x64.exe` — Start menu entry,
-  optional desktop icon, and a proper uninstaller. No admin rights needed.
+Download `openmbb-setup-windows-x64.exe` from the repo's **Releases** page and run
+it. It's a **per-user install — no admin rights**: Start-menu entry, optional
+desktop icon, and a clean uninstaller. Launch it from the Start menu or the
+desktop icon. To **update**, download the newer setup exe and run it over the old
+install.
+
+### Portable binary (no Python needed)
+
+One self-contained file that bundles Python, Tk, and every dependency:
+
 - **Windows (portable):** `openmbb-windows-x64.exe` — double-click to run from
   anywhere; nothing is installed.
 - **Linux:** `openmbb-linux-x64` — `chmod +x openmbb-linux-x64 && ./openmbb-linux-x64`.
 
-These are built and verified by CI (`.github/workflows/build.yml`) on each tagged
-release. To build one yourself for the OS you're on:
+Release binaries are built and verified by CI (`.github/workflows/build.yml`) on
+each tagged release.
 
-```
-pip install .[dev]
-python packaging/build.py      # -> dist/openmbb(.exe)
-```
-
-(PyInstaller can't cross-compile, so a Windows binary must be built on Windows and
-a Linux binary on Linux — which is exactly what the CI matrix does.)
-
-## Install from source (Python)
+### Run from source (any OS)
 
 ```
 git clone https://github.com/rodu4835/openmbb
 cd openmbb
-pip install .            # or:  pip install -e .   for a dev/editable install
+python -m venv .venv
+.venv\Scripts\activate           # Linux/macOS: source .venv/bin/activate
+pip install -e .
 ```
 
-Then run:
+Then:
 
 ```
-openmbb             # real serial (auto-lists COM ports)
-openmbb --sim       # simulator — click through everything at the desk
+openmbb --sim       # explore the whole tool with the simulator — no bike needed
+openmbb             # real serial (auto-lists COM ports; needs an FTDI cable)
 openmbb --port COM4 # preselect a port
 openmbb --selftest  # headless transport/safety tests
-openmbb --smoketest # build the GUI once, sim-connect, exit
+openmbb --smoketest # build the GUI once, sim-connect, and exit
 ```
 
-Requires Python 3.9+. Dependencies (`pyserial`, `sv-ttk`) install automatically.
-If `sv-ttk` is ever unavailable the app falls back to a built-in dark theme.
-Fonts and the file-manager "open folder" action are cross-platform.
+Requires **Python 3.9+**; `pyserial` and `sv-ttk` install automatically (if
+`sv-ttk` is ever unavailable the app falls back to a built-in dark theme). Fonts
+and the file-manager "open folder" action work cross-platform. To **update**:
+`git pull`, then re-run `pip install -e .` if dependencies changed.
 
 > If the `openmbb` command isn't found after install, your Python `Scripts` dir
 > isn't on PATH — use `python -m openmbb.cli` (same flags).
+
+### Build the binaries yourself
+
+```
+pip install .[dev]                    # adds PyInstaller + Pillow
+python packaging/build.py             # -> dist/openmbb(.exe)  — portable, any OS
+```
+
+On **Windows**, to also build the installer (requires **Inno Setup 6**):
+
+```
+powershell -File packaging\build_and_install.ps1 -Force   # or: build-and-install.bat
+```
+
+This builds `dist\openmbb.exe`, then `packaging\Output\openmbb-setup-windows-x64.exe`,
+installs it per-user, and verifies with `--selftest` / `--smoketest` (`-Force`
+closes a running OpenMBB first). PyInstaller can't cross-compile — build a Windows
+binary on Windows and a Linux binary on Linux, which is what the CI matrix does.
 
 ## Wiring (FTDI TTL-232R-3V3 → OBD-II J1962, port under the seat)
 
@@ -91,7 +111,7 @@ Fonts and the file-manager "open folder" action are cross-platform.
 | Orange (TXD) | 9 | Red/White | bike MBB **Rx** |
 | **Red (+5 V)** | — | — | **NEVER connected** |
 
-38400 baud, 8-N-1, no flow control, newline CR-LF. Bike PARKED, kill switch OFF.
+38400 baud, 8-N-1, no flow control, newline CR-LF. Bike parked, kill switch OFF.
 Never stream the console while riding. (Port location and pin-12 wiring vary by
 year; on 2017+ FX/FXS the port is under the seat.)
 
@@ -104,17 +124,23 @@ read falsely low), so OpenMBB flags any isolation reading taken while charging.
 
 ## Phase flow
 
-0. **Connect** — first, **Listen only (Stage 1)** opens the port and *only
-   listens* (never transmits in software), so it proves RX wiring + baud with
-   zero risk on any fixed cable — power the bike during the listen window to
-   catch the boot banner. Then **Connect & Probe** wakes the `ZERO MBB>` prompt
-   (retried), rejects wrong-baud/Tx-Rx garbage instead of trusting a stray `>`,
+OpenMBB opens on a **Home screen**: a short blurb and two buttons — **Analyze**
+(open a saved session, no bike needed) and **Connect**. A **Simulator mode** toggle
+lives there too (its state shows in the status bar), so you can click through the
+whole tool with no bike or cable. The staged flow below unlocks one step at a time
+— you can stop after any stage, and closing the window never loses data.
+
+0. **Connect** — optionally run **Test your cable** first: it opens the port and
+   *only listens* (never transmits in software), so it proves RX wiring + baud with
+   zero risk on any fixed cable — power the bike during the listen window to catch
+   the boot banner. Then **Connect** wakes the `ZERO MBB>` prompt (retried), rejects
+   wrong-baud/Tx-Rx garbage instead of trusting a stray `>`,
    and requires the `version` banner to parse (rev checked against the verified
    rev 41 — a different rev connects with a warning).
-1. **Read** — per-command buttons; **FULL BASELINE** captures the quick reads +
-   the settings dump (your backup) + the small `errorlogdump`. The heavy log
+1. **Read** — per-command buttons; **Pull full database** captures the command
+   reads + the settings dump (your backup) + the small `errorlogdump`. The heavy log
    reads (`eventlogdump`/`dumpall`, ~1 MB, minutes at 38400) are **not** in the
-   default baseline — they sit behind their own buttons with a confirm dialog (you
+   default pull — they sit behind their own buttons with a confirm dialog (you
    can opt in to fold `eventlogdump` into a pull with a checkbox), because on
    a keyed-on bike a long dump can starve the MBB's CAN servicing enough that the
    BMS briefly **opens the drivetrain contactor** (a click + a flashing dash that
@@ -124,18 +150,20 @@ read falsely low), so OpenMBB flags any isolation reading taken while charging.
    on-charger baseline is flagged because isolation/SOC context isn't valid off
    the charger. *You can stop here — reads are the whole point of day one.*
 2. **Login** — explicit. **On rev 41 the tunables (`spfront`/`sprear`/regen/…)
-   are login-gated: `set` at level 0 shows identity only.** "Try known passwords"
-   attempts the community-known ones (`tpsreport`, `wideopenthrottle`) in order,
-   or type a specific password (masked in the logs, never saved to disk). Success
-   is confirmed by the read-only `login` **level query** (`Login Level: N`), not
-   by guessing at the reply wording. On success the post-login `set` is saved as
-   the authoritative pre-change baseline and the tunables appear.
+   are login-gated: `set` at level 0 shows identity only.** The password box is
+   pre-filled with the last one that worked (or a community-known one — `tpsreport`,
+   `wideopenthrottle`); press **Login**, or type a different one (masked in the logs,
+   never saved to disk). Success is confirmed by the read-only `login` **level
+   query** (`Login Level: N`), not by guessing at the reply wording. On success the
+   post-login `set` is saved as the authoritative pre-change backup and the tunables
+   appear.
 3. **Writes** — locked behind login + master unlock toggle + per-write confirm.
    Rows appear only for settings that are BOTH on the whitelist AND present in
-   the live dump. Every write: journal the intent *before it hits the wire* →
-   re-read current → confirm old→new with effect/risk → auto-backup full settings
-   → send → read-back verify → journal (per-entry revert; a mismatch offers an
-   immediate revert).
+   the live dump. Click a row's New value cell to type a value, then Write. Every
+   write: journal the intent *before it hits the wire* → re-read current → confirm
+   old→new with effect/risk → auto-backup full settings → send → read-back verify →
+   journal to disk. A changed row shows **↺ Reset** to restore the last-read value;
+   a read-back mismatch points you to it.
 
 The **Analyze** tab is always available (no bike needed) and interprets a saved
 session folder — or the current one:
@@ -210,6 +238,7 @@ tests/           pytest suite (safety/transport/config/analysis + GUI flow)
 
 Everything lands in `<save-base>/openmbb-sessions/<timestamp>_<port>/`:
 `session_raw.log` (every byte, timestamped), one file per command,
+`session_meta.txt` (power mode, firmware rev, timestamp),
 `settings_baseline_*.txt`, `settings_backup_*.txt` (auto, pre-write),
 `writes_journal.txt`.
 
@@ -225,9 +254,9 @@ top status strip and is clickable.
 ## First real session checklist
 
 1. Meter check: FTDI Orange idles ~3.3 V vs Black; Red taped off.
-2. Connect & probe (Phase 0). Garbage at 38400 ⇒ suspect Tx/Rx swap — stop.
-3. FULL BASELINE before anything else. Recent firmware may be newer than the
+2. Connect (Phase 0). Garbage at 38400 ⇒ suspect Tx/Rx swap — stop.
+3. Pull full database before anything else. Recent firmware may be newer than the
    community docs — the captured `help`/`set` output is the ground truth; the
    simulator's menus are synthetic samples, not a live capture.
-4. Login attempt only after the baseline is on disk.
+4. Login attempt only after the backup is on disk.
 5. No writes on day one. Bring the session folder home first.
