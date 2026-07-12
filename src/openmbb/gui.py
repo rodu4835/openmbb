@@ -3059,12 +3059,25 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             canvas.pack(side="left", fill="both", expand=True)
             f = ttk.Frame(canvas, padding=18)
             win = canvas.create_window((0, 0), window=f, anchor="nw")
-            f.bind("<Configure>",
-                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+            def _fits():
+                bbox = canvas.bbox("all")
+                return bool(bbox) and (bbox[3] - bbox[1]) <= canvas.winfo_height()
+
+            def _sync(_e=None):
+                canvas.configure(scrollregion=canvas.bbox("all"))
+                # when the content fits the viewport, pin it to the TOP — otherwise a
+                # two-finger scroll drifts it into empty space, leaving a gap above the
+                # header (owner: content height changes as the description card toggles).
+                if _fits():
+                    canvas.yview_moveto(0)
+            f.bind("<Configure>", _sync)
             canvas.bind("<Configure>",
-                        lambda e: canvas.itemconfigure(win, width=e.width))
+                        lambda e: (canvas.itemconfigure(win, width=e.width), _sync()))
+
             def _wheel(e):
-                canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                if not _fits():                  # only scroll when it actually overflows
+                    canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
             canvas.bind("<MouseWheel>", _wheel)
             # stash so the caller can extend wheel/two-finger scroll to the page's
             # static child widgets (they'd otherwise swallow the event). See
