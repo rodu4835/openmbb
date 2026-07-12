@@ -1451,7 +1451,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 for k, v in facts:
                     lines.append("  %-18s : %s" % (k, v))
             elif not self.connected:
-                lines.append("Not connected. Connect on the Connect tab, then run")
+                lines.append("Not connected. Connect to your bike, then run")
                 lines.append("Pull full database for model / serial / gearing details.")
             else:
                 lines.append("Connected, but no data pulled yet — click Pull full")
@@ -2374,7 +2374,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if lbl is None:
                 return
             if not self.connected:
-                lbl.config(text="○ Not connected — connect on the Connect tab",
+                # neutral wording — this line shows on the Home screen too (which has
+                # no visible "Connect tab", just a Connect button), so don't name a tab.
+                lbl.config(text="○ Not connected — click Connect to begin",
                            style="Muted.TLabel")
                 return
             where = "SIMULATOR" if self.sim_var.get() else self.port_var.get()
