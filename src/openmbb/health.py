@@ -95,6 +95,15 @@ def health_snapshot(session, temp_units="C"):
     low = bms.get("low_cell_mv")
     if low is not None:
         out.append(_metric("Lowest cell", "%g mV" % low, "info"))
+    high = bms.get("high_cell_mv")
+    if high is not None:
+        out.append(_metric("Highest cell", "%g mV" % high, "info"))
+    if low is not None and high is not None:
+        spread = high - low
+        st = "ok" if spread < 40 else ("watch" if spread < 80 else "alert")
+        out.append(_metric("Cell spread", "%g mV" % spread, st,
+                           "highest minus lowest cell — a large spread signals "
+                           "imbalance"))
 
     cap, rem = bms.get("capacity_ah"), bms.get("remaining_ah")
     if cap is not None:
@@ -107,6 +116,13 @@ def health_snapshot(session, temp_units="C"):
     cyc = bms.get("cycles")
     if cyc is not None:
         out.append(_metric("Charge cycles", "%g" % cyc, "info"))
+    odo = stats.get("odo_km")
+    if odo is not None:
+        out.append(_metric("Odometer", "%g km" % odo, "info", "lifetime distance"))
+    eff = stats.get("lifetime_wh_km")
+    if eff is not None:
+        out.append(_metric("Lifetime efficiency", "%g Wh/km" % eff, "info",
+                           "lifetime-average energy use"))
 
     mot_t = stats.get("max_motor_temp_c")
     if mot_t is not None:
@@ -130,6 +146,11 @@ def health_snapshot(session, temp_units="C"):
                            "highest EVER recorded, not the current temperature; "
                            "charge tapers ~%s, operation stop ~%s"
                            % (_rng(43, 50), _rng(50, 60))))
+    ctrl_t = stats.get("max_ctrl_temp_c")
+    if ctrl_t is not None:
+        st = "ok" if ctrl_t < 70 else ("watch" if ctrl_t < 90 else "alert")
+        out.append(_metric("Max controller temp (lifetime)", _t(ctrl_t), st,
+                           "Sevcon controller — highest ever recorded"))
 
     # F5: isolation resistance — healthy is megohms (>1000 kΩ). A low reading on
     # the charger is a documented false-positive, so soften the flag when the

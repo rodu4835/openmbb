@@ -103,7 +103,7 @@ CONNECT
 
 READ
   Click any command button for a one-off read. To advance, click the blue
-  ★ Pull full database button: it runs the quick reads + the full settings dump
+  Pull full database button: it runs the quick reads + the full settings dump
   (your backup) + the small error log — NO heavy dumps. Individual reads do NOT
   unlock the writes flow — only Pull full database does, so a backup exists
   before any change. The heavy log reads (eventlogdump / dumpall) sit behind
@@ -127,15 +127,18 @@ WRITES
 
 ANALYZE (always available, no bike needed)
   Reads a saved session folder (or the current one) and interprets it:
-    - Health : SOC vs voltage, cell balance, capacity, temps, cycles, and the
-               effective gearing ratio, each flagged ok / watch / alert.
+    - Health : SOC vs voltage, cell balance/spread, capacity, temps, cycles,
+               odometer, efficiency and the effective gearing ratio, each flagged
+               ok / watch / alert.
     - Rides  : per-ride distance, SOC%/km, and temps from a ride log you load
                (.txt) — rev 41 doesn't stream ride telemetry as console text, so
                use a decoded zero-log-parser export.
+    - Charts : plot the ride-log time series, or a 'Trend:' metric (capacity,
+               cycles, temps) across your saved pulls over time.
     - Compare: pick 2+ sessions to see settings changes and capacity / gearing
                trends over time (battery degradation tracking).
-    - Gearing: enter new front/rear teeth to get the ratio and the exact
-               spfront/sprear/rwhcirc values to write.
+
+The re-gear GEARING CALCULATOR lives in Tools → Gearing calculator.
 
 TIP: File → "Open session folder" jumps to where everything is saved.
 """
@@ -248,6 +251,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._build_login_tab()
             self._build_write_tab()
             self._build_analyze_tab()
+            self._build_console_tab()
             self._apply_gates()
             self._refresh_save_label()
             self._build_landing()      # T1: guided front door over the notebook
@@ -326,28 +330,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Label(inner, text=blurb, style="Subtitle.TLabel",
                       justify="center").pack(pady=(18, 28))
 
+            # two entry actions only (owner): Analyze a saved session (no bike), or
+            # Connect (verifies the link + connects). Instructions live in Help.
             brow = ttk.Frame(inner)
             brow.pack()
-            ttk.Button(brow, text="Test your cable", width=22,
-                       command=self._show_cable_wizard
+            ttk.Button(brow, text="Analyze", width=20,
+                       command=self._open_recent_session
                        ).pack(side="left", padx=10, ipady=8)
-            ttk.Button(brow, text=CONNECT_LABEL, width=22,
+            ttk.Button(brow, text="Connect", width=20,
                        style=self.sty["accent"],
                        command=self._landing_connect
                        ).pack(side="left", padx=10, ipady=8)
-
-            cap = ttk.Frame(inner)
-            cap.pack(pady=(10, 0))
-            ttk.Label(cap, text="check the link is healthy first", width=26,
-                      anchor="center", style="Muted.TLabel").pack(side="left", padx=10)
-            ttk.Label(cap, text="connect + probe, then read when ready", width=26,
-                      anchor="center", style="Muted.TLabel").pack(side="left", padx=10)
-
-            # third lane: no bike needed — review a saved session in Analyze
-            ttk.Button(inner, text="Analyze a past session…   (no bike needed)",
-                       command=self._open_recent_session).pack(pady=(22, 0))
-            ttk.Button(inner, text="What is this?  —  Instructions",
-                       command=self._show_instructions).pack(pady=(10, 0))
 
             foot = ttk.Frame(lf)
             foot.place(relx=0.5, rely=0.9, anchor="center")
@@ -864,6 +857,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _tools_menu(self):
             return [
                 ("cmd", "Bike info…", self._show_bike_info),
+                ("cmd", "Gearing calculator…", self._show_gearing_calc),
                 ("submenu", "COM port:  %s" % self._current_port_label(),
                  self._com_port_menu),
                 ("sep",),
@@ -1360,7 +1354,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     s = None
             if not self._session_has_data(s):
                 messagebox.showinfo(APP_NAME, "No session data to report yet — run "
-                    "★ Pull full database (or load a session on the Analyze tab) first.")
+                    "Pull full database (or load a session on the Analyze tab) first.")
                 return
             path = filedialog.asksaveasfilename(
                 title="Save health report", defaultextension=".txt",
@@ -1402,9 +1396,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     lines.append("  %-18s : %s" % (k, v))
             elif not self.connected:
                 lines.append("Not connected. Connect on the Connect tab, then run")
-                lines.append("★ Pull full database for model / serial / gearing details.")
+                lines.append("Pull full database for model / serial / gearing details.")
             else:
-                lines.append("Connected, but no data pulled yet — click ★ Pull full")
+                lines.append("Connected, but no data pulled yet — click Pull full")
                 lines.append("database on the Read tab for model / gearing / serials.")
             lines += ["", "Login level :", "  %s" % ("logged in"
                       if self.logged_in else "not logged in")]
@@ -1507,13 +1501,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if idx == 3:
                 if not self.connected:
                     return ("The Writes tab opens once you're connected, logged in, and "
-                            "have run ★ Pull full database (a backup must exist before "
+                            "have run Pull full database (a backup must exist before "
                             "any write).")
                 need = []
                 if not self.logged_in:
                     need.append("log in on the Login tab")
                 if not self.baseline_done:
-                    need.append("run ★ Pull full database on the Read tab (saves a backup)")
+                    need.append("run Pull full database on the Read tab (saves a backup)")
                 return "The Writes tab opens once you " + " and ".join(need) + "."
             return "That tab isn't available yet — finish the earlier stage first."
 
@@ -1656,7 +1650,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._select_tab("Writes")
                 return
             if not self.baseline_done:
-                steps = "run ★ Pull full database (saves a backup)"
+                steps = "run Pull full database (saves a backup)"
                 if not self.logged_in:
                     steps += ", then log you in"
                 if not messagebox.askokcancel(
@@ -1720,6 +1714,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_out.see("end")
             self.txt_out.config(state="disabled")
 
+        def _console_out(self, text):
+            self.txt_console.config(state="normal")
+            self.txt_console.insert("end", text + "\n")
+            self.txt_console.see("end")
+            self.txt_console.config(state="disabled")
+
         # -- Phase 0: Connect --------------------------------------------------
         def _build_connect_tab(self):
             f = self._new_tab(" Connect ", "Connect to your bike",
@@ -1760,16 +1760,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 justify="left", padding=(0, 10), foreground=P["warn"])
             self.connect_help.pack(anchor="w")
 
-            # success banner shown by _connect's done() instead of auto-jumping to
-            # Read (owner: let the user confirm + click through). Hidden until then.
+            # success banner shown by _connect's done() (no button — the tabs are
+            # right there). Hidden until connected; replaces the pre-connect controls.
             self.connect_success = ttk.Frame(f)
             self.lbl_connect_success = ttk.Label(self.connect_success, text="",
                                                  style="Good.TLabel")
             self.lbl_connect_success.pack(side="left")
-            self.btn_continue_read = ttk.Button(
-                self.connect_success, text="Continue to read data  →",
-                style=self.sty["accent"], command=self._continue_to_read)
-            self.btn_continue_read.pack(side="left", padx=12)
 
             self.txt_probe = self._console_text(f, 16)
             self.txt_probe.pack(fill="both", expand=True)
@@ -1789,9 +1785,6 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # restore the pre-connect controls (order: port row, then the blurb)
             self.connect_row.pack(fill="x", before=self.txt_probe)
             self.connect_help.pack(anchor="w", before=self.txt_probe)
-
-        def _continue_to_read(self):
-            self.nb.select(1)      # the Read tab
 
         def _refresh_ports(self):
             real_ports = list_serial_ports()
@@ -1965,8 +1958,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 # owner: don't auto-jump to Read — confirm success here and let the
                 # user click through.
                 where = "SIMULATOR" if self.sim_var.get() else self.port_var.get()
-                self._probe_log("\nConnected. Click 'Continue to read data' (or the "
-                                "Read tab) to pull the bike's data.")
+                self._probe_log("\nConnected — the link is live and read-only. Open "
+                                "the Read tab to pull the bike's data.")
                 self._show_connect_success(
                     "✓  Connected to %s — the link is live and read-only." % where)
 
@@ -2024,14 +2017,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             rcanvas = tk.Canvas(rightwrap, highlightthickness=0, bg=rbg, width=300)
             rvsb = ttk.Scrollbar(rightwrap, orient="vertical", command=rcanvas.yview)
             rcanvas.configure(yscrollcommand=rvsb.set)
-            rvsb.pack(side="right", fill="y")
-            rcanvas.pack(side="left", fill="both", expand=True)
+            rcanvas.pack(side="left", fill="both", expand=True)   # scrollbar packed on demand
             right = ttk.Frame(rcanvas)
             rwin = rcanvas.create_window((0, 0), window=right, anchor="nw")
-            right.bind("<Configure>",
-                       lambda e: rcanvas.configure(scrollregion=rcanvas.bbox("all")))
+
+            def _sync_scroll(_e=None):
+                rcanvas.configure(scrollregion=rcanvas.bbox("all"))
+                # show the scrollbar only when the content actually overflows (owner)
+                need = right.winfo_reqheight() > rcanvas.winfo_height() + 2
+                if need and not rvsb.winfo_ismapped():
+                    rvsb.pack(side="right", fill="y", before=rcanvas)
+                elif not need and rvsb.winfo_ismapped():
+                    rvsb.pack_forget()
+            right.bind("<Configure>", _sync_scroll)
             rcanvas.bind("<Configure>",
-                         lambda e: rcanvas.itemconfigure(rwin, width=e.width))
+                         lambda e: (rcanvas.itemconfigure(rwin, width=e.width),
+                                    _sync_scroll()))
 
             def _rwheel(e):
                 rcanvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
@@ -2039,7 +2040,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             rcanvas.bind("<MouseWheel>", _rwheel)
             right._owl_wheel = _rwheel
 
-            self.btn_baseline = ttk.Button(right, text="★ Pull full database",
+            self.btn_baseline = ttk.Button(right, text="Pull full database",
                                            style=self.sty["accent"],
                                            command=self._baseline)
             self.btn_baseline.pack(fill="x")
@@ -2092,30 +2093,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 hb.pack(fill="x", pady=2)
                 self._add_tooltip(hb, READ_TIPS.get(cmd, ""))
 
-            # LEFT: output + status, with a command line underneath — type a
-            # command, Enter sends + clears, ↑/↓ cycles through what you've typed.
+            # LEFT: just the output/status window (the raw command entry moved to
+            # the Console tab). Its top aligns with the right column's Pull button.
             left = ttk.Frame(body)
             left.pack(side="left", fill="both", expand=True)
-            ttk.Label(left, text="Output & status", style="Heading.TLabel").pack(anchor="w")
             self.txt_out = self._console_text(left, 20)
-            self.txt_out.pack(fill="both", expand=True, pady=(4, 6))
-
-            cmdrow = ttk.Frame(left)
-            cmdrow.pack(fill="x")
-            ttk.Label(cmdrow, text="›", foreground=P["green"],
-                      font=(self.sty["mono"], 13, "bold")).pack(side="left", padx=(2, 6))
-            self.raw_var = tk.StringVar()
-            self.ent_cmd = ttk.Entry(cmdrow, textvariable=self.raw_var,
-                                     font=(self.sty["mono"], 10))
-            self.ent_cmd.pack(side="left", fill="x", expand=True)
-            self.ent_cmd.bind("<Return>", lambda e: self._cmd_enter())
-            self.ent_cmd.bind("<Up>", lambda e: self._cmd_history_nav(-1))
-            self.ent_cmd.bind("<Down>", lambda e: self._cmd_history_nav(1))
-            ttk.Button(cmdrow, text="Send", command=self._cmd_enter).pack(
-                side="left", padx=(6, 0))
-            ttk.Label(left, text="type a command · Enter sends · ↑/↓ history · "
-                      "read-only intent, blocklist enforced",
-                      style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
+            self.txt_out.pack(fill="both", expand=True)
 
             # route wheel/two-finger scroll over the action column's buttons to
             # its canvas (they'd otherwise swallow the event)
@@ -2143,7 +2126,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             bits.append("logged in" if self.logged_in else "read-only")
             lbl.config(text="   ·   ".join(bits), style="Good.TLabel")
 
-        def _read_heavy(self, cmd, confirmed=False):
+        def _read_heavy(self, cmd, confirmed=False, out=None):
             # A2: a heavy log dump can make the BMS open the drivetrain contactor
             # (it starves the MBB's CAN servicing). Gate it behind an explicit
             # warning + confirm — never let it run casually or in the baseline.
@@ -2154,7 +2137,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     "flash; it recovers when the read finishes. The bike must be "
                     "SAFELY PARKED (never do this while riding).\n\nContinue?" % cmd):
                 return
-            self._read_cmd(cmd, idle_timeout=30.0, confirmed=confirmed)
+            self._read_cmd(cmd, idle_timeout=30.0, confirmed=confirmed, out=out)
 
         def _toggle_watch(self):
             # E1: start/stop the repeat-read timer.
@@ -2185,7 +2168,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 secs = 5
             self.after(secs * 1000, self._watch_tick)
 
-        def _read_cmd(self, cmd, quiet=False, idle_timeout=None, confirmed=False):
+        def _read_cmd(self, cmd, quiet=False, idle_timeout=None, confirmed=False,
+                      out=None):
+            emit = out or self._out          # button reads -> txt_out; Console -> its own
             # A1/SAFE-2: classify by the lowercased FIRST TOKEN (like the transport),
             # not an exact full-string match — so a raw-box variant such as
             # "eventlogdump 5" or "Eventlogdump" still gets dump-class timeouts
@@ -2208,12 +2193,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 out, path = result
                 self.lbl_prog.config(text="")
                 if not quiet:
-                    self._out("\n### %s  (saved: %s)\n%s" % (cmd, os.path.basename(path), out))
+                    emit("\n### %s  (saved: %s)\n%s" % (cmd, os.path.basename(path), out))
                     # C1: point first-timers at where the numbers get interpreted
                     # (once — don't nag on every read).
                     if not getattr(self, "_analyze_hint_shown", False):
-                        self._out("  → To interpret these (ok / watch / alert), open "
-                                  "the Analyze tab and click 'Use current session'.")
+                        emit("  → To interpret these (ok / watch / alert), open "
+                             "the Analyze tab and click 'Use current session'.")
                         self._analyze_hint_shown = True
                 if cmd == "set":
                     self._ingest_settings(out)
@@ -2240,8 +2225,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if not self._cmd_history or self._cmd_history[-1] != cmd:
                 self._cmd_history.append(cmd)
             self._cmd_hist_idx = len(self._cmd_history)
-            self._raw_send()             # reads raw_var synchronously
-            self.raw_var.set("")         # clear like a terminal
+            self._console_out("› " + cmd)          # echo the input like a terminal
+            self._raw_send(out=self._console_out)  # output -> the Console's console
+            self.raw_var.set("")                   # clear like a terminal
             return "break"
 
         def _cmd_history_nav(self, delta):
@@ -2258,9 +2244,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 pass
             return "break"
 
-        def _raw_send(self):
+        def _raw_send(self, out=None):
             cmd = self.raw_var.get().strip()
             if not cmd:
+                return
+            if not self.connected:
+                messagebox.showinfo(APP_NAME, "Connect to your bike first — the "
+                                    "console sends live commands over the cable.")
                 return
             toks = cmd.split()
             head = toks[0].lower() if toks else ""
@@ -2285,9 +2275,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # A HEAVY log dump gets the contactor warning + long idle timeout; it is
             # not blocklisted, so it takes the normal (confirmed=False) path here.
             if head in HEAVY_COMMANDS:
-                self._read_heavy(cmd, confirmed=confirmed)
+                self._read_heavy(cmd, confirmed=confirmed, out=out)
                 return
-            self._read_cmd(cmd, confirmed=confirmed)
+            self._read_cmd(cmd, confirmed=confirmed, out=out)
 
         def _load_cmd_ref(self):
             """Lazy-load assets/command_reference.json, keyed for confirm lookups."""
@@ -2477,6 +2467,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     missing.append("set(parsed)")
                 if not missing:
                     self.baseline_done = True
+                    self._trend_cache = None      # a new pull -> refresh trend charts
                     self._apply_gates()
                     # confirmation right under the Pull button (owner)
                     self.lbl_prog.config(text="✓ Full database pulled & backed up",
@@ -2491,7 +2482,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                          foreground=P["danger"])
                     self._out("\n[!] DATABASE PULL INCOMPLETE — essential reads missing/"
                               "unparsed: %s. No backup was saved, so Writes stays "
-                              "LOCKED; fix the link and re-run ★ Pull full database."
+                              "LOCKED; fix the link and re-run Pull full database."
                               % ", ".join(missing))
                 if then:                 # continue a chained flow (e.g. -> Writes)
                     then(self.baseline_done)
@@ -3015,6 +3006,41 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             name, old, new = self.journal_entries[sel[0]]
             self._stage_revert(name, old)
 
+        # -- Console tab (raw commands — doesn't fit the phased flow) ---------
+        def _build_console_tab(self):
+            f = self._new_tab(" Console ", "Developer console",
+                              "advanced — send any console command to the bike")
+            warn = ttk.Frame(f)
+            warn.pack(fill="x", pady=(0, 8))
+            ttk.Label(warn, text="⚠  This sends RAW commands to your bike. Reads are "
+                      "safe; destructive commands are NOT hard-blocked but require a "
+                      "typed 'confirm'. Know what a command does before you send it.",
+                      foreground=P["warn"], wraplength=860, justify="left").pack(
+                          side="left", fill="x", expand=True)
+            ttk.Button(warn, text="Command reference",
+                       command=self._show_command_reference).pack(side="right",
+                                                                  padx=(8, 0))
+
+            self.txt_console = self._console_text(f, 22)
+            self.txt_console.pack(fill="both", expand=True, pady=(0, 6))
+
+            cmdrow = ttk.Frame(f)
+            cmdrow.pack(fill="x")
+            ttk.Label(cmdrow, text="›", foreground=P["green"],
+                      font=(self.sty["mono"], 13, "bold")).pack(side="left", padx=(2, 6))
+            self.raw_var = tk.StringVar()
+            self.ent_cmd = ttk.Entry(cmdrow, textvariable=self.raw_var,
+                                     font=(self.sty["mono"], 10))
+            self.ent_cmd.pack(side="left", fill="x", expand=True)
+            self.ent_cmd.bind("<Return>", lambda e: self._cmd_enter())
+            self.ent_cmd.bind("<Up>", lambda e: self._cmd_history_nav(-1))
+            self.ent_cmd.bind("<Down>", lambda e: self._cmd_history_nav(1))
+            ttk.Button(cmdrow, text="Send", command=self._cmd_enter).pack(
+                side="left", padx=(6, 0))
+            ttk.Label(f, text="type a command · Enter sends · ↑/↓ history · dangerous "
+                      "commands need a typed 'confirm'", style="Muted.TLabel").pack(
+                          anchor="w", pady=(2, 0))
+
         # -- Analyze tab (Health / Rides / Compare / Gearing) ----------------
         def _build_analyze_tab(self):
             f = self._new_tab(" Analyze ", "Analyze the data",
@@ -3101,13 +3127,29 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_compare = self._console_text(cf, 16)
             self.txt_compare.pack(fill="both", expand=True, pady=(8, 0))
 
-            # Gearing
-            gf = ttk.Frame(sub, padding=8)
-            sub.add(gf, text=" Gearing ")
-            grow = ttk.Frame(gf)
+            # (Gearing is a calculator, not data analysis — it lives in
+            # Tools -> Gearing calculator now.)
+
+        def _show_gearing_calc(self):
+            """A re-gear planning calculator (Tools menu): enter new front/rear teeth
+            to get the ratio + the spfront/sprear/rwhcirc values to write."""
+            from . import dialogs
+            surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
+            win = tk.Toplevel(self)
+            win.title("%s — Gearing calculator" % APP_NAME)
+            win.geometry("620x500")
+            win.configure(bg=surface)
+            win.transient(self)
+            outer = ttk.Frame(win, padding=(16, 14))
+            outer.pack(fill="both", expand=True)
+            ttk.Label(outer, text="Gearing calculator",
+                      style="Heading.TLabel").pack(anchor="w")
+            ttk.Label(outer, text="Enter new front/rear teeth to get the ratio and the "
+                      "exact spfront/sprear/rwhcirc values to write.",
+                      style="Muted.TLabel", wraplength=580).pack(anchor="w", pady=(0, 10))
+            grow = ttk.Frame(outer)
             grow.pack(fill="x")
-            # B5: default to FX/FXS factory gearing (20/90), not any one owner's
-            # re-gear — this is a generic calculator, seed it with stock.
+            # B5: default to FX/FXS factory gearing (20/90) — a generic calculator.
             self.gear_front = tk.StringVar(value="20")
             self.gear_rear = tk.StringVar(value="90")
             self.gear_circ = tk.StringVar(value=str(gearing_mod.DEFAULT_CIRC_MM))
@@ -3115,18 +3157,24 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                   ("Rear teeth", self.gear_rear, 6),
                                   ("Wheel circ mm", self.gear_circ, 8)):
                 ttk.Label(grow, text=label + ":").pack(side="left", padx=(0, 2))
-                ttk.Entry(grow, textvariable=var, width=w).pack(side="left", padx=(0, 10))
+                ent = ttk.Entry(grow, textvariable=var, width=w)
+                ent.pack(side="left", padx=(0, 10))
+                ent.bind("<Return>", lambda e: self._gearing_compute())
             ttk.Button(grow, text="Compute", style=self.sty["accent"],
                        command=self._gearing_compute).pack(side="left")
-            self.txt_gearing = self._console_text(gf, 12)
-            self.txt_gearing.pack(fill="both", expand=True, pady=(8, 4))
-            grow2 = ttk.Frame(gf)
-            grow2.pack(fill="x")
-            ttk.Button(grow2, text="Copy spfront/sprear/rwhcirc",
+            self.txt_gearing = self._console_text(outer, 12)
+            self.txt_gearing.pack(fill="both", expand=True, pady=(10, 8))
+            brow = ttk.Frame(outer)
+            brow.pack(fill="x")
+            ttk.Button(brow, text="Copy spfront/sprear/rwhcirc",
                        command=self._gearing_copy).pack(side="left")
-            ttk.Button(grow2, text="Set up writes  →",
+            ttk.Button(brow, text="Set up writes  →",
                        command=self._start_writes_flow).pack(side="left", padx=6)
-            self._gearing_compute()   # populate with the default 22/88 plan
+            ttk.Button(brow, text="Close", command=win.destroy).pack(side="right")
+            dialogs._dark_titlebar(win)
+            dialogs._center(win, self)
+            self._gearing_compute()      # populate with the default plan
+            return win
 
         def _session_has_data(self, s):
             if not s:
@@ -3286,9 +3334,24 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     r["max_rpm"] if r["max_rpm"] is not None else "n/a"))
 
         # -- Analyze: Charts (dependency-free tk.Canvas plots) ---------------
+        # ride-log time series + cross-session trends (one point per saved pull).
         _CHART_METRICS = ("SOC vs distance", "Pack voltage vs distance",
                           "Temperatures vs distance", "Motor current vs distance",
-                          "SOC vs pack voltage", "Efficiency per ride (bar)")
+                          "SOC vs pack voltage", "Efficiency per ride (bar)",
+                          "Trend: pack capacity", "Trend: charge cycles",
+                          "Trend: max battery temp", "Trend: max motor temp")
+
+        # cross-session trends: label -> (extract(bms, stats), y-label, is_temp)
+        _SESSION_TRENDS = {
+            "Trend: pack capacity": (lambda b, s: b.get("capacity_ah"),
+                                     "pack capacity (Ah)", False),
+            "Trend: charge cycles": (lambda b, s: b.get("cycles"),
+                                     "charge cycles", False),
+            "Trend: max battery temp": (lambda b, s: s.get("max_batt_temp_c"),
+                                        "max battery temp", True),
+            "Trend: max motor temp": (lambda b, s: s.get("max_motor_temp_c"),
+                                      "max motor temp", True),
+        }
 
         def _build_charts_tab(self, sub):
             self._ride_records = []
@@ -3304,7 +3367,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.cbo_chart.pack(side="left", padx=6)
             self.cbo_chart.bind("<<ComboboxSelected>>",
                                 lambda e: self._render_charts())
-            ttk.Label(row, text="from the loaded ride log (Rides tab)",
+            ttk.Label(row, text="ride-log series, or 'Trend:' across your saved pulls",
                       style="Muted.TLabel").pack(side="left", padx=8)
             self.chart_canvas = tk.Canvas(cf, highlightthickness=0,
                                           bg=P["console"], height=380)
@@ -3335,13 +3398,58 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                            justify="center", width=max(240, w - 80),
                            font=(self.sty["ui"], 10))
 
+        def _load_trend_sessions(self):
+            """Saved sessions (oldest->newest) parsed to (name, bms, stats), cached
+            so a chart resize doesn't re-read the folders each frame. Invalidated
+            when a new pull is saved (see _baseline / _reset_session_state)."""
+            cached = getattr(self, "_trend_cache", None)
+            if cached is not None:
+                return cached
+            out = []
+            try:
+                root, names = self._recent_sessions(limit=60)
+                for name in reversed(names):     # oldest first
+                    try:
+                        s = sessions.load_session(os.path.join(root, name))
+                        out.append((name, parsers.parse_bms(s.cmd("bms")),
+                                    parsers.parse_stats(s.cmd("stats"))))
+                    except Exception:
+                        pass
+            except Exception:
+                out = []
+            self._trend_cache = out
+            return out
+
+        def _render_session_trend(self, cv, metric):
+            extract, ylabel, is_temp = self._SESSION_TRENDS[metric]
+            tu = config.get_temp_units()
+            pts = []
+            for i, (_name, bms, stats) in enumerate(self._load_trend_sessions()):
+                v = extract(bms, stats)
+                if isinstance(v, (int, float)):
+                    if is_temp and tu == "F":
+                        v = round(v * 9 / 5 + 32)
+                    pts.append((i, v))
+            if not pts:
+                self._chart_msg(cv, "No saved sessions with this metric yet.\n\nPull "
+                                "full database on several visits to build a trend "
+                                "over time.")
+                return
+            if is_temp:
+                ylabel = "%s (°%s)" % (ylabel, tu)
+            self._chart_line(cv, [(metric.replace("Trend: ", ""), P["green"], pts)],
+                             "saved session (oldest → newest)", ylabel, dots=True)
+
         def _render_charts(self):
             cv = getattr(self, "chart_canvas", None)
             if cv is None:
                 return
             cv.delete("all")
-            recs = getattr(self, "_ride_records", [])
             metric = self.chart_metric.get()
+            if metric in self._SESSION_TRENDS:      # cross-session trend (no ride log)
+                self._render_session_trend(cv, metric)
+                return
+            recs = getattr(self, "_ride_records", [])
             unit = config.get_units()
             dfac = 0.621371 if unit == "mi" else 1.0
             dlabel = "distance (%s)" % ("mi" if unit == "mi" else "km")

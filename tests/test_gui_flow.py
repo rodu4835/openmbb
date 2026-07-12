@@ -162,23 +162,24 @@ def test_analyze_tab(app):
     # rev-41 has no console ride telemetry -> Rides tab guides to 'Load ride log'
     assert "load ride log" in app.lbl_ride_totals.cget("text").lower()
 
-    # gearing calculator
+    # gearing calculator (now a Tools -> Gearing calculator dialog)
+    gwin = app._show_gearing_calc()
     app.gear_front.set("22")
     app.gear_rear.set("88")
     app._gearing_compute()
     gtext = app.txt_gearing.get("1.0", "end")
     assert "4.00" in gtext and "spfront = 22" in gtext
+    # bad gearing input is rejected gracefully, not crashed
+    app.gear_circ.set("0")
+    app._gearing_compute()
+    assert "positive" in app.txt_gearing.get("1.0", "end").lower()
+    gwin.destroy()
 
     # compare de-dupes the same session (adding current twice keeps one)
     app._compare_add_current()
     app._compare_add_current()
     app.update()
     assert len(app.compare_list) == 1
-
-    # bad gearing input is rejected gracefully, not crashed
-    app.gear_circ.set("0")
-    app._gearing_compute()
-    assert "positive" in app.txt_gearing.get("1.0", "end").lower()
     assert not app._errors
 
 
@@ -291,19 +292,18 @@ def test_bike_about_merged_two_tab_window(app):
     assert not app._errors
 
 
-def test_connect_shows_continue_banner_not_autojump(app):
-    # owner: connect no longer auto-jumps to Read — it reveals a success banner
-    # with a "Continue to read data" button that navigates only when clicked.
+def test_connect_shows_banner_not_autojump(app):
+    # owner: connect no longer auto-jumps to Read — it reveals a "Connected"
+    # confirmation (no button) and the pre-connect controls collapse away.
     app._connect()
     assert _pump(app, lambda: app.connected)
     assert app.connect_success.winfo_manager() == "pack"       # banner is shown
     assert "Connected" in app.lbl_connect_success.cget("text")
+    assert not hasattr(app, "btn_continue_read")               # button removed
     # the now-pointless pre-connect controls are hidden once connected
     assert app.connect_row.winfo_manager() == ""
     assert app.connect_help.winfo_manager() == ""
-    assert app.nb.index(app.nb.select()) == 0                  # still on Connect
-    app._continue_to_read()
-    assert app.nb.index(app.nb.select()) == 1                  # now on Read
+    assert app.nb.index(app.nb.select()) == 0                  # still on Connect (no jump)
 
 
 def test_analyze_charts_render_every_metric(app):
@@ -369,8 +369,9 @@ def test_landing_is_front_door(app):
             walk(c)
 
     walk(app.landing)
-    assert "Test your cable" in labels
-    assert any("Connect" in t for t in labels)
+    assert "Connect" in labels                        # the two entry actions
+    assert "Analyze" in labels
+    assert not any("instructions" in t.lower() for t in labels)   # moved to Help
 
     # the simulator toggle lives on the landing (owner couldn't find it in a menu)
     checks = []
@@ -543,7 +544,7 @@ def test_home_connect_button_returns_to_live_session(app):
 def test_landing_offers_offline_analyze(app):
     # P3: the Home screen has a no-bike lane into Analyze (a past session).
     labels = _all_label_text(app.landing)
-    assert any("analyze a past session" in t.lower() for t in labels)
+    assert any(t.strip().lower() == "analyze" for t in labels)
 
 
 def test_read_command_line_clears_and_history(app):
@@ -559,6 +560,37 @@ def test_read_command_line_clears_and_history(app):
     assert app.raw_var.get() == "status"
     app._cmd_history_nav(1)                         # ↓ past the end clears
     assert app.raw_var.get() == ""
+
+
+def test_console_tab_routes_output_and_guards_connection(app, monkeypatch):
+    # the raw command line lives on the Console tab now; output goes to ITS console
+    # (not the Read output), and it refuses to send when not connected.
+    from openmbb import dialogs as mb
+    infos = []
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: infos.append(a))
+    assert hasattr(app, "txt_console") and hasattr(app, "raw_var")
+    app.raw_var.set("status")
+    app._cmd_enter()                                   # not connected -> guarded
+    assert infos and "Connect" in str(infos[0])
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app.raw_var.set("status")
+    app._cmd_enter()
+    assert _pump(app, lambda: "### status" in app.txt_console.get("1.0", "end"))
+    assert "### status" not in app.txt_out.get("1.0", "end")   # not on the Read output
+
+
+def test_gearing_calculator_is_in_tools(app):
+    # gearing is a calculator, not analysis — it moved to Tools -> Gearing calculator.
+    import tkinter as tk
+    assert any(s[0] == "cmd" and "gearing" in s[1].lower() for s in app._tools_menu())
+    w = app._show_gearing_calc()
+    assert isinstance(w, tk.Toplevel)
+    app.gear_front.set("22")
+    app.gear_rear.set("88")
+    app._gearing_compute()
+    assert "4.00" in app.txt_gearing.get("1.0", "end")
+    w.destroy()
 
 
 def test_dangerous_command_needs_typed_confirm(app, monkeypatch):
