@@ -1029,6 +1029,79 @@ def test_connect_hides_controls_then_restores_on_failure(app, monkeypatch):
     assert app.connect_busy.winfo_manager() == ""
 
 
+def test_baseline_heavy_optin_includes_eventlog(app, monkeypatch):
+    # owner: an opt-in checkbox folds the heavy event log into Pull full database
+    # (informed-consent confirm — askokcancel is True in the fixture).
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    sent = []
+    real = app.transport.exec_command
+    monkeypatch.setattr(app.transport, "exec_command",
+                        lambda cmd, *a, **k: (sent.append(cmd), real(cmd, *a, **k))[1])
+    app.baseline_heavy_var.set(True)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    assert "eventlogdump" in sent                       # heavy dump was included
+
+
+def test_baseline_without_heavy_notes_not_captured(app):
+    # a pull WITHOUT the opt-in tells the user the heavy log wasn't captured (so
+    # nobody assumes the ride history is in there)
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app.baseline_heavy_var.set(False)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    out = app.txt_out.get("1.0", "end").lower()
+    assert "not captured" in out and "eventlogdump" in out
+
+
+def test_baseline_marks_commands_green(app):
+    # each command's status-border cell turns green (ok) once captured in a pull
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app.update()
+    green = app._cell_color("ok")
+    assert any(str(cell.cget("bg")) == green for cell in app.cmd_cells.values())
+
+
+def test_watch_flash_pulses_cell(app):
+    # Watch pulses its command cell blue each time it fires a read
+    app._flash_watch()
+    assert str(app.watch_cell.cget("bg")) == "#5aa8ff"
+
+
+def test_chart_range_filters_by_window(app):
+    # the Charts 'Range' selector windows the trend points (newest-relative)
+    import datetime as dt
+    now = dt.datetime.now().timestamp()
+    pts = [(now - 400 * 86400, 1), (now - 100 * 86400, 2), (now - 10 * 86400, 3)]
+    app.chart_range.set("All")
+    assert len(app._apply_chart_range(pts)) == 3
+    app.chart_range.set("Last 30 days")
+    assert app._apply_chart_range(pts) == [(now - 10 * 86400, 3)]
+    app.chart_range.set("Last 6 mo")
+    assert len(app._apply_chart_range(pts)) == 2
+
+
+def test_sim_trend_synthesizes_year_labeled(app):
+    # in simulator mode a trend chart with too few real pulls synthesizes ~a year
+    # of history so the user sees the shape — clearly labelled SIMULATED.
+    app.sim_var.set(True)
+    pts = app._sim_trend_points("Trend: charge cycles", False, "C")
+    assert len(pts) >= 20
+    assert pts[-1][0] - pts[0][0] > 300 * 86400            # spans ~a year
+    assert pts[-1][1] >= pts[0][1]                          # cycles grow toward newest
+    app.chart_metric.set("Trend: charge cycles")
+    app._render_charts()
+    app.update()
+    cv = app.chart_canvas
+    texts = [cv.itemcget(i, "text") for i in cv.find_all() if cv.type(i) == "text"]
+    assert any("SIMULATED" in t for t in texts)
+
+
 def test_read_points_to_analyze_once(app):
     # C1: the first read prints a one-time pointer to Analyze (don't nag every read).
     app._connect()

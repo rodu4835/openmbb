@@ -1501,10 +1501,53 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 "normal" if (self.connected and self.logged_in and self.baseline_done)
                 else "disabled",                                   # Writes (needs backup)
             ]
+            prev = getattr(self, "_tab_states", None)
             for i, st in enumerate(states):
                 self.nb.tab(i, state=st)
+            # guide the eye: flash a tab's header the moment it becomes available
+            # (disabled -> normal), e.g. Read/Login on connect, Writes on login+backup.
+            if prev is not None:
+                for i, st in enumerate(states):
+                    if st == "normal" and i < len(prev) and prev[i] == "disabled":
+                        self._flash_tab(i)
+            self._tab_states = states
             self._refresh_dash_header()      # the single status line (conn/rev/login)
             self._refresh_action_buttons()   # T3: gate the action bar on connect/busy
+
+        def _tab_at(self, x, y):
+            try:
+                return self.nb.index("@%d,%d" % (x, y))
+            except Exception:
+                return -1
+
+        def _flash_tab(self, idx):
+            """One accent-blue pulse along a tab header, to draw the eye when that tab
+            just unlocked. Cosmetic + best-effort: locates the header by scanning the
+            tab strip (ttk gives no per-tab bbox), no-ops if it can't (e.g. headless)."""
+            nb = self.nb
+            try:
+                nb.update_idletasks()
+                y = 8
+                xs = [x for x in range(0, max(1, nb.winfo_width()), 4)
+                      if self._tab_at(x, y) == idx]
+                if not xs:
+                    return
+                x0, x1 = min(xs), max(xs) + 4
+                bar = tk.Frame(nb, bg="#5aa8ff", height=3)
+                bar.place(x=x0, y=0, width=x1 - x0, height=3)
+
+                def step(n):
+                    if not bar.winfo_exists():
+                        return
+                    if n <= 0:
+                        bar.destroy()
+                        return
+                    bar.config(bg="#5aa8ff" if bar.cget("bg") != "#5aa8ff"
+                               else P["console"])
+                    self.after(150, lambda: step(n - 1))
+                step(4)
+            except Exception:
+                pass
 
         def _tab_unlock_hint(self, idx):
             # C7: plain-language "here's how to unlock this stage" for a locked tab.
@@ -2107,6 +2150,21 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._add_tooltip(self.btn_baseline,
                               "Reads everything at once (health, settings, errors, "
                               "gearing) and saves a backup — the smart first move.")
+            # opt-in: also pull the heavy event log as part of the database pull. OFF
+            # by default (it's minutes-long and can click the contactor open); when a
+            # pull runs WITHOUT it, the output says so, so nobody thinks it was captured.
+            self.baseline_heavy_var = tk.BooleanVar(value=False)
+            cbh = ttk.Checkbutton(
+                right, text="＋ also pull the full event log (heavy)",
+                variable=self.baseline_heavy_var, style=self.sty["toggle"])
+            cbh.pack(anchor="w", pady=(6, 0))
+            self._add_tooltip(cbh, "Includes eventlogdump in the pull — the full ride/"
+                              "event history that feeds the Rides + Charts tabs. Heavy "
+                              "(minutes) and can briefly click the drivetrain contactor "
+                              "open; keep the bike safely parked.")
+            # the colour a command 'cell' border shows at rest (matches the panel, so
+            # it's invisible until a pull turns it blue=running / green=done / red=fail)
+            self._cell_bg = ttk.Style().lookup("TFrame", "background") or P["bg"]
             # no caption (owner): the progress bar shows only DURING a pull, and the
             # progress label is empty (invisible) when idle, so Commands sits right
             # under the button.
@@ -2121,11 +2179,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             quick.pack(fill="x", pady=(2, 0))
             quick.columnconfigure(0, weight=1)
             quick.columnconfigure(1, weight=1)
+            # each command button sits in a thin tk.Frame whose bg is its status
+            # 'border' — a pull lights it blue (running) then green (captured) so you
+            # can see the database fill in, per command. cmd_cells maps command->frame.
+            self.cmd_cells, self.cmd_btns = {}, {}
             for i, cmd in enumerate(READ_COMMANDS + DUMP_COMMANDS):
-                b = ttk.Button(quick, text=cmd, width=12,
+                cell = tk.Frame(quick, bg=self._cell_bg)
+                cell.grid(row=i // 2, column=i % 2, padx=2, pady=2, sticky="ew")
+                b = ttk.Button(cell, text=cmd, width=12,
                                command=lambda c=cmd: self._read_cmd(c))
-                b.grid(row=i // 2, column=i % 2, padx=2, pady=2, sticky="ew")
+                b.pack(fill="x", padx=2, pady=2)
                 self._add_tooltip(b, READ_TIPS.get(cmd, ""))
+                self.cmd_cells[cmd], self.cmd_btns[cmd] = cell, b
 
             # E1: live "Watch" — repeat one light read on a timer (reads only, so
             # it stays fully inside the safety model). Great for a charge session.
@@ -2135,9 +2200,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Checkbutton(wrow, text="Watch", variable=self.watch_var,
                             command=self._toggle_watch).pack(side="left")
             self.watch_cmd = tk.StringVar(value="status")
-            ttk.Combobox(wrow, textvariable=self.watch_cmd, width=8, state="readonly",
+            # the watch command sits in a status-border cell too, so it pulses blue
+            # each time the timer fires a read (the same blue a running command shows).
+            self.watch_cell = tk.Frame(wrow, bg=self._cell_bg)
+            self.watch_cell.pack(side="left", padx=4)
+            ttk.Combobox(self.watch_cell, textvariable=self.watch_cmd, width=8,
+                         state="readonly",
                          values=["status", "bms", "inputs", "sevcon", "dash",
-                                 "chargers"]).pack(side="left", padx=4)
+                                 "chargers"]).pack(padx=2, pady=2)
             self.watch_secs = tk.StringVar(value="5")
             ttk.Combobox(wrow, textvariable=self.watch_secs, width=3, state="readonly",
                          values=["3", "5", "10", "30"]).pack(side="left")
@@ -2148,10 +2218,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Label(right, text="⚠ Heavy — may open the contactor",
                       foreground=P["warn"], wraplength=280).pack(anchor="w")
             for cmd in HEAVY_COMMANDS:
-                hb = ttk.Button(right, text=cmd,
+                cell = tk.Frame(right, bg=self._cell_bg)   # status border, like above
+                cell.pack(fill="x", pady=2)
+                hb = ttk.Button(cell, text=cmd,
                                 command=lambda c=cmd: self._read_heavy(c))
-                hb.pack(fill="x", pady=2)
+                hb.pack(fill="x", padx=2, pady=2)
                 self._add_tooltip(hb, READ_TIPS.get(cmd, ""))
+                self.cmd_cells[cmd], self.cmd_btns[cmd] = cell, hb
 
             # LEFT: just the output/status window (the raw command entry moved to
             # the Console tab). Its top aligns with the right column's Pull button.
@@ -2222,6 +2295,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._out("=== WATCH stopped (disconnected) ===")
                 return
             if not self._busy:                   # skip a tick if a read is in flight
+                self._flash_watch()              # pulse the dropdown blue on each send
                 self._read_cmd(self.watch_cmd.get())
             try:
                 secs = max(2, int(self.watch_secs.get()))
@@ -2467,21 +2541,74 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                  "Command reference (see the repo for the full page).",
                                  "reference")
 
+        # -- per-command status borders + watch pulse (blue=running, green=done) ----
+        def _cell_color(self, state):
+            return {"run": "#5aa8ff", "ok": P["green"], "bad": P["danger"],
+                    "idle": self._cell_bg}.get(state, self._cell_bg)
+
+        def _baseline_mark(self, cmd, state):
+            """Colour a command's status-border cell (no-op for commands without a
+            button, e.g. `set`). Called on the main thread via _cbq."""
+            cell = getattr(self, "cmd_cells", {}).get(cmd)
+            if cell is not None:
+                try:
+                    cell.config(bg=self._cell_color(state))
+                except Exception:
+                    pass
+
+        def _baseline_reset_marks(self):
+            for cell in getattr(self, "cmd_cells", {}).values():
+                try:
+                    cell.config(bg=self._cell_bg)
+                except Exception:
+                    pass
+
+        def _flash_watch(self, ms=260):
+            """Pulse the Watch command cell blue for `ms`, then back to rest — a
+            visible 'a read just went out' cue timed to the watch frequency."""
+            cell = getattr(self, "watch_cell", None)
+            if cell is None:
+                return
+            try:
+                cell.config(bg="#5aa8ff")
+                self.after(ms, lambda: cell.winfo_exists()
+                           and cell.config(bg=self._cell_bg))
+            except Exception:
+                pass
+
         def _baseline(self, then=None):
             # D4: run `obd` LAST — after `set` (the backup) and errorlogdump —
             # because its output has never been captured live; if it stalls or
             # returns nothing, the settings backup is already safely on disk first.
             reads = [c for c in READ_COMMANDS if c != "obd"]
             seq = reads + ["set"] + DUMP_COMMANDS + (["obd"] if "obd" in READ_COMMANDS else [])
+            # opt-in: fold the heavy event log into the pull (informed-consent confirm
+            # once, up front — it carries the contactor risk). If they decline, the
+            # pull runs without it and the completion note says it wasn't captured.
+            include_heavy = bool(self.baseline_heavy_var.get())
+            if include_heavy:
+                if messagebox.askokcancel(APP_NAME,
+                        "You asked to also pull the full event log (eventlogdump) as "
+                        "part of this database pull.\n\nIt's ~1 MB and takes several "
+                        "minutes at 38400 baud, and on a keyed-on bike the BMS may "
+                        "briefly OPEN the drivetrain contactor (click + dash flash; it "
+                        "recovers when the read finishes). Keep the bike SAFELY "
+                        "PARKED.\n\nInclude it?"):
+                    seq = seq + ["eventlogdump"]
+                else:
+                    include_heavy = False
+                    self.baseline_heavy_var.set(False)
 
             def job():
                 results, errors = {}, {}
                 for i, cmd in enumerate(seq):
-                    # B3: progress bar + label AND a live play-by-play line
+                    # B3: progress bar + label AND a live play-by-play line; plus the
+                    # per-command status border turns blue while this one runs.
                     self._cbq.put(lambda c=cmd, i=i: (
                         self.lbl_prog.config(text="pulling: %s (%d/%d)"
                                              % (c, i + 1, len(seq))),
                         self.prg.config(maximum=len(seq), value=i),
+                        self._baseline_mark(c, "run"),
                         self._out("  [%d/%d] reading %s…" % (i + 1, len(seq), c))))
                     is_dump = cmd in LONG_COMMANDS
                     prog = None
@@ -2495,6 +2622,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             cmd, idle_timeout=15.0 if is_dump else 2.5,
                             max_time=900.0 if is_dump else 60.0, progress_cb=prog)
                         results[cmd] = out
+                        self._cbq.put(lambda c=cmd: self._baseline_mark(c, "ok"))
                         # persist the settings baseline the MOMENT `set` returns —
                         # before the long dumps, so a later hiccup can't lose it
                         if cmd == "set" and out.strip():
@@ -2507,10 +2635,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         raise
                     except Exception as e:
                         errors[cmd] = str(e)
-                return results, errors
+                        self._cbq.put(lambda c=cmd: self._baseline_mark(c, "bad"))
+                return results, errors, include_heavy
 
             def done(result):
-                results, errors = result
+                results, errors, heavy_included = result
                 self.prg.config(value=0)
                 self.prg.pack_forget()          # progress bar only shows during a pull
                 # C7: record power-state context (on-charger contaminates iso/SOC)
@@ -2540,6 +2669,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         self._out("(%d command(s) failed; retry them with the read "
                                   "buttons: %s)" % (len(errors), ", ".join(errors)))
                     self._out("→ Backup saved. Review it on the Analyze tab.")
+                    if not heavy_included:
+                        self._out("  Note: the full event log (eventlogdump) + dumpall "
+                                  "were NOT captured — they're heavy (minutes, and can "
+                                  "click the contactor open). Tick '＋ also pull the "
+                                  "full event log' above and re-pull, or use Analyze → "
+                                  "Rides → 'Pull ride log from bike', to include it.")
                 else:
                     self.lbl_prog.config(text="database pull incomplete",
                                          foreground=P["danger"])
@@ -2551,6 +2686,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     then(self.baseline_done)
 
             self.lbl_prog.config(text="", foreground=P["dim"])          # reset from a prior run
+            self._baseline_reset_marks()          # clear last pull's status borders
             self.prg.pack(fill="x", pady=(4, 2), before=self.lbl_prog)  # show progress
             self._run_bg(job, done)
 
@@ -3553,7 +3689,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.cbo_chart.pack(side="left", padx=6)
             self.cbo_chart.bind("<<ComboboxSelected>>",
                                 lambda e: self._render_charts())
-            ttk.Label(row, text="ride-log series, or 'Trend:' across your saved pulls",
+            # date-range / zoom for the 'Trend:' charts (across saved pulls); default
+            # 'All' = the lifetime of every pull in your sessions folder.
+            ttk.Label(row, text="Range:").pack(side="left", padx=(12, 0))
+            self.chart_range = tk.StringVar(value="All")
+            self.cbo_range = ttk.Combobox(row, textvariable=self.chart_range,
+                                          state="readonly", width=12,
+                                          values=list(self._CHART_RANGES))
+            self.cbo_range.pack(side="left", padx=6)
+            self.cbo_range.bind("<<ComboboxSelected>>",
+                                lambda e: self._render_charts())
+            ttk.Label(row, text="ride-log series, or a 'Trend:' across your saved pulls",
                       style="Muted.TLabel").pack(side="left", padx=8)
             self.chart_canvas = tk.Canvas(cf, highlightthickness=0,
                                           bg=P["console"], height=380)
@@ -3609,6 +3755,59 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._trend_cache = out
             return out
 
+        # date-range windows for the Trend charts (relative to the newest pull, so a
+        # short window never renders empty just because you haven't pulled today)
+        _CHART_RANGES = {"All": None, "Last 12 mo": 365, "Last 6 mo": 182,
+                         "Last 3 mo": 91, "Last 30 days": 30}
+
+        def _apply_chart_range(self, pts):
+            """Filter (time, value) points to the selected date window (newest-point
+            relative). 'All' keeps everything."""
+            rng = self.chart_range.get() if hasattr(self, "chart_range") else "All"
+            days = self._CHART_RANGES.get(rng)
+            if not days or not pts:
+                return pts
+            ref = max(t for t, _ in pts)
+            cutoff = ref - days * 86400
+            return [(t, v) for t, v in pts if t >= cutoff]
+
+        def _sim_trend_points(self, metric, is_temp, tu):
+            """Simulator only: synthesize a year-long trend (≈26 pulls) so the chart
+            demonstrates what a real history looks like. Anchored on the sim's own
+            current reading where available; clearly labelled SIMULATED on the chart."""
+            import math
+            extract = self._SESSION_TRENDS[metric][0]
+            anchor = None
+            trend = self._load_trend_sessions()
+            if trend:
+                v = extract(trend[-1][2], trend[-1][3])
+                if isinstance(v, (int, float)):
+                    anchor = float(v) * (9 / 5) + 32 if (is_temp and tu == "F") else float(v)
+            if anchor is None:
+                anchor = {"Trend: pack capacity": 100.0, "Trend: charge cycles": 60.0,
+                          "Trend: max battery temp": 34.0 if tu != "F" else 93.0,
+                          "Trend: max motor temp": 55.0 if tu != "F" else 131.0
+                          }.get(metric, 50.0)
+            now = _dt.datetime.now().timestamp()
+            span, n = 365 * 86400, 26
+            pts = []
+            for i in range(n):
+                t = now - span + span * i / (n - 1)
+                back = n - 1 - i                       # steps back from the newest
+                if metric == "Trend: charge cycles":
+                    val = max(0.0, anchor - back * 4)   # cycles grow toward newest
+                elif metric == "Trend: pack capacity":
+                    val = anchor + back * 0.15          # gentle decline toward newest
+                else:                                   # temps: wobble around anchor
+                    val = anchor + math.sin(i * 1.1) * (5 if (is_temp and tu == "F") else 3)
+                pts.append((t, round(val, 2)))
+            return pts
+
+        def _chart_note(self, cv, text):
+            w, _h = self._chart_size(cv)
+            cv.create_text(w - 22, 22, text=text, fill=P["dim"], anchor="ne",
+                           font=(self.sty["ui"], 8))
+
         def _render_session_trend(self, cv, metric):
             extract, ylabel, is_temp = self._SESSION_TRENDS[metric]
             tu = config.get_temp_units()
@@ -3619,10 +3818,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     if is_temp and tu == "F":
                         v = round(v * 9 / 5 + 32)
                     pts.append((mt, v))          # x = capture time (a real timeline)
+            # simulator: too few REAL pulls to show a trend -> synthesize a year so the
+            # user can see the shape (labelled SIMULATED, never mixed with real data).
+            synthetic = False
+            if len(pts) < 2 and self.sim_var.get():
+                pts = self._sim_trend_points(metric, is_temp, tu)
+                synthetic = True
+            pts = self._apply_chart_range(pts)
             if not pts:
-                self._chart_msg(cv, "No saved sessions with this metric yet.\n\nPull "
-                                "full database on several visits to build a trend "
-                                "over time.")
+                self._chart_msg(cv, "No saved sessions with this metric in this range."
+                                "\n\nPull full database on several visits to build a "
+                                "trend over time, or widen the Range.")
                 return
             if is_temp:
                 ylabel = "%s (°%s)" % (ylabel, tu)
@@ -3634,6 +3840,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     return ""
             self._chart_line(cv, [(metric.replace("Trend: ", ""), P["green"], pts)],
                              "date", ylabel, dots=True, xfmt=_datefmt)
+            note = "%d pull%s · %s" % (len(pts), "" if len(pts) == 1 else "s",
+                                       self.chart_range.get())
+            self._chart_note(cv, ("SIMULATED · " + note) if synthetic else note)
 
         def _render_charts(self):
             cv = getattr(self, "chart_canvas", None)
