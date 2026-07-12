@@ -3956,6 +3956,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if cv is None:
                 return
             cv.delete("all")
+            # invalidate the drag-zoom transform on EVERY render — only a successful
+            # _chart_line draw re-stashes it. This means an empty/no-data render (incl.
+            # zooming into an empty band, or switching metric/range) leaves _chart_xform
+            # None, so a follow-up drag is a safe no-op instead of inverting pixels with
+            # a stale transform from the previous chart. (review v0.18: critical + major)
+            self._chart_xform = None
             metric = self.chart_metric.get()
             if metric in self._SESSION_TRENDS:      # cross-session trend (no ride log)
                 self._render_session_trend(cv, metric)

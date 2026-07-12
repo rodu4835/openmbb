@@ -1204,6 +1204,32 @@ def test_chart_drag_sets_xzoom_and_double_click_resets(app):
     assert app._chart_xzoom is None
 
 
+def test_chart_xform_cleared_on_empty_render_so_stale_drag_is_noop(app):
+    # v0.18 review (critical/major): every render invalidates _chart_xform; only a
+    # successful draw re-stashes it. So zooming into an empty band (or switching to a
+    # no-data metric) leaves it None, and a follow-up drag can't invert pixels with a
+    # stale transform from the previous chart.
+    app._ride_records = [{"odo_km": 100.0, "soc": 90.0},
+                         {"odo_km": 110.0, "soc": 80.0}]
+    app.chart_metric.set("SOC vs distance")
+    app._chart_xzoom = None
+    app._render_charts()
+    app.update()
+    assert app._chart_xform is not None            # a normal render stashes it
+    app._chart_xzoom = (500.0, 600.0)              # zoom to an empty band (no points)
+    app._render_charts()
+    app.update()
+    assert app._chart_xform is None                # cleared -> a follow-up drag no-ops
+    app._chart_drag = 100
+
+    class E:
+        pass
+    rel = E()
+    rel.x = 300
+    app._chart_release(rel)
+    assert app._chart_xzoom == (500.0, 600.0)      # release bailed (no stale zoom)
+
+
 def test_chart_tiny_drag_is_a_click_not_a_zoom(app):
     # a drag under 8 px is a click — it must NOT set a zoom
     app._chart_xform = (0.0, 100.0, 60, 460)

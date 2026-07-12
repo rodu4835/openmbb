@@ -346,7 +346,13 @@ class Transport:
             # "counting noise / the last few entries" from a real mid-stream cut.
             promised, got = (eventlog_completeness(result)
                              if head == "eventlogdump" else (None, 0))
-            if promised is not None and got >= promised - max(3, promised // 200):
+            # tolerance: forgive the last few entries (~0.5%, floor 3 for counting
+            # noise) BUT never call a mostly-missing log "captured" — the 90% gate
+            # stops the floor from swallowing a genuinely short SMALL log (review
+            # v0.18: promised//200 is 0 under 200, so the floor alone was too loose).
+            if (promised is not None
+                    and got >= promised - max(3, promised // 200)
+                    and got >= promised * 0.9):
                 result += ("\n### NOTE: event log captured (%d of %d entries) — the "
                            "console prompt wasn't seen at the end, so the link will "
                            "resync on the next command; the ride/health data is "
