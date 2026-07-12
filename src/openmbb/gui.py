@@ -59,7 +59,9 @@ READ_TIPS = {
     "errorlogdump": "The small error log (~1 KB, safe).",
     "eventlogdump": "The FULL event log (~1 MB, minutes) — can briefly OPEN the "
                     "drivetrain contactor. Park the bike first.",
-    "dumpall": "Everything incl. logs (~1 MB, minutes) — same contactor caveat.",
+    "dumpall": "Everything incl. logs (~1 MB, minutes) — same contactor caveat. "
+               "Rarely needed: a full pull with the '＋ event log' opt-in already "
+               "captures the same data (stats/inputs/settings + the event log).",
 }
 
 
@@ -2167,7 +2169,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._add_tooltip(cbh, "Includes eventlogdump in the pull — the full ride/"
                               "event history that feeds the Rides + Charts tabs. Heavy "
                               "(minutes) and can briefly click the drivetrain contactor "
-                              "open; keep the bike safely parked.")
+                              "open; keep the bike safely parked. (dumpall is NOT added "
+                              "— it just repeats data the pull + event log already "
+                              "capture, for double the contactor exposure.)")
             # the colour a command 'cell' border shows at rest (matches the panel, so
             # it's invisible until a pull turns it blue=running / green=done / red=fail)
             self._cell_bg = ttk.Style().lookup("TFrame", "background") or P["bg"]

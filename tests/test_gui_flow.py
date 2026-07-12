@@ -1142,6 +1142,14 @@ def test_trend_note_says_real_pulls(app, monkeypatch):
     assert not any("SIMULATED" in t for t in texts)
 
 
+def test_dumpall_tip_explains_it_is_redundant(app):
+    # v0.18 C decision: dumpall is NOT folded into the pull (it repeats what the
+    # pull + event-log opt-in already capture) — the tip says so instead.
+    from openmbb.gui import READ_TIPS
+    tip = READ_TIPS["dumpall"].lower()
+    assert "rarely needed" in tip and "event log" in tip
+
+
 def test_read_points_to_analyze_once(app):
     # C1: the first read prints a one-time pointer to Analyze (don't nag every read).
     app._connect()
