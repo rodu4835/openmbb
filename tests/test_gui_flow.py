@@ -1325,15 +1325,36 @@ def test_post_login_baseline_saved(app):
 
 
 def test_rides_no_console_telemetry_guides_to_load(app):
-    # A1: a session with no decoded ride records guides the user to Load ride log
-    # (rev-41 has no console ride-telemetry command)
+    # a session with no event-log riding entries guides the user to pull it from the
+    # bike or load a file (no records to show)
     import tempfile
     from openmbb import sessions
     app.analyze_session = sessions.Session(
         tempfile.mkdtemp(), {"dumplogs": "packed binary junk, no riding lines here"}, "")
     app._render_rides()
     app.update()
-    assert "load ride log" in app.lbl_ride_totals.cget("text").lower()
+    low = app.lbl_ride_totals.cget("text").lower()
+    assert "pull ride log" in low and "load ride log" in low
+
+
+def test_rides_parses_session_eventlogdump(app):
+    # owner: ride telemetry comes straight off the bike via the console's
+    # eventlogdump (decoded text) — no Zero app, no .bin, no external decoder. The
+    # Rides tab parses the session's OWN event log, matching the real rev-41 format.
+    from openmbb import sessions
+    log = (
+        " 00489   05/28/2026 11:57:59   Riding   PackTemp: h 29C, l 27C, "
+        "PackSOC:100%, Vpack:113.941V, MotAmps: 251, BattAmps: 46, MotTemp: 29C, "
+        "CtrlTemp: 22C, MotRPM: 497, Odo: 5369km\n"
+        " 00490   05/28/2026 11:58:59   Riding   PackTemp: h 30C, l 27C, "
+        "PackSOC: 98%, Vpack:109.560V, MotAmps: 258, BattAmps: 122, MotTemp: 37C, "
+        "CtrlTemp: 25C, MotRPM:1569, Odo: 5370km\n")
+    app.analyze_session = sessions.Session("x", {"eventlogdump": log}, "")
+    app._render_rides()
+    app.update()
+    assert len(app._ride_records) == 2                 # both riding samples parsed
+    assert app.ride_tree.get_children()                # rendered as rows
+    assert "event log" in app.lbl_ride_totals.cget("text").lower()  # sourced from it
 
 
 def test_write_mismatch_offers_revert(app, monkeypatch):

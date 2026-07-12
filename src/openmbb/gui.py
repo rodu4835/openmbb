@@ -2186,7 +2186,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             bits.append("logged in" if self.logged_in else "read-only")
             lbl.config(text="   ·   ".join(bits), style="Good.TLabel")
 
-        def _read_heavy(self, cmd, confirmed=False, out=None):
+        def _read_heavy(self, cmd, confirmed=False, out=None, then=None):
             # A2: a heavy log dump can make the BMS open the drivetrain contactor
             # (it starves the MBB's CAN servicing). Gate it behind an explicit
             # warning + confirm — never let it run casually or in the baseline.
@@ -2197,7 +2197,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     "flash; it recovers when the read finishes. The bike must be "
                     "SAFELY PARKED (never do this while riding).\n\nContinue?" % cmd):
                 return
-            self._read_cmd(cmd, idle_timeout=30.0, confirmed=confirmed, out=out)
+            self._read_cmd(cmd, idle_timeout=30.0, confirmed=confirmed, out=out,
+                           then=then)
 
         def _toggle_watch(self):
             # E1: start/stop the repeat-read timer.
@@ -2229,7 +2230,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.after(secs * 1000, self._watch_tick)
 
         def _read_cmd(self, cmd, quiet=False, idle_timeout=None, confirmed=False,
-                      out=None):
+                      out=None, then=None):
             emit = out or self._out          # button reads -> txt_out; Console -> its own
             # A1/SAFE-2: classify by the lowercased FIRST TOKEN (like the transport),
             # not an exact full-string match — so a raw-box variant such as
@@ -2273,6 +2274,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     if hasattr(self, "unlock_var"):
                         self.unlock_var.set(False)
                     self._apply_gates()
+                if then:                     # e.g. re-render Rides after a log pull
+                    then()
 
             self._run_bg(job, done)
 
@@ -3254,22 +3257,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             sub.add(rf, text=" Rides ")
             rbtns = ttk.Frame(rf)
             rbtns.pack(fill="x")
+            ttk.Button(rbtns, text="Pull ride log from bike  →",
+                       style=self.sty["accent"],
+                       command=self._pull_ride_log).pack(side="left")
             ttk.Button(rbtns, text="Load ride log (.txt)…",
-                       command=self._load_ride_log).pack(side="left")
-            ttk.Button(rbtns, text="Get zero-log-parser",
-                       command=lambda: self._open_url(
-                           "https://github.com/zero-motorcycle-community/zero-log-parser")
-                       ).pack(side="left", padx=8)
+                       command=self._load_ride_log).pack(side="left", padx=8)
             self.lbl_ride_totals = ttk.Label(
-                rf, text="Ride telemetry does NOT come from a normal pull — rev 41 "
-                "doesn't stream it as console text. To use this tab:\n"
-                "  1. export your bike's raw log (a heavy dump, or pulled off the "
-                "bike's storage),\n"
-                "  2. run the community zero-log-parser tool on it (button above) to "
-                "get a DECODED .txt,\n"
-                "  3. click 'Load ride log (.txt)…' and pick that file.\n"
-                "Then you'll see per-ride distance, SOC%/km and temps here, and the "
-                "ride-log charts on the Charts tab.",
+                rf, text="Ride telemetry comes straight off the bike — no Zero app, no "
+                ".bin files, no external decoder. 'Pull ride log from bike' runs the "
+                "console's eventlogdump (the full event log). It's a heavy read (a few "
+                "minutes) and can briefly click the drivetrain contactor open, so keep "
+                "the bike SAFELY PARKED. Then you'll see per-ride distance, SOC%/km and "
+                "temps here, and the ride charts on the Charts tab. (Already have a "
+                "decoded log file? Use 'Load ride log (.txt)…'.)",
                 foreground=P["dim"], wraplength=920, justify="left")
             self.lbl_ride_totals.pack(anchor="w", pady=(6, 0))
             rcols = ("start", "km", "soc", "socpkm", "ptemp", "mtemp", "rpm")
@@ -3458,21 +3458,35 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             return note
 
         def _render_rides(self):
-            # A1: rev-41 has no console command that streams ride telemetry as text
-            # (`dumplogs` doesn't exist). Ride analysis is sourced from an external
-            # zero-log-parser export via 'Load ride log (.txt)'. Old sessions that
-            # DID capture a `dumplogs` file still render for backward compatibility.
+            # The ride telemetry IS available straight off the bike over serial: the
+            # console's `eventlogdump` prints the full event log as decoded text,
+            # including per-sample "Riding" entries (SOC / Vpack / pack+motor temp /
+            # MotRPM / Odo). We parse that directly — no Zero app, no .bin files, and
+            # no external decoder needed. (Legacy `dumplogs` captures + externally
+            # loaded .txt exports still render, for back-compat.)
             self.ride_tree.delete(*self.ride_tree.get_children())
-            legacy = self.analyze_session.cmd("dumplogs") if self.analyze_session else ""
-            recs = parsers.parse_ride_log(legacy)
+            s = self.analyze_session
+            text, source = "", ""
+            if s:
+                text = s.cmd("eventlogdump") or ""
+                if text.strip():
+                    source = "session event log"
+                else:
+                    text = s.cmd("dumplogs") or ""
+                    source = "session dumplogs (legacy)" if text.strip() else ""
+            recs = parsers.parse_ride_log(text)
             if recs:
-                self._render_ride_records(recs, "session dumplogs (legacy capture)")
+                self._render_ride_records(recs, source)
                 return
             self._ride_records = []
             self._render_charts()
             self.lbl_ride_totals.config(
-                text="Ride telemetry isn't a console command on this firmware — use "
-                     "'Load ride log (.txt)' above to analyze a zero-log-parser export.")
+                text="No ride telemetry in this session yet. Connect to the bike and "
+                     "click 'Pull ride log from bike →' (runs the console's "
+                     "eventlogdump — the full event log; takes a few minutes and may "
+                     "briefly click the drivetrain contactor open, so the bike must be "
+                     "safely parked). No Zero app or external decoder needed. You can "
+                     "also 'Load ride log (.txt)…' to open a log file you already have.")
 
         def _render_ride_records(self, recs, source):
             self.ride_tree.delete(*self.ride_tree.get_children())
@@ -3771,9 +3785,37 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             cv.create_text(12, (y0 + y1) / 2, text=ylabel, fill=fg, angle=90,
                            font=(self.sty["ui"], 9))
 
+        def _pull_ride_log(self):
+            """Pull the ride telemetry straight off the bike: run the console's
+            eventlogdump (decoded text, incl. per-sample Riding entries), then reload
+            the session and re-render Rides/Charts. No Zero app / .bin / decoder."""
+            if not self.connected:
+                messagebox.showinfo(APP_NAME, "Connect to the bike first (Connect "
+                    "tab), then Pull ride log. It runs the console's eventlogdump — "
+                    "the full event log — which is where the per-ride telemetry lives. "
+                    "No bike? Use 'Load ride log (.txt)…' to open a log you already "
+                    "have, or turn on Simulator mode to see the layout.")
+                return
+            if self._busy:
+                messagebox.showinfo(APP_NAME, "Busy — wait for the current read to "
+                                    "finish, then Pull ride log.")
+                return
+            # routes through the heavy-read contactor warning + long idle timeout,
+            # then re-renders this tab from the freshly-saved event log.
+            self._read_heavy("eventlogdump", then=self._rides_after_pull)
+
+        def _rides_after_pull(self):
+            if not self.logger:
+                return
+            try:
+                self._analyze_set(sessions.load_session(self.logger.dir))
+            except Exception as e:
+                messagebox.showerror(APP_NAME, "Pulled the log but couldn't reload "
+                                     "the session:\n%s" % e)
+
         def _load_ride_log(self):
             path = filedialog.askopenfilename(
-                title="Load a zero-log-parser decoded ride log (.txt)",
+                title="Load a decoded ride log (.txt)",
                 filetypes=[("Text log", "*.txt"), ("All files", "*.*")])
             if not path:
                 return
