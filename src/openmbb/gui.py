@@ -69,7 +69,7 @@ READ_TIPS = {
 
 def baseline_read_order():
     """The command order a Pull full database runs (excluding the heavy event log):
-    the quick reads, then `set` (the settings backup), the small error log, and
+    the command reads, then `set` (the settings backup), the small error log, and
     `obd` LAST — obd's live output is unproven, so a stall can't delay the backup.
     The Read tab's command buttons are laid out in THIS SAME order, so the green
     'captured' borders fill in row by row (left→right, top→bottom) as the pull runs
@@ -130,7 +130,7 @@ CONNECT
 
 READ
   Click any command button for a one-off read. To advance, click the blue
-  Pull full database button: it runs the quick reads + the full settings dump
+  Pull full database button: it runs the command reads + the full settings dump
   (your backup) + the small error log — NO heavy dumps. Individual reads do NOT
   unlock the writes flow — only Pull full database does, so a backup exists
   before any change. The heavy log reads (eventlogdump / dumpall) sit behind
@@ -139,31 +139,34 @@ READ
   recovers when the read finishes). They are NOT part of the routine pull.
 
 LOGIN
-  Explicit. "Try known passwords" attempts the community-known ones in order;
-  or type a specific password and "Try this password" (it is masked in the logs
-  and never saved to disk). Both failing is fine — the tool stays read-only.
-  Success unlocks Writes. A password is masked in the logs and never written to
-  disk unless YOU say yes when it offers to remember it after a successful login
+  Explicit and READ-ONLY — it only reveals the tunable settings. The box is
+  pre-filled with the last password that worked (or a community-known one); press
+  Login, or type a different one. A failed attempt just leaves you read-only;
+  success unlocks Writes. Passwords are masked in the logs and never written to
+  disk unless YOU say yes when it offers to remember one after a successful login
   (clear saved ones via Tools → Settings → Login) — nothing to hand-edit.
 
 WRITES
   Triple-gated: logged in + the master UNLOCK WRITES switch + a per-write
   confirm dialog. Only whitelisted settings that actually exist on your bike
-  appear. Each write re-reads the current value, backs up all settings, sends
-  the change, reads it back to verify, and journals it (with a Revert button).
+  appear. Click a row's New value cell to type a value, then click Write. Each
+  write re-reads the current value, backs up all settings, sends the change,
+  reads it back to verify, and journals it to disk. Changed a setting? Its row
+  shows ↺ Reset to restore the value from your last full read.
 
 ANALYZE (always available, no bike needed)
   Reads a saved session folder (or the current one) and interprets it:
     - Health : SOC vs voltage, cell balance/spread, capacity, temps, cycles,
                odometer, efficiency and the effective gearing ratio, each flagged
                ok / watch / alert.
-    - Rides  : per-ride distance, SOC%/km, and temps from a ride log you load
-               (.txt) — rev 41 doesn't stream ride telemetry as console text, so
-               use a decoded zero-log-parser export.
-    - Charts : plot the ride-log time series, or a 'Trend:' metric (capacity,
-               cycles, temps) across your saved pulls over time.
-    - Compare: pick 2+ sessions to see settings changes and capacity / gearing
-               trends over time (battery degradation tracking).
+    - Rides  : per-ride distance, SOC%/km, and temps read STRAIGHT OFF THE BIKE —
+               'Pull ride log from bike' runs the console's eventlogdump (decoded
+               text). No Zero app, no external decoder. Or load a saved .txt.
+    - Charts : plot the ride-log series, or a 'Trend:' metric (pack capacity,
+               charge cycles, temps, effective gearing) across your real pulls
+               over time — pick a date Range, or drag to zoom (double-click resets).
+    - Compare: pick 2+ sessions to see exactly which settings changed; the
+               over-time trends live on the Charts tab.
 
 The re-gear GEARING CALCULATOR lives in Tools → Gearing calculator.
 
@@ -1531,8 +1534,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _apply_gates(self):
             # C1: Login is READ-ONLY (it only reveals the tunable settings), so it
-            # opens as soon as you're connected — no FULL BASELINE required. The one
-            # hard safety rule lives on WRITES: a settings backup (FULL BASELINE)
+            # opens as soon as you're connected — no full database pull required. The
+            # one hard safety rule lives on WRITES: a settings backup (a Pull full
+            # database)
             # AND a login must both exist before anything can be written.
             states = [
                 "normal",                                          # Connect

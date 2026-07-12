@@ -431,7 +431,7 @@ class SimPort:
         elif head == "errorlogdump":
             self._respond(SIM_ERRORLOG)
         elif head == "dumpall":
-            # a heavy dump: synthetic ride-log-shaped lines (zero-log-parser DECODED
+            # a heavy dump: synthetic ride-log-shaped lines (eventlogdump decoded
             # field keys: PackTemp h/l, MotTemp, PackSOC, MotRPM, Odo)
             big = "\n".join(
                 " %05d 05/%02d/2026 %02d:%02d:%02d Riding PackTemp: h %dC, l %dC, "

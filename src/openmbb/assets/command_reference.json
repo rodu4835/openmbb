@@ -81,7 +81,7 @@
     "category": "read",
     "danger": "safe",
     "one_liner": "Show OBD summary (protocol, DTCs).",
-    "what_it_does": "OBD summary: protocol, DTCs (READ_TIPS: 'Show all obd info'). Menu-verified at both login levels but its live OUTPUT has not been captured yet, so the full baseline runs it LAST; an empty reply is treated as possibly command-specific, not necessarily a sleeping console. It is a read only."
+    "what_it_does": "OBD summary: protocol, DTCs (READ_TIPS: 'Show all obd info'). Menu-verified at both login levels but its live OUTPUT has not been captured yet, so a full database pull runs it LAST; an empty reply is treated as possibly command-specific, not necessarily a sleeping console. It is a read only."
   },
   {
     "name": "eeprom",
@@ -95,7 +95,7 @@
     "category": "read",
     "danger": "safe",
     "one_liner": "Dump the small error log (~1 KB, safe).",
-    "what_it_does": "Reads the error log (READ_TIPS: 'The small error log (~1 KB, safe).'). This is the only dump-class command safe to auto-run in the full baseline. Note: 'dumplogs' does NOT exist on rev 41 (bike replies 'invalid command'); errorlogdump is the real small-log read."
+    "what_it_does": "Reads the error log (READ_TIPS: 'The small error log (~1 KB, safe).'). This is the only dump-class command safe to auto-run in a full database pull. Note: 'dumplogs' does NOT exist on rev 41 (bike replies 'invalid command'); errorlogdump is the real small-log read."
   },
   {
     "name": "eventlogdump",

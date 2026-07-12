@@ -1610,17 +1610,20 @@ def test_connect_guidance_is_cable_agnostic(app):
 
 
 def test_instructions_text_matches_current_baseline_behavior():
-    # C1 (review REL-2/FID-2): the F1 instructions must not claim FULL BASELINE
-    # captures the ~1 MB log dump (Tier A moved the heavy dumps out of the baseline
-    # behind a contactor-warning confirm), and Rides no longer come from a console
-    # "log dump" on rev 41.
+    # the F1 instructions must reflect the CURRENT app: Pull full database excludes
+    # heavy dumps; Rides come STRAIGHT OFF THE BIKE via eventlogdump (not the rejected
+    # zero-log-parser); Login is a single 'Login' button; writes revert via ↺ Reset.
     from openmbb.gui import INSTRUCTIONS_TEXT
     low = INSTRUCTIONS_TEXT.lower()
     assert "and the ~1 mb log dump" not in low     # the stale baseline claim is gone
-    assert "no heavy dumps" in low                 # baseline explicitly excludes them
+    assert "no heavy dumps" in low                 # the pull explicitly excludes them
     assert "eventlogdump" in low and "contactor" in low   # heavy reads are gated + warned
-    assert "parsed from the log dump" not in low   # stale Rides source
-    assert "ride log you load" in low              # correct Rides source
+    # retired vocabulary must be gone
+    for stale in ("zero-log-parser", "try this password", "try known passwords",
+                  "connect & probe", "revert button", "quick reads"):
+        assert stale not in low, "stale instruction term: %s" % stale
+    assert "pull ride log from bike" in low        # correct Rides source (off the bike)
+    assert "reset to restore" in low               # writes revert via inline ↺ Reset
 
 
 def test_safety_text_reflects_eeprom_read_and_new_blocks():
