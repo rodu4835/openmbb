@@ -1142,6 +1142,57 @@ def test_trend_note_says_real_pulls(app, monkeypatch):
     assert not any("SIMULATED" in t for t in texts)
 
 
+def test_chart_drag_sets_xzoom_and_double_click_resets(app):
+    # v0.18 D: dragging across the plot sets an x-window in DATA coords (via the
+    # transform _chart_line stashes); double-click clears it.
+    app._chart_xform = (0.0, 100.0, 60, 460)     # data 0..100 <-> px 60..460
+    app._chart_xzoom = None
+    app._chart_rubber = None
+
+    class E:
+        pass
+    app._chart_drag = 160                         # pressed at px 160 -> data 25
+    rel = E()
+    rel.x = 360                                   # released at px 360 -> data 75
+    app._chart_release(rel)
+    lo, hi = app._chart_xzoom
+    assert abs(lo - 25.0) < 0.01 and abs(hi - 75.0) < 0.01
+    app._chart_zoom_reset()
+    assert app._chart_xzoom is None
+
+
+def test_chart_tiny_drag_is_a_click_not_a_zoom(app):
+    # a drag under 8 px is a click — it must NOT set a zoom
+    app._chart_xform = (0.0, 100.0, 60, 460)
+    app._chart_xzoom = None
+    app._chart_rubber = None
+
+    class E:
+        pass
+    app._chart_drag = 200
+    rel = E()
+    rel.x = 204                                   # 4 px -> click
+    app._chart_release(rel)
+    assert app._chart_xzoom is None
+
+
+def test_chart_zoom_out_of_range_shows_reset_hint(app):
+    # zooming to an x-window with no points shows the reset hint (not a crash)
+    app._ride_records = [{"odo_km": 100.0, "soc": 90.0},
+                         {"odo_km": 110.0, "soc": 80.0},
+                         {"odo_km": 120.0, "soc": 70.0}]
+    app.chart_metric.set("SOC vs distance")
+    app._chart_xzoom = None
+    app._render_charts()
+    app.update()
+    app._chart_xzoom = (500.0, 600.0)             # distances here are only 0..20
+    app._render_charts()
+    app.update()
+    cv = app.chart_canvas
+    texts = [cv.itemcget(i, "text") for i in cv.find_all() if cv.type(i) == "text"]
+    assert any("zoomed range" in t.lower() for t in texts)
+
+
 def test_dumpall_tip_explains_it_is_redundant(app):
     # v0.18 C decision: dumpall is NOT folded into the pull (it repeats what the
     # pull + event-log opt-in already capture) — the tip says so instead.

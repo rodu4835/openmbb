@@ -3709,9 +3709,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                           values=list(self._CHART_METRICS))
             self.cbo_chart.pack(side="left", padx=6)
             self.cbo_chart.bind("<<ComboboxSelected>>",
-                                lambda e: self._render_charts())
-            # date-range / zoom for the 'Trend:' charts (across saved pulls); default
-            # 'All' = the lifetime of every pull in your sessions folder.
+                                lambda e: self._chart_reselect())
+            # date-range window for the 'Trend:' charts (across saved pulls); default
+            # 'All' = the lifetime of every real pull in your sessions folder. This is
+            # a coarse window; drag on the plot to zoom into any x-range (see below).
             ttk.Label(row, text="Range:").pack(side="left", padx=(12, 0))
             self.chart_range = tk.StringVar(value="All")
             self.cbo_range = ttk.Combobox(row, textvariable=self.chart_range,
@@ -3719,14 +3720,72 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                           values=list(self._CHART_RANGES))
             self.cbo_range.pack(side="left", padx=6)
             self.cbo_range.bind("<<ComboboxSelected>>",
-                                lambda e: self._render_charts())
-            ttk.Label(row, text="ride-log series, or a 'Trend:' across your saved pulls",
+                                lambda e: self._chart_reselect())
+            ttk.Label(row, text="drag to zoom · double-click to reset",
                       style="Muted.TLabel").pack(side="left", padx=8)
             self.chart_canvas = tk.Canvas(cf, highlightthickness=0,
                                           bg=P["console"], height=380)
             self.chart_canvas.pack(fill="both", expand=True, pady=(8, 0))
             # redraw responsively; debounce so a resize drag isn't a redraw storm
             self.chart_canvas.bind("<Configure>", self._chart_on_resize)
+            # drag-to-zoom the x-range (rubber band); double-click resets. _chart_line
+            # stashes the last render's x-transform so we can invert pixel -> data.
+            self._chart_xzoom = None       # (data_lo, data_hi) applied to every series
+            self._chart_xform = None       # (xlo, xhi, x0px, x1px) from last render
+            self._chart_drag = None        # press x (px) while a rubber band is active
+            self._chart_rubber = None      # the rubber-band canvas rect id
+            self.chart_canvas.bind("<ButtonPress-1>", self._chart_press)
+            self.chart_canvas.bind("<B1-Motion>", self._chart_drag_motion)
+            self.chart_canvas.bind("<ButtonRelease-1>", self._chart_release)
+            self.chart_canvas.bind("<Double-1>", self._chart_zoom_reset)
+
+        def _chart_reselect(self):
+            # switching metric or range starts fresh — drop any active drag-zoom
+            self._chart_xzoom = None
+            self._render_charts()
+
+        def _chart_press(self, e):
+            self._chart_drag = e.x
+            if self._chart_rubber is not None:
+                self.chart_canvas.delete(self._chart_rubber)
+                self._chart_rubber = None
+
+        def _chart_drag_motion(self, e):
+            if self._chart_drag is None:
+                return
+            cv = self.chart_canvas
+            if self._chart_rubber is not None:
+                cv.delete(self._chart_rubber)
+            h = self._chart_size(cv)[1]
+            self._chart_rubber = cv.create_rectangle(
+                self._chart_drag, 10, e.x, h - 30, outline="#5aa8ff", dash=(3, 2))
+
+        def _chart_release(self, e):
+            start, self._chart_drag = self._chart_drag, None
+            if self._chart_rubber is not None:
+                self.chart_canvas.delete(self._chart_rubber)
+                self._chart_rubber = None
+            if start is None or abs(e.x - start) < 8:
+                return                       # a click / tiny drag, not a zoom
+            xform = self._chart_xform
+            if not xform:
+                return
+            xlo, xhi, x0, x1 = xform
+            if x1 <= x0 or xhi <= xlo:
+                return
+
+            def to_data(px):
+                px = min(max(px, x0), x1)
+                return xlo + (px - x0) / (x1 - x0) * (xhi - xlo)
+            a, b = sorted((to_data(start), to_data(e.x)))
+            if b > a:
+                self._chart_xzoom = (a, b)
+                self._render_charts()
+
+        def _chart_zoom_reset(self, _e=None):
+            if self._chart_xzoom is not None:
+                self._chart_xzoom = None
+                self._render_charts()
 
         def _chart_on_resize(self, _evt=None):
             if getattr(self, "_chart_resize_job", None):
@@ -3934,11 +3993,21 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _chart_line(self, cv, series, xlabel, ylabel, dots=False, xfmt=None):
             xfmt = xfmt or self._fmt_tick        # x-tick label formatter (e.g. dates)
+            # drag-to-zoom: keep only points inside the selected x-window, then re-fit
+            # Y to what's visible. Filter BEFORE downsample so we don't thin first.
+            zoom = getattr(self, "_chart_xzoom", None)
+            if zoom:
+                lo, hi = zoom
+                series = [(lbl, col, [(x, y) for x, y in pts if lo <= x <= hi])
+                          for lbl, col, pts in series]
             series = [(lbl, col, charts_mod.downsample(pts))
                       for lbl, col, pts in series if pts]
             allpts = [p for _, _, pts in series for p in pts]
             if not allpts:
-                self._chart_msg(cv, "Not enough data to plot this metric.")
+                self._chart_msg(cv, "No data in the zoomed range." if zoom
+                                else "Not enough data to plot this metric.")
+                if zoom:
+                    self._chart_note(cv, "double-click to reset zoom")
                 return
             w, h = self._chart_size(cv)
             x0, y0, x1, y1 = 60, 16, w - 18, h - 42
@@ -3948,6 +4017,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ys = [p[1] for p in allpts]
             xlo, xhi, xstep = charts_mod.nice_bounds(min(xs), max(xs))
             ylo, yhi, ystep = charts_mod.nice_bounds(min(ys), max(ys))
+            # remember this render's x-transform so a drag can invert pixel -> data
+            self._chart_xform = (xlo, xhi, x0, x1)
 
             def sx(x):
                 return x0 + (x - xlo) / (xhi - xlo) * (x1 - x0)
@@ -3989,6 +4060,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     cv.create_text(lx + 22, ly, text=lbl, fill=fg, anchor="w",
                                    font=(self.sty["mono"], 8))
                     ly += 15
+            if zoom:
+                cv.create_text(x1, h - 8, text="zoomed · double-click to reset",
+                               fill=P["dim"], anchor="se", font=(self.sty["ui"], 8))
 
         def _chart_bar(self, cv, labels, values, ylabel):
             w, h = self._chart_size(cv)
