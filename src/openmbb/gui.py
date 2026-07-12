@@ -1527,14 +1527,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             nb = self.nb
             try:
                 nb.update_idletasks()
-                y = 8
+                # locate the tab header's x-range by scanning the strip at a y that
+                # lands inside the headers (ttk exposes no per-tab bbox)
                 xs = [x for x in range(0, max(1, nb.winfo_width()), 4)
-                      if self._tab_at(x, y) == idx]
+                      if self._tab_at(x, 10) == idx]
                 if not xs:
                     return
                 x0, x1 = min(xs), max(xs) + 4
+                # derive the header's BOTTOM edge by hit-testing down its centre, so
+                # the underline sits ON the tab across themes/DPI (no hardcoded y)
+                xc = (x0 + x1) // 2
+                ys = [y for y in range(0, 60, 2) if self._tab_at(xc, y) == idx]
+                y_bottom = max(0, (max(ys) if ys else 22) - 2)
                 bar = tk.Frame(nb, bg="#5aa8ff", height=3)
-                bar.place(x=x0, y=0, width=x1 - x0, height=3)
+                bar.place(x=x0, y=y_bottom, width=x1 - x0, height=3)
 
                 def step(n):
                     if not bar.winfo_exists():
@@ -2550,16 +2556,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             """Colour a command's status-border cell (no-op for commands without a
             button, e.g. `set`). Called on the main thread via _cbq."""
             cell = getattr(self, "cmd_cells", {}).get(cmd)
-            if cell is not None:
-                try:
+            if cell is None:
+                return
+            try:
+                if cell.winfo_exists():
                     cell.config(bg=self._cell_color(state))
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
         def _baseline_reset_marks(self):
             for cell in getattr(self, "cmd_cells", {}).values():
                 try:
-                    cell.config(bg=self._cell_bg)
+                    if cell.winfo_exists():
+                        cell.config(bg=self._cell_bg)
                 except Exception:
                     pass
 
@@ -2670,11 +2679,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                   "buttons: %s)" % (len(errors), ", ".join(errors)))
                     self._out("→ Backup saved. Review it on the Analyze tab.")
                     if not heavy_included:
-                        self._out("  Note: the full event log (eventlogdump) + dumpall "
-                                  "were NOT captured — they're heavy (minutes, and can "
-                                  "click the contactor open). Tick '＋ also pull the "
-                                  "full event log' above and re-pull, or use Analyze → "
-                                  "Rides → 'Pull ride log from bike', to include it.")
+                        self._out("  Note: the full event log (eventlogdump) was NOT "
+                                  "captured — it's heavy (minutes, and can click the "
+                                  "contactor open). Tick '＋ also pull the full event "
+                                  "log' above and re-pull, or use Analyze → Rides → "
+                                  "'Pull ride log from bike', to include it.")
                 else:
                     self.lbl_prog.config(text="database pull incomplete",
                                          foreground=P["danger"])
