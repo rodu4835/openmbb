@@ -1142,6 +1142,20 @@ def test_set_has_a_command_button(app):
     assert app.cmd_btns["set"].cget("text") == "set"
 
 
+def test_command_buttons_are_laid_out_in_pull_order(app):
+    # owner: the green 'captured' borders should fill row by row (r0c0, r0c1, r1c0,
+    # ...) — so the buttons must be gridded in the EXACT order Pull full database
+    # runs them (baseline_read_order: reads, set, error log, obd LAST).
+    from openmbb.gui import baseline_read_order
+    order = baseline_read_order()
+    assert order[-1] == "obd"                       # obd runs (and sits) last
+    assert order.index("set") < order.index("errorlogdump")
+    for i, cmd in enumerate(order):
+        assert cmd in app.cmd_cells                 # every pull step has a button
+        info = app.cmd_cells[cmd].grid_info()        # ...gridded row-major, in order
+        assert int(info["row"]) == i // 2 and int(info["column"]) == i % 2
+
+
 def test_tooltips_are_dark_themed(app):
     # owner: hover hints were the OS pale-yellow — restyle to the dark panel theme.
     import tkinter as tk

@@ -67,6 +67,17 @@ READ_TIPS = {
 }
 
 
+def baseline_read_order():
+    """The command order a Pull full database runs (excluding the heavy event log):
+    the quick reads, then `set` (the settings backup), the small error log, and
+    `obd` LAST — obd's live output is unproven, so a stall can't delay the backup.
+    The Read tab's command buttons are laid out in THIS SAME order, so the green
+    'captured' borders fill in row by row (left→right, top→bottom) as the pull runs
+    — one source of truth keeps the buttons and the pull sequence in lock-step."""
+    reads = [c for c in READ_COMMANDS if c != "obd"]
+    return reads + ["set"] + DUMP_COMMANDS + (["obd"] if "obd" in READ_COMMANDS else [])
+
+
 def _trend_gearing_ratio(bms, stats):
     """Per-session lifetime-average effective ratio from the odometer (default wheel
     circ — the trend cache doesn't carry per-session rwhcirc, and a constant circ
@@ -2293,10 +2304,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # 'border' — a pull lights it blue (running) then green (captured) so you
             # can see the database fill in, per command. cmd_cells maps command->frame.
             self.cmd_cells, self.cmd_btns = {}, {}
-            # `set` (the settings dump) IS part of a Pull full database — it just had
-            # no button, so the pull's "[12/15] reading set…" looked like a missing
-            # command (owner). Give it one, in its pull position (after the reads).
-            for i, cmd in enumerate(READ_COMMANDS + ["set"] + DUMP_COMMANDS):
+            # buttons are laid out in the EXACT order Pull full database runs them
+            # (baseline_read_order — `set` included, `obd` last), so the green
+            # 'captured' borders fill in row by row as the pull progresses.
+            for i, cmd in enumerate(baseline_read_order()):
                 cell = tk.Frame(quick, bg=self._cell_bg)
                 cell.grid(row=i // 2, column=i % 2, padx=2, pady=2, sticky="ew")
                 b = ttk.Button(cell, text=cmd, width=12,
@@ -2699,8 +2710,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # D4: run `obd` LAST — after `set` (the backup) and errorlogdump —
             # because its output has never been captured live; if it stalls or
             # returns nothing, the settings backup is already safely on disk first.
-            reads = [c for c in READ_COMMANDS if c != "obd"]
-            seq = reads + ["set"] + DUMP_COMMANDS + (["obd"] if "obd" in READ_COMMANDS else [])
+            seq = baseline_read_order()      # same order the command buttons use
             # opt-in: fold the heavy event log into the pull (informed-consent confirm
             # once, up front — it carries the contactor risk). If they decline, the
             # pull runs without it and the completion note says it wasn't captured.
@@ -3108,11 +3118,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # per-row description; the read-only reference is Help → Command reference).
             ttk.Label(f, foreground=P["dim"], wraplength=940, justify="left",
                       text="Arming UNLOCK only enables writing — it changes nothing on "
-                      "its own. Every write backs up all settings first, then reads the "
-                      "value back to verify. Change one thing at a time. If you change a "
-                      "setting, that row shows a ↺ Reset to put it back to the last full "
-                      "read. Rows below are the settings your bike reports as safe to "
-                      "change.").pack(anchor="w", pady=(2, 6))
+                      "its own. To change a setting: click its 'New value' cell and type "
+                      "a value (a '✎ Write →' appears on that row), arm UNLOCK WRITES "
+                      "(top-right), then click Write. Every write backs up all settings "
+                      "first, then reads the value back to verify — change one thing at a "
+                      "time. A changed row shows '↺ Reset' to restore the last full read. "
+                      "Rows below are the settings your bike reports as safe to change."
+                      ).pack(anchor="w", pady=(2, 6))
 
             # owner: edit in the table — double-click a row's "New value" to type a
             # value, then click "Write" on that same row. No separate input box.
@@ -3272,10 +3284,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             tk.Label(self.effect_card, wraplength=660, justify="left",
                      foreground=self._CARD_DIM, bg=P["panel"],
                      font=(self.sty["ui"], 10),
-                     text="Select a setting to see what it does. Click its 'New value' "
-                     "cell to type a value (a '✎ Write →' appears); arm UNLOCK WRITES "
-                     "(top-right) and click it to apply. Changed a setting? Its row "
-                     "shows '↺ Reset' to restore the last full read.").pack(anchor="w")
+                     text="Select a setting above to see what it does — its effect, "
+                     "risk, and any cautions. (How to write one is explained at the top "
+                     "of the page.)").pack(anchor="w")
             self._bind_wheel_subtree(self.effect_panel,
                                      getattr(self, "_writes_wheel", None))
 
