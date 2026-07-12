@@ -92,16 +92,14 @@ def test_full_flow(app):
     assert len(app.tree.get_children()) == len(WRITE_WHITELIST)
 
     # write blocked without the unlock toggle
-    app.tree.selection_set("spfront")
-    app.newval_var.set("22")
-    app._write()
+    app._write_value("spfront", "22")
     app.update()
     assert not app.journal_entries      # refused
 
     # unlock and write for real — the write is async (send -> verify -> ingest),
     # so wait for the read-back value to actually land, not just the journal entry
     app.unlock_var.set(True)
-    app._write()
+    app._write_value("spfront", "22")
     assert _pump(app, lambda: first_number(
         app.settings.get("spfront", {}).get("value", "")) == "22")
     assert len(app.journal_entries) > 0
@@ -459,7 +457,7 @@ def test_action_bar_hidden_until_connected(app):
     assert app.btn_safequit.winfo_manager() == "pack"     # connected + idle: visible
     app._set_busy(True)
     assert app.btn_safequit.winfo_manager() == ""         # busy: hidden again
-    app._safe_quit()                      # must refuse while busy
+    app._safe_disconnect()                # must refuse while busy
     assert app.winfo_exists()
     app._set_busy(False)
     assert app.btn_safequit.winfo_manager() == "pack"
@@ -927,13 +925,35 @@ def test_write_confirm_explains_backup_verify_revert(app, monkeypatch):
     seen = []
     monkeypatch.setattr(mb, "askokcancel",
                         lambda title, text=None, **k: seen.append(text) or False)
-    app.tree.selection_set("spfront")
-    app.newval_var.set("22")
     app.unlock_var.set(True)
-    app._write()
+    app._write_value("spfront", "22")
     assert _pump(app, lambda: seen)                    # the confirm fired
     low = seen[-1].lower()
     assert "backup" in low and "verify" in low and "revert" in low
+
+
+def test_writes_inline_edit_stages_and_writes(app):
+    # owner: editing happens IN the table — a pending value shows in the row + a
+    # Write affordance; clicking Write applies it; unchanged clears the pending;
+    # the old separate 'New value' input box is gone.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: "spfront" in app.tree.get_children())
+    assert not hasattr(app, "newval_var")                 # old input box removed
+    app._set_pending_write("spfront", "22")
+    assert app._pending_writes.get("spfront") == "22"
+    vals = app.tree.item("spfront", "values")
+    assert vals[3] == "22" and "Write" in vals[4]         # new value + write affordance
+    app._set_pending_write("spfront", "20")               # == current -> pending cleared
+    assert "spfront" not in app._pending_writes
+    app.unlock_var.set(True)
+    app._write_value("spfront", "22")
+    assert _pump(app, lambda: first_number(
+        app.settings.get("spfront", {}).get("value", "")) == "22")
 
 
 def test_read_points_to_analyze_once(app):
@@ -1244,9 +1264,11 @@ def test_rides_no_console_telemetry_guides_to_load(app):
 
 
 def test_write_mismatch_offers_revert(app, monkeypatch):
-    # F8: a read-back mismatch offers an immediate revert to the old value
+    # F8: a read-back mismatch OFFERS an immediate revert to the old value
     from openmbb import dialogs as mb
-    monkeypatch.setattr(mb, "askyesno", lambda *a, **k: True)      # accept the offer
+    offered = []
+    monkeypatch.setattr(mb, "askyesno",
+                        lambda *a, **k: offered.append(a) or False)   # see the offer
     app._connect()
     assert _pump(app, lambda: app.connected)
     app._baseline()
@@ -1256,11 +1278,10 @@ def test_write_mismatch_offers_revert(app, monkeypatch):
     assert _pump(app, lambda: len(app.settings) >= 30)
     # make the write a no-op so the read-back stays at the old value -> mismatch
     monkeypatch.setattr(app.transport, "write_setting", lambda *a, **k: "no-op")
-    app.tree.selection_set("spfront")
-    app.newval_var.set("22")
     app.unlock_var.set(True)
-    app._write()
-    assert _pump(app, lambda: app.newval_var.get() == "20")       # revert staged
+    app._write_value("spfront", "22")
+    assert _pump(app, lambda: offered)                        # the revert offer fired
+    assert "mismatch" in str(offered[-1]).lower()
 
 
 def test_connect_while_busy_does_not_reset_state(app):
@@ -1603,8 +1624,6 @@ def test_write_records_before_verify_failure(app, monkeypatch):
     app._login()
     assert _pump(app, lambda: app.logged_in)
 
-    app.tree.selection_set("spfront")
-    app.newval_var.set("22")
     app.unlock_var.set(True)
     orig = app.transport.exec_command
     calls = {"set": 0}
@@ -1617,7 +1636,7 @@ def test_write_records_before_verify_failure(app, monkeypatch):
         return orig(cmd, *a, **k)
 
     monkeypatch.setattr(app.transport, "exec_command", flaky)
-    app._write()
+    app._write_value("spfront", "22")
     assert _pump(app, lambda: len(app.journal_entries) > 0)
     journal = open(app.transport.logger.journal_path, encoding="utf-8").read()
     assert "PENDING" in journal

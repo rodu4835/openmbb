@@ -918,12 +918,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.units_var.set(u)
             self._apply_units()
 
-        def _open_repo(self):
+        def _open_url(self, url):
             try:
                 import webbrowser
-                webbrowser.open("https://github.com/rodu4835/openmbb")
+                webbrowser.open(url)
             except Exception:
                 pass
+
+        def _open_repo(self):
+            self._open_url("https://github.com/rodu4835/openmbb")
 
         def _report_issue(self):
             try:
@@ -1585,8 +1588,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # T3: created here but HIDDEN until usable (owner: not visible until you
             # actually connect) — _refresh_action_buttons packs/forgets it. (The pull
             # confirmation lives under the Pull-full-database button now, not here.)
-            self.btn_safequit = ttk.Button(bar, text="Safely disconnect & quit",
-                                            command=self._safe_quit)
+            self.btn_safequit = ttk.Button(bar, text="Safely disconnect",
+                                            command=self._safe_disconnect)
             self._refresh_action_buttons()   # hidden until connected + idle
 
         def _set_busy(self, flag):
@@ -1595,7 +1598,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._refresh_action_buttons()
 
         def _refresh_action_buttons(self):
-            """Show 'Safely disconnect & quit' only when CONNECTED and not
+            """Show 'Safely disconnect' only when CONNECTED and not
             mid-operation — HIDDEN otherwise (not visible until you connect; gone
             during a write / heavy dump / pull that's unsafe to interrupt)."""
             sq = getattr(self, "btn_safequit", None)
@@ -1614,28 +1617,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self.nb.select(tid)
                     return
 
-        def _safe_quit(self):
-            """Global 'safely disconnect & quit' — never mid-operation. Release the
-            port, tell the user it's safe to unplug/power off, then close."""
+        def _safe_disconnect(self):
+            """'Safely disconnect' — never mid-operation. Release the port, tell the
+            user it's safe to unplug, then return to the Home screen (does NOT quit;
+            use the window X / File → Exit to close the app)."""
             if self._busy:
                 messagebox.showinfo(APP_NAME, "An operation is still running — "
                                     "wait for it to finish before disconnecting.")
                 return
             where = self.logger.dir if self.logger else None
-            try:
-                if self.transport:
-                    self.transport.close()
-            except Exception:
-                pass
-            self.transport = None
-            self.connected = False
-            self._apply_gates()
+            self._reset_session_state()      # closes the port, drops state, re-gates
             messagebox.showinfo("Disconnected — safe to unplug",
                                 "Disconnected from the bike.\n\nIt is now safe to "
                                 "unplug the cable and power off the motorcycle."
                                 + (("\n\nSession saved to:\n%s" % where)
                                    if where else ""))
-            self.destroy()
+            self._show_landing()             # back to the Home screen
 
         def _start_writes_flow(self):
             """Get the user to Writes doing only the MISSING prerequisites, in
@@ -2777,7 +2774,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       "bike actually reports that are safe to change.").pack(
                           anchor="w", pady=(2, 6))
 
-            cols = ("name", "current", "risk")
+            # owner: edit in the table — double-click a row's "New value" to type a
+            # value, then click "Write" on that same row. No separate input box.
+            cols = ("name", "current", "risk", "new", "write")
+            heads = ("Setting", "Current", "Risk", "New value", "")
+            widths = (150, 120, 90, 140, 90)
             trow = ttk.Frame(f)
             trow.pack(fill="x", pady=(8, 4))
             self.tree = ttk.Treeview(trow, columns=cols, show="headings", height=9)
@@ -2785,25 +2786,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.tree.configure(yscrollcommand=tvsb.set)
             tvsb.pack(side="right", fill="y")
             self.tree.pack(side="left", fill="both", expand=True)
-            for c, w in zip(cols, (170, 300, 420)):
-                self.tree.heading(c, text=c.title())
+            for c, hd, w in zip(cols, heads, widths):
+                self.tree.heading(c, text=hd)
                 self.tree.column(c, width=w, anchor="w")
             self._attach_tree_copy(self.tree)       # E4
             self.tree.tag_configure("safe", foreground="#7fe0a0")
             self.tree.tag_configure("caution", foreground=P["warn"])
+            self.tree.tag_configure("pending", foreground=P["green"])
             self.tree.bind("<<TreeviewSelect>>", self._show_effect)
+            self.tree.bind("<Double-1>", self._writes_edit_cell)
+            self.tree.bind("<Button-1>", self._writes_action_click)
+            self._pending_writes = {}
 
-            self.lbl_effect = ttk.Label(f, text="Select a setting to see its effect.",
-                                        wraplength=1000, justify="left", padding=(0, 4))
+            self.lbl_effect = ttk.Label(
+                f, text="Double-click a row's 'New value' cell to edit it, then click "
+                "'Write' on that row.", wraplength=1000, justify="left", padding=(0, 4))
             self.lbl_effect.pack(anchor="w")
-
-            wrow = ttk.Frame(f)
-            wrow.pack(fill="x", pady=4)
-            ttk.Label(wrow, text="New value:").pack(side="left")
-            self.newval_var = tk.StringVar()
-            ttk.Entry(wrow, textvariable=self.newval_var, width=16).pack(side="left", padx=6)
-            ttk.Button(wrow, text="Write…", style=self.sty["danger"],
-                       command=self._write).pack(side="left")
 
             # (the read-only Sevcon safety guards moved off this action page — they
             # are documented context, available in Help -> Command reference and the
@@ -2829,12 +2827,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if not hasattr(self, "tree"):
                 return
             self.tree.delete(*self.tree.get_children())
+            self._pending_writes = {}
             for name in self.settings_order:
                 if name in WRITE_WHITELIST and name in self.settings:
                     label, effect, risk, _v, _w = WRITE_WHITELIST[name]
                     tag = "safe" if risk.startswith("SAFE") else "caution"
                     self.tree.insert("", "end", iid=name, tags=(tag,), values=(
-                        name, self.settings[name]["value"], risk.split(" - ")[0]))
+                        name, self.settings[name]["value"], risk.split(" - ")[0],
+                        "", ""))
 
         def _write_help_map(self):
             """T5: lazy-load the write-options explanations
@@ -2884,19 +2884,73 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                      "RISK: %s" % risk] + self._write_help_lines(name)
             self.lbl_effect.config(text="\n".join(parts))
 
-        def _write(self):
-            sel = self.tree.selection()
-            if not sel:
-                messagebox.showinfo(APP_NAME, "Select a setting row first.")
+        def _writes_edit_cell(self, event):
+            """Double-click the 'New value' cell -> an inline Entry to type into."""
+            row = self.tree.identify_row(event.y)
+            if not row or self.tree.identify_column(event.x) != "#4":   # "new" column
                 return
+            bbox = self.tree.bbox(row, "new")
+            if not bbox:
+                return
+            x, y, w, h = bbox
+            var = tk.StringVar(value=self._pending_writes.get(row, ""))
+            ent = tk.Entry(self.tree, textvariable=var, font=(self.sty["mono"], 10),
+                           bg=P["field"], fg=P["fg"], insertbackground=P["fg"],
+                           relief="flat", highlightthickness=1,
+                           highlightbackground=P["green"])
+            ent.place(x=x, y=y, width=w, height=h)
+            ent.focus_set()
+            ent.icursor("end")
+            ent.select_range(0, "end")
+
+            done = {"v": False}                 # Return destroys -> FocusOut fires too
+
+            def commit(_e=None):
+                if done["v"]:
+                    return
+                done["v"] = True
+                val = var.get().strip()
+                try:
+                    ent.destroy()
+                except Exception:
+                    pass
+                self._set_pending_write(row, val)
+            ent.bind("<Return>", commit)
+            ent.bind("<FocusOut>", commit)
+            ent.bind("<Escape>", lambda e: (done.__setitem__("v", True), ent.destroy()))
+
+        def _set_pending_write(self, name, val):
+            """Stage/clear an inline pending write for a row: show the new value + a
+            'Write' affordance in that row when it differs from the current value."""
+            if name not in WRITE_WHITELIST or name not in self.settings:
+                return
+            _l, _e, risk, _v, _w = WRITE_WHITELIST[name]
+            cur = self.settings.get(name, {}).get("value", "")
+            base = (name, cur, risk.split(" - ")[0])
+            tag = "safe" if risk.startswith("SAFE") else "caution"
+            if not val or first_number(val) == first_number(cur):
+                self._pending_writes.pop(name, None)
+                self.tree.item(name, values=base + ("", ""), tags=(tag,))
+            else:
+                self._pending_writes[name] = val
+                self.tree.item(name, values=base + (val, "✎ Write →"),
+                               tags=("pending",))
+
+        def _writes_action_click(self, event):
+            """Single click on a row's 'Write' cell -> apply that row's pending value."""
+            row = self.tree.identify_row(event.y)
+            if row and self.tree.identify_column(event.x) == "#5" \
+                    and row in self._pending_writes:
+                self._write_value(row, self._pending_writes[row])
+                return "break"
+
+        def _write_value(self, name, new_val):
             if not self.unlock_var.get():
                 messagebox.showwarning(APP_NAME, "Writes are locked. Toggle the master "
                                        "'UNLOCK WRITES' gate first.")
                 return
-            name = sel[0]
-            new_val = self.newval_var.get().strip()
-            if not new_val:
-                messagebox.showinfo(APP_NAME, "Enter a new value.")
+            new_val = (new_val or "").strip()
+            if not new_val or name not in WRITE_WHITELIST:
                 return
             label, effect, risk, validator, warn_fn = WRITE_WHITELIST[name]
             ok, msg = validator(new_val)
@@ -2989,15 +3043,21 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 pass
 
         def _stage_revert(self, name, old):
-            """Stage a revert (select the row + fill the old value); the user then
-            presses Write to apply it through the normal confirm/backup flow."""
-            self.newval_var.set(first_number(old))
-            for iid in self.tree.get_children():
-                if iid == name:
-                    self.tree.selection_set(iid)
-                    break
-            messagebox.showinfo(APP_NAME, "Revert staged: %s -> %s. Review and press "
-                                "Write… to apply (same confirm/backup flow)." % (name, old))
+            """Stage a revert as an inline pending write on the setting's row; the
+            user clicks 'Write' on that row to apply it (normal confirm/backup).
+            Always give feedback — never fail silently if the row is missing."""
+            if name in self.tree.get_children():
+                self._set_pending_write(name, first_number(old))
+                self.tree.selection_set(name)
+                self.tree.see(name)
+                messagebox.showinfo(APP_NAME, "Revert staged in the table: %s → %s. "
+                                    "Click 'Write' on that row to apply (same "
+                                    "confirm/backup flow)." % (name, old))
+            else:
+                messagebox.showwarning(APP_NAME, "Couldn't stage the revert for '%s' "
+                                       "(its row isn't in the write table right now). "
+                                       "Re-read the settings, then set it back to %s "
+                                       "yourself." % (name, old))
 
         def _revert(self):
             sel = self.lst_journal.curselection()
@@ -3090,14 +3150,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             rbtns.pack(fill="x")
             ttk.Button(rbtns, text="Load ride log (.txt)…",
                        command=self._load_ride_log).pack(side="left")
-            ttk.Label(rbtns, text="  (a zero-log-parser decoded .txt)",
-                      foreground=P["dim"]).pack(side="left")
+            ttk.Button(rbtns, text="Get zero-log-parser",
+                       command=lambda: self._open_url(
+                           "https://github.com/zero-motorcycle-community/zero-log-parser")
+                       ).pack(side="left", padx=8)
             self.lbl_ride_totals = ttk.Label(
-                rf, text="No ride log loaded. Rev 41 doesn't stream ride data as "
-                "console text, so click 'Load ride log (.txt)' above — that file is a "
-                "DECODED log from the community zero-log-parser tool (it converts a raw "
-                "MBB/BMS log into readable lines). OpenMBB's own eventlogdump / "
-                "errorlogdump are NOT that input.",
+                rf, text="Ride telemetry does NOT come from a normal pull — rev 41 "
+                "doesn't stream it as console text. To use this tab:\n"
+                "  1. export your bike's raw log (a heavy dump, or pulled off the "
+                "bike's storage),\n"
+                "  2. run the community zero-log-parser tool on it (button above) to "
+                "get a DECODED .txt,\n"
+                "  3. click 'Load ride log (.txt)…' and pick that file.\n"
+                "Then you'll see per-ride distance, SOC%/km and temps here, and the "
+                "ride-log charts on the Charts tab.",
                 foreground=P["dim"], wraplength=920, justify="left")
             self.lbl_ride_totals.pack(anchor="w", pady=(6, 0))
             rcols = ("start", "km", "soc", "socpkm", "ptemp", "mtemp", "rpm")
@@ -3399,9 +3465,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                            font=(self.sty["ui"], 10))
 
         def _load_trend_sessions(self):
-            """Saved sessions (oldest->newest) parsed to (name, bms, stats), cached
-            so a chart resize doesn't re-read the folders each frame. Invalidated
-            when a new pull is saved (see _baseline / _reset_session_state)."""
+            """Saved sessions (oldest->newest) parsed to (mtime, name, bms, stats),
+            cached so a chart resize doesn't re-read the folders each frame.
+            Invalidated when a new pull is saved (see _baseline)."""
             cached = getattr(self, "_trend_cache", None)
             if cached is not None:
                 return cached
@@ -3410,13 +3476,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 root, names = self._recent_sessions(limit=60)
                 for name in reversed(names):     # oldest first
                     try:
-                        s = sessions.load_session(os.path.join(root, name))
-                        out.append((name, parsers.parse_bms(s.cmd("bms")),
+                        folder = os.path.join(root, name)
+                        s = sessions.load_session(folder)
+                        out.append((os.path.getmtime(folder), name,
+                                    parsers.parse_bms(s.cmd("bms")),
                                     parsers.parse_stats(s.cmd("stats"))))
                     except Exception:
                         pass
             except Exception:
                 out = []
+            out.sort(key=lambda r: r[0])         # oldest -> newest by capture time
             self._trend_cache = out
             return out
 
@@ -3424,12 +3493,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             extract, ylabel, is_temp = self._SESSION_TRENDS[metric]
             tu = config.get_temp_units()
             pts = []
-            for i, (_name, bms, stats) in enumerate(self._load_trend_sessions()):
+            for mt, _name, bms, stats in self._load_trend_sessions():
                 v = extract(bms, stats)
                 if isinstance(v, (int, float)):
                     if is_temp and tu == "F":
                         v = round(v * 9 / 5 + 32)
-                    pts.append((i, v))
+                    pts.append((mt, v))          # x = capture time (a real timeline)
             if not pts:
                 self._chart_msg(cv, "No saved sessions with this metric yet.\n\nPull "
                                 "full database on several visits to build a trend "
@@ -3437,8 +3506,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 return
             if is_temp:
                 ylabel = "%s (°%s)" % (ylabel, tu)
+
+            def _datefmt(t):
+                try:
+                    return _dt.datetime.fromtimestamp(t).strftime("%m/%d")
+                except Exception:
+                    return ""
             self._chart_line(cv, [(metric.replace("Trend: ", ""), P["green"], pts)],
-                             "saved session (oldest → newest)", ylabel, dots=True)
+                             "date", ylabel, dots=True, xfmt=_datefmt)
 
         def _render_charts(self):
             cv = getattr(self, "chart_canvas", None)
@@ -3500,7 +3575,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._chart_bar(cv, [b[0] for b in bars], [b[1] for b in bars],
                                 "SOC %% used per %s" % ("mi" if unit == "mi" else "km"))
 
-        def _chart_line(self, cv, series, xlabel, ylabel, dots=False):
+        def _chart_line(self, cv, series, xlabel, ylabel, dots=False, xfmt=None):
+            xfmt = xfmt or self._fmt_tick        # x-tick label formatter (e.g. dates)
             series = [(lbl, col, charts_mod.downsample(pts))
                       for lbl, col, pts in series if pts]
             allpts = [p for _, _, pts in series for p in pts]
@@ -3526,7 +3602,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             for xt in charts_mod.axis_ticks(xlo, xhi, xstep):
                 gx = sx(xt)
                 cv.create_line(gx, y0, gx, y1, fill=grid)
-                cv.create_text(gx, y1 + 5, text=self._fmt_tick(xt), fill=axcol,
+                cv.create_text(gx, y1 + 5, text=xfmt(xt), fill=axcol,
                                anchor="n", font=(self.sty["mono"], 8))
             for yt in charts_mod.axis_ticks(ylo, yhi, ystep):
                 gy = sy(yt)
