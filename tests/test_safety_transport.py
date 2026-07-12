@@ -457,6 +457,44 @@ def test_prompt_in_data_does_not_truncate():
     assert tr.last_truncated is False
 
 
+# --- v0.18 B: eventlogdump completeness (no false "incomplete") --------------
+
+def _eventlog_bytes(promised, n_entries):
+    lines = ["*****  Event Log  *****",
+             "Printing %d of %d log entries.." % (promised, promised)]
+    for i in range(1, n_entries + 1):
+        lines.append(" %05d   05/28/2026 11:57:%02d   Riding   PackSOC:%d%%, "
+                     "Vpack:113.9V, MotRPM: 497, Odo: 53%02dkm"
+                     % (i, i % 60, max(1, 100 - i), i % 100))
+    return ("\r\n".join(lines) + "\r\n").encode()
+
+
+def test_eventlogdump_complete_without_prompt_reports_captured_not_truncated():
+    # Real-bike behavior: a heavy eventlogdump can end WITHOUT a trailing prompt
+    # (the contactor stall eats the idle window) even though ~all entries arrived.
+    # That must read as "event log captured (N of M)", NOT "capture is incomplete".
+    chunks = [b"eventlogdump\r\n", _eventlog_bytes(50, 50)]
+    tr = Transport(ScriptedPort(chunks),
+                   SessionLogger(base_dir=tempfile.mkdtemp(prefix="zev_"), tag="t"))
+    out = tr.exec_command("eventlogdump", idle_timeout=0.3, max_time=5.0,
+                          confirmed=True)
+    assert "TRUNCATED" not in out
+    assert "event log captured (50 of 50" in out
+    assert tr.last_truncated is True         # wire unchanged -> next command resyncs
+
+
+def test_eventlogdump_genuinely_short_still_truncated():
+    # A real mid-stream cut (many entries missing vs the promised count) keeps the
+    # TRUNCATED / incomplete banner — the tolerance only forgives the last few.
+    chunks = [b"eventlogdump\r\n", _eventlog_bytes(50, 40)]
+    tr = Transport(ScriptedPort(chunks),
+                   SessionLogger(base_dir=tempfile.mkdtemp(prefix="zev_"), tag="t"))
+    out = tr.exec_command("eventlogdump", idle_timeout=0.3, max_time=5.0,
+                          confirmed=True)
+    assert "TRUNCATED" in out
+    assert "event log captured" not in out
+
+
 # --- A6: password redaction is session-scoped -------------------------------
 
 def test_redaction_is_session_scoped():

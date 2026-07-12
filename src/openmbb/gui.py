@@ -2276,7 +2276,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     "flash; it recovers when the read finishes. The bike must be "
                     "SAFELY PARKED (never do this while riding).\n\nContinue?" % cmd):
                 return
-            self._read_cmd(cmd, idle_timeout=30.0, confirmed=confirmed, out=out,
+            # 45 s idle: the real-bike contactor stall during a heavy dump can pause
+            # the stream longer than the 30 s we first used (which finished, but with
+            # no margin) — give it room so the read isn't cut mid-log.
+            self._read_cmd(cmd, idle_timeout=45.0, confirmed=confirmed, out=out,
                            then=then)
 
         def _toggle_watch(self):
@@ -3621,7 +3624,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     source = "session dumplogs (legacy)" if text.strip() else ""
             recs = parsers.parse_ride_log(text)
             if recs:
-                self._render_ride_records(recs, source)
+                # a genuinely truncated capture (not the "captured N of M" note) may
+                # be missing entries — say so rather than imply the totals are whole.
+                warn = ("   ⚠ the event-log capture ended early — some entries may be "
+                        "missing; re-pull for the full log." if "### TRUNCATED" in text
+                        else "")
+                self._render_ride_records(recs, source, warn=warn)
                 return
             self._ride_records = []
             self._render_charts()
@@ -3633,7 +3641,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                      "safely parked). No Zero app or external decoder needed. You can "
                      "also 'Load ride log (.txt)…' to open a log file you already have.")
 
-        def _render_ride_records(self, recs, source):
+        def _render_ride_records(self, recs, source, warn=""):
             self.ride_tree.delete(*self.ride_tree.get_children())
             self._ride_records = list(recs or [])
             self._render_charts()                    # keep the Charts tab in sync
@@ -3652,10 +3660,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
             self.lbl_ride_totals.config(
                 text="%s: %d rides · %.1f %s · mean %s SOC%%/km · max pack %s C / "
-                "motor %s C · %d samples"
+                "motor %s C · %d samples%s"
                 % (source, t["ride_count"], _d(t["total_km"]), unit,
                    t["mean_soc_per_km"], t["max_pack_temp_c"],
-                   t["max_motor_temp_c"], t["samples"]))
+                   t["max_motor_temp_c"], t["samples"], warn))
             for r in summ["rides"]:
                 self.ride_tree.insert("", "end", values=(
                     r["start_ts"] or "?", _d(r["distance_km"]), r["soc_used_pct"],

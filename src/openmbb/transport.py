@@ -29,6 +29,23 @@ PROMPT_RE = re.compile(rb"ZERO MBB>\s*$|MBB>\s*$")
 # let a log line that merely ends in "MBB>" truncate a ~1 MB dump mid-stream.
 PROMPT_LINE_RE = re.compile(rb"(?:^|[\r\n])[ \t]*(?:ZERO )?MBB>[ \t]*$")
 
+# An eventlogdump prints a header ("Printing N of M log entries..") then N numbered
+# entries (a 5-digit column). On the real bike the dump can end without a trailing
+# prompt (the contactor stall eats the idle window) even though ~all entries arrived
+# — so a raw "TRUNCATED / incomplete" banner is misleading. These let us report HOW
+# complete it was instead (see exec_command).
+_EVENTLOG_HDR_RE = re.compile(r"Printing\s+(\d+)\s+of\s+(\d+)\s+log entries", re.I)
+_EVENTLOG_ENTRY_RE = re.compile(r"^\s*\d{5}\s", re.M)
+
+
+def eventlog_completeness(text):
+    """(promised, got) numbered-entry counts for an eventlogdump, or (None, got) if
+    the 'Printing N of M' header isn't present."""
+    m = _EVENTLOG_HDR_RE.search(text or "")
+    got = len(_EVENTLOG_ENTRY_RE.findall(text or ""))
+    return (int(m.group(1)) if m else None), got
+
+
 READ_COMMANDS = ["version", "help", "status", "stats", "runtime", "bms",
                  "sevcon", "chargers", "inputs", "outputs", "dash", "obd"]
 # `obd` ("Show all obd info") is a read, present in the rev-41 menu at BOTH login
@@ -322,8 +339,21 @@ class Transport:
             lines = lines[:-1]
         result = "\n".join(lines).strip("\n")
         if self.last_truncated:
-            result += ("\n### TRUNCATED: no console prompt seen before the read "
-                       "ended (max_time/idle) - capture is incomplete ###")
+            # For an eventlogdump that ended without a prompt, report HOW complete it
+            # was: on the real bike the contactor stall routinely eats the trailing
+            # prompt after ~all entries have arrived — a flat "capture is incomplete"
+            # then needlessly alarms the user. A small tolerance (~0.5%) separates
+            # "counting noise / the last few entries" from a real mid-stream cut.
+            promised, got = (eventlog_completeness(result)
+                             if head == "eventlogdump" else (None, 0))
+            if promised is not None and got >= promised - max(3, promised // 200):
+                result += ("\n### NOTE: event log captured (%d of %d entries) — the "
+                           "console prompt wasn't seen at the end, so the link will "
+                           "resync on the next command; the ride/health data is "
+                           "usable ###" % (got, promised))
+            else:
+                result += ("\n### TRUNCATED: no console prompt seen before the read "
+                           "ended (max_time/idle) - capture is incomplete ###")
         # D2: keep the known-settings cache current. A bare `set` dump defines the
         # set of writable names; a `login <pw>` or `logout` changes the login level
         # and so what `set` would show, so it invalidates the cache (forcing a fresh
