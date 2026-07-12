@@ -815,7 +815,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             root.geometry("+%d+%d" % (anchor.winfo_rootx(),
                                       anchor.winfo_rooty() + anchor.winfo_height()))
             root.bind("<Escape>", lambda e: close_all())
-            self.bind("<Escape>", lambda e: close_all(), add="+")
+            # (main-window Escape is bound ONCE in _build_menubar -> _dismiss_open_menu,
+            # not per popup, so the bindings don't accumulate — review v0.18-UX.)
             # NO grab (owner: "still have to click twice to switch menus"). A local
             # grab redirects/swallows a click on a SIBLING menu button, so the first
             # click only closed the open menu and a second was needed to open the next.
@@ -856,6 +857,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._menubuttons = []              # (mb, specs_fn) — for one-click switch
             self._menu_dismiss_id = None        # live only while a menu is open
             self._open_menu_anchor = None       # which button's menu is open (toggle)
+            # Escape closes an open menu — bound ONCE here (not per popup, which would
+            # accumulate bindings); no-ops when nothing is open.
+            self.bind("<Escape>", lambda e: self._dismiss_open_menu(), add="+")
             def add_menu(text, specs_fn):
                 mb = ttk.Menubutton(bar, text=text, style=mb_style)
                 mb._owl_menu_specs = specs_fn       # so a click switches menus
@@ -1670,6 +1674,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._trend_cache = None
             if hasattr(self, "unlock_var"):
                 self.unlock_var.set(False)
+            if hasattr(self, "baseline_heavy_var"):
+                self.baseline_heavy_var.set(False)   # the '+event log' opt-in re-earns
+            self._chart_xzoom = None                 # drop any chart drag-zoom
             self._baseline_reset_marks()
             self._hide_connect_success()     # a new/broken session re-earns it
             self._set_login_status(False)

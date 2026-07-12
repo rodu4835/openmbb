@@ -974,6 +974,8 @@ def test_safe_disconnect_resets_to_clean_slate(app):
     assert app.analyze_session is not None
     app._baseline_mark("status", "ok")
     assert str(app.cmd_cells["status"].cget("bg")) == app._cell_color("ok")
+    app.baseline_heavy_var.set(True)          # opt-ins / zoom must also re-earn
+    app._chart_xzoom = (1.0, 2.0)
 
     app._safe_disconnect()
     app.update()
@@ -981,6 +983,8 @@ def test_safe_disconnect_resets_to_clean_slate(app):
     assert app._baseline_settings == {}
     assert app.analyze_session is None
     assert str(app.cmd_cells["status"].cget("bg")) == str(app._cell_bg)  # cleared
+    assert app.baseline_heavy_var.get() is False
+    assert app._chart_xzoom is None
 
 
 def test_top_menu_switches_in_one_action_without_grab(app):
@@ -997,7 +1001,12 @@ def test_top_menu_switches_in_one_action_without_grab(app):
     app._menu_popup(mb_b, fn_b())                      # switch in one action
     assert app._open_menu is not None and app._open_menu_anchor is mb_b
 
-    app._menu_popup(mb_b, fn_b())                      # re-click toggles closed
+    # Escape closes it via the ONE main-window binding (not per-popup accumulation)
+    app._dismiss_open_menu()
+    assert app._open_menu is None and app._menu_dismiss_id is None
+
+    app._menu_popup(mb_a, fn_a())
+    app._menu_popup(mb_a, fn_a())                      # re-click toggles closed
     assert app._open_menu is None and app._menu_dismiss_id is None
 
 
