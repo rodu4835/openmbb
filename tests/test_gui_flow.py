@@ -1183,6 +1183,25 @@ def test_connect_page_copy_is_calm_and_current(app):
     assert str(busy_lbl.cget("style")) == "Muted.TLabel"
 
 
+def test_writes_description_appears_only_on_click(app):
+    # owner: remove the default placeholder description — the card is hidden until a
+    # setting row is clicked, then it shows that setting's description.
+    assert app.effect_panel.winfo_manager() == ""        # hidden at build (no text)
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: "spfront" in app.tree.get_children())
+    app.tree.selection_set("spfront")
+    app._show_effect()
+    assert app.effect_panel.winfo_manager() == "pack"    # appears on click
+    assert app.effect_card.winfo_children()              # ...with the description
+    app._hide_effect()
+    assert app.effect_panel.winfo_manager() == ""        # hidden again (reset/disconnect)
+
+
 def test_writes_description_card_scrolls_and_is_readable(app):
     # owner: (C) two-finger scroll must work over the description card (its dynamic
     # labels get the page wheel binding); (D) it reads as a card — panel-coloured

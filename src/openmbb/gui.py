@@ -1704,7 +1704,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._analyze_hint_shown = False
             self.compare_list = []                   # Compare tab: drop loaded sessions
             if hasattr(self, "effect_panel"):
-                self._show_effect_hint()             # reset the Writes description panel
+                self._hide_effect()                  # hide the Writes description panel
             self._close_transient_toplevels()        # gearing calc / pickers / info wins
             self._hide_connect_success()     # a new/broken session re-earns it
             self._set_login_status(False)
@@ -3151,20 +3151,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.tree.bind("<Button-1>", self._writes_action_click)
             self._pending_writes = {}
 
-            # description panel = a CARD (panel-grey with a thin border) so it reads as
-            # a contained block, not text floating on the page. Rebuilt per selection.
-            self.effect_panel = ttk.Frame(f)
-            self.effect_panel.pack(anchor="w", fill="x", pady=(8, 0))
+            # description = a CARD (panel-grey, thin border) shown ONLY when a setting
+            # row is clicked (owner: no default/placeholder text — the how-to lives in
+            # the intro above). Built now but kept hidden until _show_effect packs it.
+            self.effect_panel = ttk.Frame(f)      # packed on demand by _show_effect
             card = tk.Frame(self.effect_panel, bg=P["panel"], highlightthickness=1,
                             highlightbackground="#39394a", highlightcolor="#39394a")
             card.pack(fill="x")
             self.effect_card = tk.Frame(card, bg=P["panel"])   # inner padding surface
             self.effect_card.pack(fill="x", padx=12, pady=10)
-            # remember the page's wheel handler BEFORE building the card, so a REBUILT
-            # effect card re-binds the two-finger scroll (its dynamic labels otherwise
-            # become a scroll dead zone) — set it before the first _show_effect_hint.
+            # remember the page's wheel handler so the rebuilt card re-binds two-finger
+            # scroll (its dynamic labels would otherwise be a scroll dead zone).
             self._writes_wheel = getattr(f, "_owl_wheel", None)
-            self._show_effect_hint()
 
             # (No separate revert journal (owner): a changed row shows '↺ Reset' inline,
             # which restores the last full read's value through the same safe write
@@ -3279,22 +3277,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                      foreground=P["fg"], bg=P["panel"],
                      font=(self.sty["ui"], 10)).pack(anchor="w", padx=(18, 0))
 
-        def _show_effect_hint(self):
+        def _hide_effect(self):
+            """No selection -> hide the description card entirely (owner: no default
+            text; the card appears only when a setting row is clicked)."""
             self._clear_effect()
-            tk.Label(self.effect_card, wraplength=660, justify="left",
-                     foreground=self._CARD_DIM, bg=P["panel"],
-                     font=(self.sty["ui"], 10),
-                     text="Select a setting above to see what it does — its effect, "
-                     "risk, and any cautions. (How to write one is explained at the top "
-                     "of the page.)").pack(anchor="w")
-            self._bind_wheel_subtree(self.effect_panel,
-                                     getattr(self, "_writes_wheel", None))
+            try:
+                self.effect_panel.pack_forget()
+            except Exception:
+                pass
 
         def _show_effect(self, _evt=None):
             sel = self.tree.selection()
             if not sel:
                 return
             self._clear_effect()
+            if self.effect_panel.winfo_manager() != "pack":
+                self.effect_panel.pack(anchor="w", fill="x", pady=(8, 0))
             name = sel[0]
             label, effect, risk, _v, _w = WRITE_WHITELIST[name]
             tk.Label(self.effect_card, text="%s — %s" % (name, label), bg=P["panel"],
