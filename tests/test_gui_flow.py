@@ -41,6 +41,13 @@ def app(monkeypatch):
         pytest.skip("no display available for Tk")
     application._errors = errors
     yield application
+    # A5 safety net: a test that opened the heavy-read modal must not leak a
+    # grabbed Toplevel + a running indeterminate Progressbar into teardown.
+    try:
+        if getattr(application, "_read_modal_up", False):
+            application._close_read_modal()
+    except Exception:
+        pass
     # Deterministic teardown. Tk Variable objects (StringVar/BooleanVar/…) hold
     # reference cycles through their widgets, so they aren't freed the instant the
     # app is destroyed — they linger until CPython's cyclic GC runs, which can be
@@ -1800,9 +1807,11 @@ def test_rides_parses_session_eventlogdump(app):
     assert "event log" in app.lbl_ride_totals.cget("text").lower()  # sourced from it
 
 
-def test_write_mismatch_warns_and_points_to_reset(app, monkeypatch):
-    # F8: a read-back mismatch WARNS (and the row's inline '↺ Reset' restores the
-    # last-read value — no separate revert journal).
+def test_write_unchanged_readback_reports_clamp(app, monkeypatch):
+    # B1: a write that reads back UNCHANGED from the pre-write value is a SILENT
+    # CLAMP (the console can reply SUCCESS yet keep the old value — verified live
+    # with maxcustspmph capping at 89). The warning must say the value did not
+    # stick / is capped, NOT the generic "read-back mismatch … restore …".
     from openmbb import dialogs as mb
     warned = []
     monkeypatch.setattr(mb, "showwarning", lambda *a, **k: warned.append(a))
@@ -1813,12 +1822,54 @@ def test_write_mismatch_warns_and_points_to_reset(app, monkeypatch):
     app._login()
     assert _pump(app, lambda: app.logged_in)
     assert _pump(app, lambda: len(app.settings) >= 30)
-    # make the write a no-op so the read-back stays at the old value -> mismatch
+    # make the write a no-op so the read-back stays at the OLD value -> clamp case
     monkeypatch.setattr(app.transport, "write_setting", lambda *a, **k: "no-op")
     app.unlock_var.set(True)
     app._write_value("spfront", "22")
-    assert _pump(app, lambda: warned)                        # the mismatch warning fired
-    assert "mismatch" in str(warned[-1]).lower()
+    assert _pump(app, lambda: warned)                        # the clamp warning fired
+    msg = str(warned[-1]).lower()
+    assert "unchanged" in msg and ("did not stick" in msg or "capped" in msg)
+    assert "mismatch" not in msg                             # NOT the generic wording
+
+
+def test_write_changed_but_wrong_readback_points_to_reset(app, monkeypatch):
+    # B1: a read-back that CHANGED but not to what we asked (got != new AND
+    # got != old) still gets the generic mismatch wording + ↺ Reset pointer.
+    import re
+    from openmbb import dialogs as mb
+    warned = []
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: warned.append(a))
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: len(app.settings) >= 30)
+    monkeypatch.setattr(app.transport, "write_setting", lambda *a, **k: "no-op")
+    # The write flow reads `set` twice: (1) live old_val, then (2) the verify
+    # read. Doctor ONLY the 2nd so old_val stays 20 while the read-back is 99 —
+    # a genuine CHANGED-but-wrong result (99 != 22 asked, 99 != 20 old).
+    real = app.transport.exec_command
+    calls = {"set": 0}
+
+    def doctored(cmd, *a, **k):
+        out = real(cmd, *a, **k)
+        if cmd == "set":
+            calls["set"] += 1
+            if calls["set"] >= 2:
+                out = "\n".join(
+                    re.sub(r"\d+", "99", ln) if ln.strip().startswith("spfront")
+                    else ln for ln in out.splitlines())
+        return out
+
+    monkeypatch.setattr(app.transport, "exec_command", doctored)
+    app.unlock_var.set(True)
+    app._write_value("spfront", "22")
+    assert _pump(app, lambda: warned)
+    msg = str(warned[-1]).lower()
+    assert "mismatch" in msg                                 # generic branch
+    assert "unchanged" not in msg
 
 
 def test_connect_while_busy_does_not_reset_state(app):
@@ -2177,3 +2228,194 @@ def test_write_records_before_verify_failure(app, monkeypatch):
     assert _pump(app, lambda: os.path.exists(app.transport.logger.journal_path))
     journal = open(app.transport.logger.journal_path, encoding="utf-8").read()
     assert "PENDING" in journal
+
+
+# ==========================================================================
+# v0.20 Tier A — heavy-read BLOCKING progress modal
+# ==========================================================================
+
+def test_read_modal_scaffold_grabs_and_is_nonblocking(app):
+    # A1: opening the modal sets the interlock flag, RETURNS immediately (no
+    # wait_window), and takes an application grab once the window is viewable.
+    win = app._show_read_modal("Reading 'eventlogdump' from the bike")
+    assert app._read_modal_up is True            # flag set synchronously (non-blocking)
+    assert app._read_modal_win is win
+    assert win.winfo_exists()
+    assert _pump(app, lambda: win.grab_current() is win, timeout=5)   # app-modal grab
+    app._close_read_modal()
+    assert app._read_modal_up is False
+    assert not app.grab_current()
+
+
+def test_read_modal_gate_refuses_silently_and_allows_owned_read(app, monkeypatch):
+    # A2-guard: while the modal is up, a stray _run_bg is refused SILENTLY (the
+    # "Busy" popup is itself a grab-stealing dialog); the ONE modal-owned launch
+    # (allow_during_modal) still runs; Watch self-skips.
+    from openmbb import dialogs as mb
+    infos = []
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: infos.append(a))
+    app._read_modal_up = True
+    app._busy = False
+    ran = []
+    app._run_bg(lambda: ran.append("stray"), None)          # stray op -> refused
+    app.update()
+    assert not ran and not infos                            # refused AND silent
+    app._run_bg(lambda: ran.append("owned"), None, allow_during_modal=True)
+    assert _pump(app, lambda: "owned" in ran)               # modal-owned read runs
+    # Watch is gated by _read_modal_up (grab does not suppress the after() timer)
+    fired = []
+    monkeypatch.setattr(app, "_flash_watch", lambda: fired.append(1))
+    app.watch_var.set(True)
+    app._busy = False
+    app._watch_tick()
+    assert not fired                                        # skipped while modal up
+    app.watch_var.set(False)
+    app._read_modal_up = False
+
+
+def test_heavy_outcome_messages_classify(app):
+    # A4: the finalizer's outcome classifier — clean / graceful-NOTE / error.
+    assert app._heavy_outcome_msg("plain dump output", None) == \
+        "Done — the read completed and is saved."
+    graceful = app._heavy_outcome_msg(
+        "…\n### NOTE: event log captured (8573 of 8573 entries) …", None)
+    assert "resync" in graceful.lower() and "usable" in graceful.lower()
+    err = app._heavy_outcome_msg(None, RuntimeError("MBB rebooted"))
+    assert "stopped early" in err.lower() and "rebooted" in err
+
+
+def test_run_bg_error_with_on_error_still_shows_dialog(app):
+    # A4 REGRESSION (Review 2): the connect flow passes on_error yet relies on the
+    # default showerror. Guarding showerror on `on_error is None` would swallow it.
+    # With a caller-supplied on_error and NO suppress flag, showerror MUST fire.
+    app._errors.clear()
+    seen = []
+    app._run_bg(lambda: (_ for _ in ()).throw(RuntimeError("bad cable")),
+                on_error=lambda: seen.append(1))
+    assert _pump(app, lambda: app._errors)                  # default dialog NOT suppressed
+    assert seen                                             # on_error also ran
+
+
+def test_heavy_read_error_flips_modal_to_continue_no_showerror(app, monkeypatch):
+    # A4: a console error DURING a modal heavy read suppresses the default
+    # showerror and flips the SAME modal to a single Continue (no double dialog);
+    # `then` does NOT run on the error path.
+    from openmbb import dialogs as mb
+    from openmbb.transport import ConsoleRebootError
+    monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._errors.clear()
+    monkeypatch.setattr(app.transport, "exec_command",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            ConsoleRebootError("MBB rebooted mid-dump")))
+    then_ran = []
+    app._read_heavy("eventlogdump", then=lambda: then_ran.append(1))
+    assert _pump(app, lambda: app._read_modal_btnrow is not None
+                 and app._read_modal_btnrow.winfo_children(), timeout=10)
+    assert not app._errors                                  # default showerror suppressed
+    assert not then_ran                                     # `then` skipped on error
+    app._read_modal_btnrow.winfo_children()[0].invoke()     # Continue
+    assert _pump(app, lambda: not app._read_modal_up)
+    assert not app.grab_current()
+
+
+def test_heavy_read_success_runs_then_on_continue(app, monkeypatch):
+    # A2/A4: a heavy read raises the modal, and `then` runs only AFTER the user
+    # clicks Continue (not before).
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    then_ran = []
+    app._read_heavy("eventlogdump", then=lambda: then_ran.append(1))
+    assert _pump(app, lambda: app._read_modal_btnrow is not None
+                 and app._read_modal_btnrow.winfo_children(), timeout=15)
+    assert not then_ran                                     # deferred to Continue
+    app._read_modal_btnrow.winfo_children()[0].invoke()     # Continue
+    assert _pump(app, lambda: then_ran and not app._read_modal_up)
+
+
+def test_read_modal_teardown_releases_grab(app):
+    # A5: the single teardown owner releases the grab, clears the flag, and leaves
+    # no stray Toplevel.
+    import tkinter as tk
+    win = app._show_read_modal("Reading 'eventlogdump' from the bike")
+    assert _pump(app, lambda: win.grab_current() is win, timeout=5)
+    app._close_read_modal()
+    app.update()
+    assert not app._read_modal_up
+    assert not app.grab_current()
+    assert not [w for w in app.winfo_children()
+                if isinstance(w, tk.Toplevel) and w.winfo_exists()]
+
+
+def test_menu_and_f1_inert_while_read_modal_up(app, monkeypatch):
+    # A6: the custom Menubuttons open with NO grab, and F1 launches a browser — both
+    # must be inert while the heavy-read modal is up (grab is the belt, this the suspenders).
+    opened, shown = [], []
+    monkeypatch.setattr(app, "_menu_popup", lambda *a, **k: opened.append(a))
+    monkeypatch.setattr(app, "_show_instructions", lambda *a, **k: shown.append(1))
+    mb0 = app._menubuttons[0][0]
+    app._read_modal_up = True
+    mb0.event_generate("<Button-1>")
+    app.event_generate("<F1>")
+    app.update()
+    assert not opened and not shown                         # both inert
+    app._read_modal_up = False
+    mb0.event_generate("<Button-1>")                        # works again when down
+    app.update()
+    assert opened
+    app._dismiss_open_menu()
+
+
+def test_heavy_confirm_names_permanent_very_severe_entry(app, monkeypatch):
+    # C1: the pre-dump confirm must warn that each dump leaves a PERMANENT
+    # "VERY SEVERE" error-log entry (not just the contactor click).
+    from openmbb import dialogs as mb
+    asked = []
+    monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: asked.append(a) or False)
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._read_heavy("eventlogdump")
+    app.update()
+    assert asked
+    text = str(asked[0]).lower()
+    assert "permanent" in text and "very severe" in text
+
+
+def test_heavy_read_while_busy_is_refused_without_a_stuck_modal(app, monkeypatch):
+    # Audit fix: clicking a heavy read while another op is in flight must be
+    # refused BEFORE the blocking modal opens — otherwise _run_bg refuses the
+    # read behind the modal and the UI is left permanently grab-locked.
+    from openmbb import dialogs as mb
+    infos = []
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: infos.append(a))
+    monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._busy = True                       # an op is in flight
+    app._read_heavy("eventlogdump")
+    app.update()
+    assert not app._read_modal_up          # NO modal opened
+    assert not app.grab_current()          # nothing grab-locked
+    assert infos                           # user was told it's busy
+    app._busy = False
+
+
+def test_modal_read_refused_tears_down_the_modal(app, monkeypatch):
+    # Audit fix, safety net: if a read slips in and sets _busy AFTER the modal
+    # opened (e.g. a Watch tick during the confirm), the modal-owned _run_bg is
+    # refused — and the modal must tear itself down, not stay grab-locked.
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: None)
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._show_read_modal("Reading 'eventlogdump' from the bike")
+    assert app._read_modal_up
+    app._busy = True                       # the race: busy when the read launches
+    app._read_cmd("eventlogdump", modal=True)
+    app.update()
+    assert not app._read_modal_up          # torn down, not stuck
+    assert not app.grab_current()
+    app._busy = False

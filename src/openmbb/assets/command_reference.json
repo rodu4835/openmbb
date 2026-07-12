@@ -103,8 +103,8 @@
     "danger": "caution",
     "one_liner": "Dump the full event log (~1 MB, minutes) - can briefly open the contactor.",
     "what_it_does": "Reads the entire event log (~8600 entries / ~1 MB) as decoded text, INCLUDING per-sample 'Riding' entries (SOC, pack/motor temp, voltage, rpm, odometer) - this is the source OpenMBB parses for the Rides + Charts tabs; no Zero app or external decoder is needed. At 38400 baud it streams for MINUTES and monopolizes the MBB long enough that it stops servicing the Sevcon/CAN bus. READ_TIPS: 'can briefly OPEN the drivetrain contactor. Park the bike first.' It is a read - it does not modify anything. It is never in the DEFAULT baseline, but you can OPT IN to it: tick '+ also pull the full event log' on the Read tab (folds it into Pull full database behind a confirm), use the 'Pull ride log from bike' button on Analyze -> Rides, or run it directly here - all gated behind the contactor-risk confirm dialog. If the console prompt is missed at the end (the contactor stall can eat it), a near-complete capture is reported as 'event log captured (N of M)', not 'incomplete'.",
-    "what_could_happen": "The BMS protectively OPENS the drivetrain contactor while the console is monopolized (observed live: audible click + flashing dash). If the bike were moving, the drivetrain would drop out. It also ties up the console for minutes.",
-    "reversible": "Yes - no data is changed; the contactor re-closes on its own once the read finishes. It is a read-only side effect, not a persistent state change.",
+    "what_could_happen": "The BMS protectively OPENS the drivetrain contactor while the console is monopolized (observed live: audible click + flashing dash). If the bike were moving, the drivetrain would drop out. It also ties up the console for minutes. Each contactor open writes a PERMANENT 'Line Contactor o/c - VERY SEVERE' entry (Sevcon error 0x5101) to the bike's error log that this app CANNOT clear (errorlogclear is blocked) - so read the event log only when you actually need it.",
+    "reversible": "Yes for the drivetrain - the contactor re-closes on its own once the read finishes (a read-only side effect, not a persistent state change). But the VERY SEVERE error-log entry it leaves is permanent and not clearable from this app.",
     "recovery": "Wait for the dump to complete; the bike re-closes the contactor automatically and the dash returns to normal. Park the bike before running so a mid-ride contactor open is not a hazard."
   },
   {
@@ -113,7 +113,7 @@
     "danger": "caution",
     "one_liner": "Dump everything incl. logs (~1 MB, minutes) - same contactor caveat.",
     "what_it_does": "Dumps everything including the event logs (READ_TIPS: 'Everything incl. logs (~1 MB, minutes) - same contactor caveat.'). Because it includes the full event log it carries the same heavy/monopolize-the-console behavior as eventlogdump. Read-only content, never auto-run, GUI-gated behind a confirm dialog.",
-    "what_could_happen": "Same as eventlogdump: while the console is monopolized for minutes the BMS can protectively OPEN the drivetrain contactor (audible click + flashing dash).",
+    "what_could_happen": "Same as eventlogdump: while the console is monopolized for minutes the BMS can protectively OPEN the drivetrain contactor (audible click + flashing dash), and each open writes a PERMANENT 'Line Contactor o/c - VERY SEVERE' entry to the bike's error log that this app cannot clear.",
     "reversible": "Yes - it reads data only; the contactor re-closes itself once the dump finishes. No persistent change.",
     "recovery": "Let the dump finish; the bike re-closes the contactor automatically. Park the bike first."
   },

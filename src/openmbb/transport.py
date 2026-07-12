@@ -47,7 +47,11 @@ def eventlog_completeness(text):
 
 
 READ_COMMANDS = ["version", "help", "status", "stats", "runtime", "bms",
-                 "sevcon", "chargers", "inputs", "outputs", "dash", "obd"]
+                 "sevcon", "chargers", "inputs", "outputs", "dash", "bluetooth",
+                 "obd"]
+# `bluetooth` (bare) is a read — "Display/modify Bluetooth connection"; only
+# `bluetooth <args>` is a write and is blocked (safety.py). It was reachable only
+# by hand before; folding it into the read set means Pull captures bluetooth.txt.
 # `obd` ("Show all obd info") is a read, present in the rev-41 menu at BOTH login
 # levels (003_help.txt / 019_help.txt). D4: it is menu-verified but its OUTPUT has
 # not been captured live yet, so the FULL BASELINE runs it LAST (after `set` +

@@ -55,6 +55,7 @@ READ_TIPS = {
     "inputs": "Raw sensor inputs (rail voltages, kill switch, kickstand…).",
     "outputs": "Output states (DC/DC, warning light, contactor enable…).",
     "dash": "Instrument-cluster data (clock, odometer, CAN age).",
+    "bluetooth": "Bluetooth radio status (connected / discoverable / idle).",
     "obd": "OBD summary (protocol, DTCs).",
     "set": "All tunable settings — the backup source a write reads first. Shows "
            "identity only until you log in; the tunables appear after login.",
@@ -252,6 +253,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._cmd_history = []      # raw command-line history (↑/↓)
             self._cmd_hist_idx = 0
             self._busy = False
+            # A1: a heavy-read (eventlogdump/dumpall/ride-log/heavy-Pull) shows a
+            # BLOCKING modal until the user clicks Continue. _read_modal_up is the
+            # real software interlock (grab_set only stops human clicks, not
+            # after()-timers or programmatic invokes); the widgets are stored so
+            # progress/teardown can reach them; _last_read_error is stashed for the
+            # modal finalizer (on_error is called zero-arg).
+            self._read_modal_up = False
+            self._read_modal_win = None
+            self._read_modal_status = None
+            self._read_modal_bar = None
+            self._read_modal_btnrow = None
+            self._last_read_error = None
             self.analyze_session = None      # currently loaded Session for analysis
             self.compare_list = []           # [Session, ...] for the Compare panel
             # save base for session folders: explicit arg > saved config > cwd
@@ -879,15 +892,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             def add_menu(text, specs_fn):
                 mb = ttk.Menubutton(bar, text=text, style=mb_style)
                 mb._owl_menu_specs = specs_fn       # so a click switches menus
+                # A6: while the heavy-read modal is up, the menu bar is inert (these
+                # custom Menubuttons open with NO grab, so the modal's grab may not
+                # cover them — gate explicitly). Return "break" so nothing opens.
                 mb.bind("<Button-1>", lambda e, m=mb, f=specs_fn:
-                        (self._menu_popup(m, f()), "break")[-1])
+                        "break" if self._read_modal_up
+                        else (self._menu_popup(m, f()), "break")[-1])
                 mb.pack(side="left", padx=(4, 0), pady=1)
                 self._menubuttons.append((mb, specs_fn))
 
             add_menu("File", self._file_menu)
             add_menu("Tools", self._tools_menu)
             add_menu("Help", self._help_menu)
-            self.bind("<F1>", lambda e: self._show_instructions())
+            # F1 is a main-window binding that launches an external browser — also
+            # gated during a heavy read (A6).
+            self.bind("<F1>", lambda e: None if self._read_modal_up
+                      else self._show_instructions())
             # an open dropdown is an absolute-positioned popup that can't follow the
             # window; dismiss it when the main window moves/resizes (like a native
             # menu). Only acts while a menu is open, and only for the main window.
@@ -1675,6 +1695,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self.transport.close()
             except Exception:
                 pass
+            # A5: a disconnect/clean-slate must also release any read modal's grab.
+            if getattr(self, "_read_modal_up", False):
+                self._close_read_modal()
             self.transport = None
             self.logger = None
             self.connected = False
@@ -1764,6 +1787,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                                   "-", "-", False)
                 except Exception:
                     pass
+            # A5: release the read modal's grab deterministically (the _busy guard
+            # above misses the post-read, pre-Continue window where _busy is already
+            # False but the modal still holds the grab).
+            if self._read_modal_up:
+                self._close_read_modal()
             try:
                 if self.transport:
                     self.transport.close()
@@ -1795,7 +1823,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if sq is None:
                 return
             sq.pack_forget()
-            if self.connected and not self._busy:
+            # also hidden while the heavy-read modal is up — otherwise it repacks
+            # the moment finish() clears _busy (before Continue is pressed), floating
+            # a live button outside the modal (A2-guard).
+            if self.connected and not self._busy and not self._read_modal_up:
                 sq.pack(side="right")
 
         def _select_tab(self, needle):
@@ -1863,10 +1894,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._select_tab("Login")
                 self._login(then=lambda ok: ok and self._goto_writes())
 
-        def _run_bg(self, fn, done=None, on_error=None):
-            if self._busy:
-                messagebox.showinfo(APP_NAME, "Busy — wait for the current operation.")
-                return
+        def _run_bg(self, fn, done=None, on_error=None, allow_during_modal=False,
+                    suppress_default_error=False):
+            # A2-guard: refuse a second operation while busy OR while the heavy-read
+            # modal is up (except the ONE modal-owned read, which passes
+            # allow_during_modal). The modal refusal is SILENT — the "Busy" popup is
+            # itself a grab_set+wait_window dialog that would STEAL the modal's grab.
+            if self._busy or (self._read_modal_up and not allow_during_modal):
+                if self._busy and not self._read_modal_up:
+                    messagebox.showinfo(APP_NAME,
+                                        "Busy — wait for the current operation.")
+                return False        # refused — callers that opened a modal tear it down
             self._set_busy(True)
 
             def worker():
@@ -1879,8 +1917,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 def finish():
                     self._set_busy(False)
                     if err is not None:
+                        # A4: stash the exception so a modal finalizer (invoked via
+                        # the zero-arg on_error) can read it — on_error's signature
+                        # stays zero-arg so the connect caller is unaffected.
+                        self._last_read_error = err
                         # D6: a mid-session reboot invalidates the login/baseline
-                        # state — re-gate before surfacing the error
+                        # state — re-gate before surfacing the error (this does NOT
+                        # tear down a read modal; the finalizer owns that, A4).
                         if isinstance(err, ConsoleRebootError):
                             self.logged_in = False
                             self.baseline_done = False
@@ -1894,11 +1937,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                 on_error()
                             except Exception:
                                 pass
-                        messagebox.showerror(APP_NAME, str(err))
+                        # A4: suppress the default error dialog only for the
+                        # modal-owned read (its finalizer shows the error on the
+                        # modal). NEVER gate on `on_error is None` — the connect flow
+                        # passes on_error yet relies on this showerror.
+                        if not suppress_default_error:
+                            messagebox.showerror(APP_NAME, str(err))
                     elif done:
                         done(result)
                 self._cbq.put(finish)
             threading.Thread(target=worker, daemon=True).start()
+            return True         # accepted — the worker will run and call finish
 
         def _out(self, text):
             self.txt_out.config(state="normal")
@@ -2389,22 +2438,190 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             bits.append("logged in" if self.logged_in else "read-only")
             lbl.config(text="   ·   ".join(bits), style="Good.TLabel")
 
+        # -- A1/A2/A3/A5: heavy-read blocking modal ---------------------------
+        def _show_read_modal(self, title):
+            """A1: an application-modal, NON-blocking progress dialog for a heavy
+            read. grab_set blocks stray human clicks; _read_modal_up is the real
+            software interlock. Driven entirely via _cbq — NEVER wait_window (that
+            would re-enter _read_heavy). Mirrors the non-blocking _show_cable_wizard."""
+            from . import dialogs
+            try:
+                surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
+            except Exception:
+                surface = P["bg"]
+            win = tk.Toplevel(self)
+            win.title("Reading — please wait")
+            win.configure(bg=surface)
+            win.resizable(False, False)
+            try:
+                win.transient(self)
+            except Exception:
+                pass
+            win.protocol("WM_DELETE_WINDOW", lambda: None)   # no close until done
+            body = ttk.Frame(win, padding=(24, 20))
+            body.pack(fill="both", expand=True)
+            ttk.Label(body, text=title, style="Heading.TLabel").pack(anchor="w")
+            # plain Label (not a StringVar) — StringVars add dead-cycle GC pressure
+            # the Tk-suite teardown force-collects against.
+            status = ttk.Label(body, text=(
+                "Reading the full log from the bike — several minutes at 38400 baud. "
+                "Please don't touch anything until it finishes: the console can only "
+                "do one thing at a time. The bike may click the contactor; that's "
+                "expected and recovers when the read completes."),
+                wraplength=400, justify="left", style="Muted.TLabel")
+            status.pack(anchor="w", pady=(8, 12))
+            bar = ttk.Progressbar(body, mode="indeterminate")
+            bar.pack(fill="x")
+            try:
+                bar.start(12)
+            except Exception:
+                pass
+            btnrow = ttk.Frame(body)
+            btnrow.pack(fill="x", pady=(16, 0))
+            self._read_modal_win = win
+            self._read_modal_status = status
+            self._read_modal_bar = bar
+            self._read_modal_btnrow = btnrow
+            self._read_modal_up = True
+            self._refresh_action_buttons()       # hide safe-quit behind the modal
+            dialogs._dark_titlebar(win)
+            dialogs._center(win, self)
+            # grab_set raises TclError until the window is viewable (mapped); retry
+            # on the event loop instead of silently giving up (the grab is the
+            # human-facing block, so it must actually take).
+            def _grab(n=40):
+                if not self._alive(win) or win is not self._read_modal_win:
+                    return
+                try:
+                    win.grab_set()
+                except tk.TclError:
+                    if n > 0:
+                        win.after(20, lambda: _grab(n - 1))
+            _grab()
+            return win
+
+        def _modal_status(self, text):
+            """A3: push a status line to the read modal (no-op if it's gone)."""
+            s = self._read_modal_status
+            if self._read_modal_up and s is not None:
+                try:
+                    if s.winfo_exists():
+                        s.config(text=text)
+                except Exception:
+                    pass
+
+        def _heavy_outcome_msg(self, text, err):
+            """A4: classify a heavy read's terminal state into a plain message."""
+            if err is not None:
+                return ("The read stopped early: %s\n\nWhat was captured so far is "
+                        "saved to the session folder." % err)
+            if text and "### NOTE: event log captured" in text:
+                return ("Done. The full event log was captured. The console prompt "
+                        "wasn't seen at the very end, so the link resyncs on the "
+                        "next command — the ride/health data is usable.")
+            if text and "### TRUNCATED" in text:
+                return ("The read ended before the full log arrived. What was "
+                        "captured is saved; you can retry with the bike parked.")
+            return "Done — the read completed and is saved."
+
+        def _read_modal_finish(self, message, then=None):
+            """A4: terminal state — stop the bar, show `message`, reveal ONE
+            Continue button that tears the modal down and (if given) runs `then`."""
+            win = self._read_modal_win
+            if win is None or not self._alive(win):
+                self._close_read_modal()          # nothing to show; ensure teardown
+                if then:
+                    then()
+                return
+            try:
+                if self._read_modal_bar is not None and self._alive(self._read_modal_bar):
+                    self._read_modal_bar.stop()
+            except Exception:
+                pass
+            self._modal_status(message)
+
+            def _continue():
+                self._close_read_modal()
+                if then:
+                    then()
+            self._read_modal_set_continue(_continue)
+
+        def _read_modal_set_continue(self, command):
+            row = self._read_modal_btnrow
+            if row is None or not self._alive(row):
+                return
+            for w in row.winfo_children():
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+            ttk.Button(row, text="Continue", style=self.sty["accent"],
+                       command=command).pack(side="right")
+
+        def _close_read_modal(self):
+            """A5: the ONE teardown owner — release grab, destroy, clear the flag.
+            Called from Continue, _on_close, and disconnect. NOT from the reboot
+            re-gate (the finalizer owns the flip-to-Continue there)."""
+            bar = self._read_modal_bar
+            if bar is not None:
+                try:
+                    if self._alive(bar):
+                        bar.stop()
+                except Exception:
+                    pass
+            win = self._read_modal_win
+            if win is not None:
+                try:
+                    if self._alive(win):
+                        win.grab_release()
+                        win.destroy()
+                except Exception:
+                    pass
+            self._read_modal_win = None
+            self._read_modal_status = None
+            self._read_modal_bar = None
+            self._read_modal_btnrow = None
+            self._read_modal_up = False
+            self._refresh_action_buttons()
+
+        @staticmethod
+        def _alive(w):
+            try:
+                return bool(w.winfo_exists())
+            except Exception:
+                return False
+
         def _read_heavy(self, cmd, confirmed=False, out=None, then=None):
+            # Refuse up front while another op is in flight — otherwise we'd open
+            # the blocking modal and then _run_bg would refuse the read behind it,
+            # leaving a stuck grab (the modal-owned launch only exempts the
+            # _read_modal_up gate, not _busy). Mirrors _show_cable_wizard.
+            if self._busy:
+                messagebox.showinfo(APP_NAME, "Busy — wait for the current "
+                                    "operation to finish, then try the log read.")
+                return
             # A2: a heavy log dump can make the BMS open the drivetrain contactor
-            # (it starves the MBB's CAN servicing). Gate it behind an explicit
-            # warning + confirm — never let it run casually or in the baseline.
+            # (it starves the MBB's CAN servicing) AND writes a PERMANENT "Line
+            # Contactor o/c — VERY SEVERE" entry to the error log every time (C1).
+            # Gate it behind an explicit warning + confirm.
             if not messagebox.askokcancel(APP_NAME,
                     "'%s' reads the full log (~1 MB, several minutes at 38400 baud).\n\n"
                     "On a keyed-on bike this can make the BMS briefly OPEN the "
                     "drivetrain contactor — you'll hear a click and the dash will "
-                    "flash; it recovers when the read finishes. The bike must be "
-                    "SAFELY PARKED (never do this while riding).\n\nContinue?" % cmd):
+                    "flash; it recovers when the read finishes. Each time it does, "
+                    "the bike writes a PERMANENT 'Line Contactor o/c — VERY SEVERE' "
+                    "entry to its error log that this app CANNOT clear (errorlogclear "
+                    "is blocked). The bike must be SAFELY PARKED (never do this while "
+                    "riding).\n\nRead only when you need the log. Continue?" % cmd):
                 return
+            # A2: raise the blocking modal BEFORE the first wire byte, then run the
+            # read (modal=True routes completion through the Continue finalizer).
+            self._show_read_modal("Reading '%s' from the bike" % cmd)
             # 45 s idle: the real-bike contactor stall during a heavy dump can pause
             # the stream longer than the 30 s we first used (which finished, but with
             # no margin) — give it room so the read isn't cut mid-log.
             self._read_cmd(cmd, idle_timeout=45.0, confirmed=confirmed, out=out,
-                           then=then)
+                           then=then, modal=True)
 
         def _toggle_watch(self):
             # E1: start/stop the repeat-read timer.
@@ -2427,7 +2644,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.watch_var.set(False)
                 self._out("=== WATCH stopped (disconnected) ===")
                 return
-            if not self._busy:                   # skip a tick if a read is in flight
+            # skip a tick if a read is in flight OR the heavy-read modal is up
+            # (grab_set does NOT suppress this after()-timer; _busy clears before
+            # the user presses Continue, so _read_modal_up is the gate here).
+            if not self._busy and not self._read_modal_up:
                 self._flash_watch()              # pulse the dropdown blue on each send
                 self._read_cmd(self.watch_cmd.get())
             try:
@@ -2437,7 +2657,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.after(secs * 1000, self._watch_tick)
 
         def _read_cmd(self, cmd, quiet=False, idle_timeout=None, confirmed=False,
-                      out=None, then=None):
+                      out=None, then=None, modal=False):
             emit = out or self._out          # button reads -> txt_out; Console -> its own
             # A1/SAFE-2: classify by the lowercased FIRST TOKEN (like the transport),
             # not an exact full-string match — so a raw-box variant such as
@@ -2449,15 +2669,21 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
             def job():
                 def prog(nbytes):
-                    self._cbq.put(lambda: self.lbl_prog.config(
-                        text="%s: %d KB" % (cmd, nbytes // 1024)))
+                    def upd():
+                        self.lbl_prog.config(text="%s: %d KB" % (cmd, nbytes // 1024))
+                        self._modal_status("Reading %s… %d KB captured so far."
+                                           % (cmd, nbytes // 1024))     # A3
+                    self._cbq.put(upd)
                 out = self.transport.exec_command(
                     cmd, idle_timeout=idle,
                     max_time=900.0 if is_dump else 60.0,
                     progress_cb=prog if is_dump else None, confirmed=confirmed)
                 return out, self.transport.last_saved_path
 
-            def done(result):
+            def apply_read(result):
+                """The per-read side effects (emit, ingest, hints, logout re-gate).
+                Additive; `then` is handled separately so a modal read can defer it
+                to Continue. Returns the raw command text (for outcome classing)."""
                 out, path = result
                 self.lbl_prog.config(text="")
                 if not quiet:
@@ -2481,10 +2707,37 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     if hasattr(self, "unlock_var"):
                         self.unlock_var.set(False)
                     self._apply_gates()
-                if then:                     # e.g. re-render Rides after a log pull
-                    then()
+                return out
 
-            self._run_bg(job, done)
+            if modal:
+                # A4: success/graceful/truncation and errors ALL converge on the one
+                # Continue button; the modal finalizer runs `then` (success only).
+                def done(result):
+                    text = apply_read(result)
+                    self._read_modal_finish(self._heavy_outcome_msg(text, None), then)
+
+                def on_err():
+                    err = self._last_read_error
+                    self._last_read_error = None
+                    self.lbl_prog.config(text="")
+                    # error path never runs `then` (a partial pull parses nothing)
+                    self._read_modal_finish(self._heavy_outcome_msg(None, err), None)
+
+                started = self._run_bg(job, done, on_error=on_err,
+                                       allow_during_modal=True,
+                                       suppress_default_error=True)
+                if not started:
+                    # a read slipped in between the modal opening and here (e.g. a
+                    # Watch tick during the confirm) — don't leave a stuck grab.
+                    self._close_read_modal()
+                    messagebox.showinfo(APP_NAME, "Busy — wait for the current "
+                                        "operation to finish, then try again.")
+            else:
+                def done(result):
+                    apply_read(result)
+                    if then:                 # e.g. re-render Rides after a log pull
+                        then()
+                self._run_bg(job, done)
 
         def _cmd_enter(self):
             """Command-line Enter: send the typed command, then clear the box +
@@ -2744,13 +2997,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                              % (c, i + 1, len(seq))),
                         self.prg.config(maximum=len(seq), value=i),
                         self._baseline_mark(c, "run"),
-                        self._out("  [%d/%d] reading %s…" % (i + 1, len(seq), c))))
+                        self._out("  [%d/%d] reading %s…" % (i + 1, len(seq), c)),
+                        self._modal_status("Reading %s  (%d of %d)…"      # A2 path 4
+                                           % (c, i + 1, len(seq)))))
                     is_dump = cmd in LONG_COMMANDS
                     prog = None
                     if is_dump:
                         def prog(n, c=cmd):
-                            self._cbq.put(lambda: self.lbl_prog.config(
-                                text="pulling: %s (%d KB)" % (c, n // 1024)))
+                            self._cbq.put(lambda: (
+                                self.lbl_prog.config(
+                                    text="pulling: %s (%d KB)" % (c, n // 1024)),
+                                self._modal_status("Reading %s… %d KB captured "
+                                                   "so far." % (c, n // 1024))))
                     # C6: each command tolerant — one failure doesn't discard the pass
                     try:
                         out = self.transport.exec_command(
@@ -2823,7 +3081,38 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.lbl_prog.config(text="", foreground=P["dim"])          # reset from a prior run
             self._baseline_reset_marks()          # clear last pull's status borders
             self.prg.pack(fill="x", pady=(4, 2), before=self.lbl_prog)  # show progress
-            self._run_bg(job, done)
+            if include_heavy:
+                # A2 path 4: the heavy opt-in bypasses _read_heavy, so raise the SAME
+                # blocking modal here (same contactor + stray-click exposure) and
+                # route completion through the Continue finalizer.
+                self._show_read_modal("Pulling the full database + event log")
+
+                def done_modal(result):
+                    done(result)                  # normal completion (gates, notes)
+                    _res, errs, _hv = result
+                    if errs:
+                        msg = ("Database pull complete — %d command(s) failed (retry "
+                               "them with the read buttons). Backup saved." % len(errs))
+                    else:
+                        msg = "Database pull complete — everything read and backed up."
+                    self._read_modal_finish(msg, None)
+
+                def on_err_modal():
+                    err = self._last_read_error
+                    self._last_read_error = None
+                    self._read_modal_finish(
+                        "The pull stopped early: %s\n\nAny data read before that is "
+                        "saved to the session folder." % err, None)
+
+                started = self._run_bg(job, done_modal, on_error=on_err_modal,
+                                       allow_during_modal=True,
+                                       suppress_default_error=True)
+                if not started:                    # busy race — no stuck grab
+                    self._close_read_modal()
+                    messagebox.showinfo(APP_NAME, "Busy — wait for the current "
+                                        "operation to finish, then re-run the pull.")
+            else:
+                self._run_bg(job, done)
 
         def _write_session_meta(self, status_text):
             """C7: stamp the session with power mode + firmware rev, and warn when
@@ -3485,13 +3774,26 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     got, verified, verify_dump = r2
                     self._ingest_settings(verify_dump)   # current now reflects the write
                     if not verified:
-                        # the row now differs from the last read, so it shows '↺ Reset'
-                        # — point the user at it (esp. for booleans, whose accepted
-                        # token on rev 41 is unverified — a "Yes" might land inverted).
-                        messagebox.showwarning(APP_NAME,
-                            "Read-back mismatch for %s: you wrote %r but the bike reports "
-                            "%r. That row now shows '↺ Reset' — click it to restore the "
-                            "last-read value (%s)." % (name, new_val, got, old_val))
+                        # B1: distinguish a SILENT CLAMP (read-back UNCHANGED from the
+                        # pre-write value) from a changed-but-wrong read-back. The
+                        # console can reply "SUCCESS" yet keep the old value — verified
+                        # live 2026-07-12: maxcustspmph caps at the factory 89 mph.
+                        if first_number(got) == first_number(old_val):
+                            messagebox.showwarning(APP_NAME,
+                                "The console reported SUCCESS, but %s read back as %r — "
+                                "UNCHANGED from before your write. Your value of %r did "
+                                "not stick; this setting appears to be capped or rejected "
+                                "at this level. (No harm done — the bike kept its "
+                                "previous value.)" % (name, got, new_val))
+                        else:
+                            # changed, but not to what we asked — the row now shows
+                            # '↺ Reset'; point the user at it (esp. booleans, whose
+                            # accepted token on rev 41 is unverified).
+                            messagebox.showwarning(APP_NAME,
+                                "Read-back mismatch for %s: you wrote %r but the bike "
+                                "reports %r. That row now shows '↺ Reset' — click it to "
+                                "restore the last-read value (%s)."
+                                % (name, new_val, got, old_val))
                         try:
                             self.tree.selection_set(name)
                             self.tree.see(name)

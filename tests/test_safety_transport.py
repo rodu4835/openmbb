@@ -205,6 +205,58 @@ def test_bare_eeprom_reads_but_args_are_blocked():
     assert "eeprom usage" in tr.exec_command("eeprom").lower()   # the read returns data
 
 
+# C2 (v0.20): the REAL post-login (level 2) `help` menu (019_help.txt) exposes the
+# whole destructive command set to the raw box. Pin that EVERY one is refused by
+# the PUBLIC command_blocked (not the private _line_blocked), and that the two
+# deliberate safe reads still pass — fails if a future edit un-blocks one.
+LEVEL2_DESTRUCTIVE = [
+    "statsrst", "settingsrst", "force_all_storage_mode", "sevcon preop",
+    "dtc_clear", "eventlogclear", "errorlogclear", "format eeprom", "reset",
+    "exit_to_bl", "blcmds", "test", "burn",
+]
+
+
+@pytest.mark.parametrize("cmd", LEVEL2_DESTRUCTIVE)
+def test_post_login_destructive_menu_all_blocked(cmd):
+    assert command_blocked(cmd) is not None, cmd
+
+
+def test_post_login_safe_reads_still_allowed():
+    # these appear in the level-2 menu but are safe reads — must NOT be blocked
+    assert command_blocked("sevcon faults") is None
+    assert command_blocked("eeprom") is None
+
+
+def test_maxcustspmph_help_states_the_89_clamp():
+    # B2: the write-options help must reflect the LIVE-verified 89-mph clamp, not
+    # the stale "~85 mph / harmless" text (both the safety string and the JSON).
+    import json
+    import pathlib
+    blob = " ".join(x for x in WRITE_WHITELIST["maxcustspmph"]
+                    if isinstance(x, str)).lower()
+    assert "89" in blob and ("clamp" in blob or "capped" in blob)
+    assert "85 mph" not in blob
+    p = (pathlib.Path(__file__).resolve().parent.parent / "src" / "openmbb"
+         / "assets" / "write_options_help.json")
+    entry = next(e for e in json.loads(p.read_text(encoding="utf-8"))
+                 if e["name"] == "maxcustspmph")
+    txt = (entry["what_it_does"] + " " + entry["caution"]).lower()
+    assert "89" in txt and ("clamp" in txt or "capped" in txt)
+    assert "85 mph" not in txt and "harmless" not in txt
+
+
+def test_bluetooth_is_a_baseline_read_with_a_tooltip():
+    # D1: `bluetooth` (bare) is a read folded into Pull; its arg-form stays blocked.
+    # It MUST also have a READ_TIPS entry (a separate test asserts every read has one).
+    from openmbb.gui import baseline_read_order, READ_TIPS
+    order = baseline_read_order()
+    assert "bluetooth" in order
+    assert order[-1] == "obd"                       # obd still runs/sits last
+    assert "bluetooth" in READ_TIPS and READ_TIPS["bluetooth"]
+    assert command_blocked("bluetooth") is None     # bare = read
+    assert command_blocked("bluetooth reset") is not None    # arg-form = write, blocked
+
+
 def test_level0_gating_hides_tunables():
     # rev-41 (and now the sim): tunables are login-gated, identity shows at L0
     tr = make_transport()

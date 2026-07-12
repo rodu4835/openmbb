@@ -144,7 +144,12 @@ whole tool with no bike or cable. The staged flow below unlocks one step at a ti
    can opt in to fold `eventlogdump` into a pull with a checkbox), because on
    a keyed-on bike a long dump can starve the MBB's CAN servicing enough that the
    BMS briefly **opens the drivetrain contactor** (a click + a flashing dash that
-   recovers when the read finishes; observed live). One failed command no longer
+   recovers when the read finishes; observed live) — and each contactor open
+   leaves a **permanent "Line Contactor o/c — VERY SEVERE" error-log entry** the
+   app can't clear, so only read the event log when you need it. During a heavy
+   read the app shows a **blocking "Reading — please wait" window** that locks the
+   rest of the UI until it finishes, then offers **Continue** (the console is
+   single-threaded — nothing else can run mid-dump). One failed command no longer
    discards the pass, and Login unlocks only once the essential reads + a parsed
    `set` succeed. The session's power state is stamped (`session_meta.txt`); an
    on-charger baseline is flagged because isolation/SOC context isn't valid off

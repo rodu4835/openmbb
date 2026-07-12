@@ -12,11 +12,26 @@ _NUM = re.compile(r"-?\d+(?:\.\d+)?")
 
 
 def num(s):
-    """First number in a string as float, or None."""
+    """First number in a string as float, or None.
+
+    Guards the malformed-decimal token the MBB firmware can emit — the real
+    ``chargers`` dump printed ``0.-51 A`` (should be ``-0.51``). The regex would
+    match just the leading ``0`` and silently return ``0.0``, turning a real
+    negative reading into a wrong zero. When the match is immediately followed by
+    ``.`` and then a sign/digit (a garbled/truncated decimal, e.g. ``0.-51``),
+    return None (renders as n/a) instead of a misleading value. A plain trailing
+    period (``6809.``) is NOT affected — it isn't followed by a sign/digit.
+    """
     if s is None:
         return None
-    m = _NUM.search(str(s))
-    return float(m.group(0)) if m else None
+    s = str(s)
+    m = _NUM.search(s)
+    if not m:
+        return None
+    end = m.end()
+    if end + 1 < len(s) and s[end] == "." and s[end + 1] in "-+0123456789":
+        return None
+    return float(m.group(0))
 
 
 def all_nums(s):

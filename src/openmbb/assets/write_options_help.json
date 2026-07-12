@@ -23,8 +23,8 @@
   {
     "name": "maxcustspmph",
     "plain_name": "Custom mode: max speed (mph)",
-    "what_it_does": "Sets the top speed cap when riding in Custom ride mode. The bike's physical ceiling is around 85 mph; the console accepts values up to 102. This is a factory-supported parameter \u2014 the bike has always been designed to accept it.",
-    "caution": "Factory-supported and safe within the 20\u2013102 mph range. Setting it above the bike's actual top speed is harmless (the drivetrain limit still applies). Setting it very low restricts Custom mode to a slow crawl.",
+    "what_it_does": "Sets the top speed cap when riding in Custom ride mode. It can be LOWERED below stock, but it cannot be raised above the factory 89 mph: the console accepts values up to 102 and even reports SUCCESS, yet the value silently stays 89 (verified live 2026-07-12). This is a factory-supported parameter.",
+    "caution": "Lowering it restricts Custom mode (very low = a slow crawl). Raising it above the factory 89 mph is a silent no-op \u2014 the console reports SUCCESS but the setting is clamped/capped back to 89, so it does NOT unlock a higher top speed.",
     "seen_on_rev41": true
   },
   {

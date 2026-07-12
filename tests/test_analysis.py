@@ -106,6 +106,22 @@ def test_parsers_tolerate_empty_and_garbage():
     assert parsers.parse_stats("total nonsense here")["odo_km"] is None
 
 
+def test_num_rejects_malformed_decimal_but_keeps_clean_numbers():
+    # D2: the real `chargers` dump printed "0.-51 A" (should be -0.51). The regex
+    # would match just the leading "0" and silently return 0.0 — a real negative
+    # reading becoming a wrong zero. Reject the garbled-decimal signature -> None,
+    # WITHOUT breaking a plain trailing period (e.g. "6809.").
+    assert parsers.num("0.-51 A") is None            # was 0.0 on v0.19.1
+    assert parsers.num("Total Reported Battery Current : 0.-51 A") is None
+    # clean cases unchanged
+    assert parsers.num("-51 A") == -51.0
+    assert parsers.num("0.5 A") == 0.5
+    assert parsers.num("89") == 89.0
+    assert parsers.num("102.856 V") == 102.856
+    assert parsers.num("6809.") == 6809.0            # trailing period is NOT garbled
+    assert parsers.num("Odo: 6809km") == 6809.0
+
+
 # --- gearing math (exact) ---------------------------------------------------
 
 def test_gearing_ratios():

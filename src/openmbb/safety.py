@@ -117,9 +117,10 @@ WRITE_WHITELIST = {
     # the bike also exposes maxcustsprpm/maxcustspkph and the maxcust*x10 raw forms).
     "maxcustspmph": (
         "Custom mode: max speed (mph)",
-        "Top speed in Custom ride mode (real name: maxcustspmph). Bike's physical "
-        "ceiling is ~85 mph; console accepts up to 102.",
-        "SAFE - factory-supported parameter space.",
+        "Top speed in Custom ride mode (real name: maxcustspmph). Can be LOWERED, "
+        "but NOT raised above the factory 89 mph — the console accepts up to 102 and "
+        "reports SUCCESS, yet silently clamps the value back to 89 (verified live).",
+        "SAFE - factory-supported; raising above 89 is a silent no-op (clamped).",
         _v_int_range(20, 102), None),
     "maxcusttq_allowed": (
         "Custom mode: max torque (% of allowed)",
