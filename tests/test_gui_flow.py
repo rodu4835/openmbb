@@ -420,16 +420,15 @@ def test_cable_wizard_verifies_and_offers_connect(app):
 
 
 def test_sim_toggle_shows_indicator(app):
-    # toggling simulator mode is NOT silent — it updates the status-bar indicator
-    # and the landing badge (owner: clicked it and "nothing happened").
+    # toggling simulator mode is NOT silent — it updates the single status-bar
+    # indicator (owner: the redundant landing badge was removed).
     app.sim_var.set(False)
     app._on_sim_toggle()
     assert str(app.lbl_sim.cget("text")) == ""
-    assert app._sim_badge.winfo_manager() == ""        # badge hidden
+    assert not hasattr(app, "_sim_badge")              # landing badge removed
     app.sim_var.set(True)
     app._on_sim_toggle()
     assert "SIMULATOR" in str(app.lbl_sim.cget("text"))
-    assert app._sim_badge.winfo_manager() == "place"   # badge shown
 
 
 def test_dashboard_layout(app):
@@ -954,6 +953,80 @@ def test_writes_inline_edit_stages_and_writes(app):
     app._write_value("spfront", "22")
     assert _pump(app, lambda: first_number(
         app.settings.get("spfront", {}).get("value", "")) == "22")
+
+
+def test_writes_click_routing_opens_editor_and_writes(app, monkeypatch):
+    # owner bug: "i click on an item and nothing lets me enter a value". A single
+    # click on the 'New value' cell (#4) must open the inline editor; a double-click
+    # anywhere on the row opens it too; clicking 'Write' (#5) applies a pending value.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: "spfront" in app.tree.get_children())
+
+    opened = []
+    monkeypatch.setattr(app, "_open_new_editor", lambda row: opened.append(row))
+    monkeypatch.setattr(app.tree, "identify_row", lambda y: "spfront")
+
+    class E:
+        x = y = 5
+
+    # single click on the New-value column -> opens the editor (no double-click needed)
+    monkeypatch.setattr(app.tree, "identify_column", lambda x: "#4")
+    assert app._writes_action_click(E()) == "break"
+    assert opened == ["spfront"]
+
+    # double-click anywhere on the row (here the Setting column) -> also opens it
+    opened.clear()
+    monkeypatch.setattr(app.tree, "identify_column", lambda x: "#1")
+    assert app._writes_edit_cell(E()) == "break"
+    assert opened == ["spfront"]
+
+    # click the Write cell with a pending value staged -> applies it
+    written = []
+    monkeypatch.setattr(app, "_write_value", lambda n, v: written.append((n, v)))
+    app._pending_writes["spfront"] = "23"
+    monkeypatch.setattr(app.tree, "identify_column", lambda x: "#5")
+    assert app._writes_action_click(E()) == "break"
+    assert written == [("spfront", "23")]
+
+
+def test_analyze_defaults_to_current_session(app):
+    # owner: opening the Analyze tab with a live capture auto-loads the current
+    # session — no manual 'Use current session' click needed.
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._read_cmd("bms")
+    assert _pump(app, lambda: "### bms" in app.txt_out.get("1.0", "end"))
+    assert app.analyze_session is None
+    app.nb.select(app._ANALYZE_TAB)
+    app._on_tab_changed()
+    assert app.analyze_session is not None
+
+
+def test_connect_hides_controls_then_restores_on_failure(app, monkeypatch):
+    # owner: after clicking Connect the port/verify/connect controls hide (only the
+    # 'Connecting…' line + log show); they come back only if the attempt fails.
+    app.sim_var.set(True)
+    app._connect()
+    # mid-attempt (before the worker finishes) the pre-connect row is hidden
+    assert app.connect_row.winfo_manager() == ""
+    assert app.connect_busy.winfo_manager() == "pack"
+    assert _pump(app, lambda: app.connected)
+    # success: controls stay hidden, the success banner shows
+    assert app.connect_row.winfo_manager() == ""
+    assert app.connect_success.winfo_manager() == "pack"
+
+    # now force a failing connect and confirm the controls are restored for a retry
+    from openmbb import gui as _gui
+    monkeypatch.setattr(_gui.Transport, "listen",
+                        lambda self, *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    app._connect()
+    assert _pump(app, lambda: app.connect_row.winfo_manager() == "pack")
+    assert app.connect_busy.winfo_manager() == ""
 
 
 def test_read_points_to_analyze_once(app):

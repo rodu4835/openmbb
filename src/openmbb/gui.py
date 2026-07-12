@@ -246,6 +246,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # C7: a click on a locked tab is silently ignored by Tk — intercept it
             # and say what unlocks that phase instead.
             self.nb.bind("<Button-1>", self._on_tab_click)
+            # Analyze defaults to the live session (auto-loads on first open)
+            self.nb.bind("<<NotebookTabChanged>>", self._on_tab_changed, add="+")
             self._build_connect_tab()
             self._build_read_tab()
             self._build_login_tab()
@@ -312,12 +314,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             Calm/modern; hands off into the existing Connect flow."""
             lf = ttk.Frame(self)
             self.landing = lf
-            # persistent badge (place()d/forgotten by _refresh_sim_badge) so it
-            # tracks the simulator toggle, not just the startup state.
-            self._sim_badge = ttk.Label(
-                lf, text="SIMULATOR MODE  —  no bike connected",
-                style="Accent.TLabel")
-            self._refresh_sim_badge()
+            # (the simulator state shows once, in the status bar — no landing badge)
             inner = ttk.Frame(lf)
             inner.place(relx=0.5, rely=0.44, anchor="center")
             ttk.Label(inner, text=APP_NAME, style="Title.TLabel").pack()
@@ -788,15 +785,26 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             def outside(e):
                 if 0 <= e.x < root.winfo_width() and 0 <= e.y < root.winfo_height():
                     return
-                w = self.winfo_containing(e.x_root, e.y_root)
+                # click inside the open fly-out submenu? (it's a child of the grabbed
+                # root, so winfo_containing CAN see it — siblings it can't)
                 sm = getattr(self, "_open_submenu", None)
-                if sm is not None and w is not None and \
-                        (str(w) == str(sm) or str(w).startswith(str(sm) + ".")):
-                    return                   # click landed inside the open submenu
+                if sm is not None:
+                    w = self.winfo_containing(e.x_root, e.y_root)
+                    if w is not None and (str(w) == str(sm)
+                                          or str(w).startswith(str(sm) + ".")):
+                        return
                 close_all()
-                fn = getattr(w, "_owl_menu_specs", None)
-                if fn is not None:           # clicked another menu button -> switch
-                    self._menu_popup(w, fn())
+                # clicked another menu button? winfo_containing can't see it while a
+                # grab is active (it's outside the grab subtree), so hit-test the
+                # menubar by screen coords — this makes switching menus ONE click.
+                for mb, fn in getattr(self, "_menubuttons", []):
+                    if not mb.winfo_ismapped():
+                        continue
+                    x0, y0 = mb.winfo_rootx(), mb.winfo_rooty()
+                    if x0 <= e.x_root < x0 + mb.winfo_width() and \
+                            y0 <= e.y_root < y0 + mb.winfo_height():
+                        self._menu_popup(mb, fn())
+                        break
             root.bind("<Button-1>", outside)
 
         def _build_menubar(self):
@@ -824,12 +832,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             bar = ttk.Frame(self)
             bar.pack(side="top", fill="x")
 
+            self._menubuttons = []              # (mb, specs_fn) — for one-click switch
             def add_menu(text, specs_fn):
                 mb = ttk.Menubutton(bar, text=text, style=mb_style)
                 mb._owl_menu_specs = specs_fn       # so a click switches menus
                 mb.bind("<Button-1>", lambda e, m=mb, f=specs_fn:
                         (self._menu_popup(m, f()), "break")[-1])
                 mb.pack(side="left", padx=(4, 0), pady=1)
+                self._menubuttons.append((mb, specs_fn))
 
             add_menu("File", self._file_menu)
             add_menu("Tools", self._tools_menu)
@@ -1523,6 +1533,27 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if disabled:
                 messagebox.showinfo(APP_NAME, self._tab_unlock_hint(idx))
 
+        _ANALYZE_TAB = 4       # Connect0 Read1 Login2 Writes3 Analyze4 Console5
+
+        def _on_tab_changed(self, _evt=None):
+            """Owner: opening the Analyze tab with a live session captured but nothing
+            loaded auto-loads the current session (silently — no popup). The user can
+            still 'Load session folder…' to analyze a different one."""
+            try:
+                idx = self.nb.index(self.nb.select())
+            except Exception:
+                return
+            if idx != self._ANALYZE_TAB or self.analyze_session is not None:
+                return
+            if not self.logger or self._busy:
+                return
+            try:
+                s = sessions.load_session(self.logger.dir)
+            except Exception:
+                return
+            if self._session_has_data(s):
+                self._analyze_set(s)
+
         def _goto_writes(self):
             if self.connected and self.baseline_done and self.logged_in:
                 self.nb.select(3)
@@ -1673,7 +1704,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._select_tab("Login")
                 self._login(then=lambda ok: ok and self._goto_writes())
 
-        def _run_bg(self, fn, done=None):
+        def _run_bg(self, fn, done=None, on_error=None):
             if self._busy:
                 messagebox.showinfo(APP_NAME, "Busy — wait for the current operation.")
                 return
@@ -1699,6 +1730,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             if hasattr(self, "unlock_var"):
                                 self.unlock_var.set(False)
                             self._apply_gates()
+                        if on_error:
+                            try:
+                                on_error()
+                            except Exception:
+                                pass
                         messagebox.showerror(APP_NAME, str(err))
                     elif done:
                         done(result)
@@ -1757,6 +1793,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 justify="left", padding=(0, 10), foreground=P["warn"])
             self.connect_help.pack(anchor="w")
 
+            # while a connect attempt runs, the port/verify/connect controls are
+            # hidden and this "Connecting…" line shows instead — they only come back
+            # if the attempt fails (so the user can adjust the port + retry).
+            self.connect_busy = ttk.Frame(f)
+            ttk.Label(self.connect_busy,
+                      text="Connecting… waking the console and reading the firmware "
+                      "version. Progress shows in the log below.",
+                      style="Good.TLabel").pack(side="left")
+
             # success banner shown by _connect's done() (no button — the tabs are
             # right there). Hidden until connected; replaces the pre-connect controls.
             self.connect_success = ttk.Frame(f)
@@ -1767,11 +1812,33 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_probe = self._console_text(f, 16)
             self.txt_probe.pack(fill="both", expand=True)
 
+        def _show_connecting(self):
+            # a connect attempt just started: hide the pre-connect controls and show
+            # the "Connecting…" line. They stay hidden on success; _restore brings
+            # them back on failure.
+            self.connect_row.pack_forget()
+            self.connect_help.pack_forget()
+            if hasattr(self, "connect_success"):
+                self.connect_success.pack_forget()
+            self.connect_busy.pack(fill="x", pady=(0, 8), before=self.txt_probe)
+
+        def _restore_connect_controls(self):
+            # connect FAILED: bring back the port/verify/connect controls so the user
+            # can adjust and try again.
+            if hasattr(self, "connect_busy"):
+                self.connect_busy.pack_forget()
+            if hasattr(self, "connect_success"):
+                self.connect_success.pack_forget()
+            self.connect_row.pack(fill="x", before=self.txt_probe)
+            self.connect_help.pack(anchor="w", before=self.txt_probe)
+
         def _show_connect_success(self, text):
             # connected: drop the pre-connect controls (port / verify / connect /
             # how-to) — they're pointless now — and show just the banner + console.
             self.connect_row.pack_forget()
             self.connect_help.pack_forget()
+            if hasattr(self, "connect_busy"):
+                self.connect_busy.pack_forget()
             self.lbl_connect_success.config(text=text)
             self.connect_success.pack(fill="x", pady=(0, 8), before=self.txt_probe)
 
@@ -1809,18 +1876,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._refresh_dash_header()
 
         def _refresh_sim_badge(self):
-            """Reflect the simulator state everywhere it's visible: the landing
-            badge and a persistent status-bar indicator."""
-            on = self.sim_var.get()
-            badge = getattr(self, "_sim_badge", None)
-            if badge is not None:
-                if on:
-                    badge.place(relx=0.5, rely=0.06, anchor="center")
-                else:
-                    badge.place_forget()
+            """Reflect the simulator state in the single status-bar indicator
+            (the redundant landing badge was removed — one place is enough)."""
             lbl = getattr(self, "lbl_sim", None)
             if lbl is not None:
-                lbl.config(text="◆ SIMULATOR MODE" if on else "")
+                lbl.config(text="◆ SIMULATOR MODE" if self.sim_var.get() else "")
 
         def _probe_log(self, text):
             self.txt_probe.config(state="normal")
@@ -1873,6 +1933,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._reset_session_state()
             self._ensure_log_dir()          # G2: fall back if the save folder died
             is_simport = self.sim_var.get()
+            # hide the port/verify/connect controls while we connect; they come back
+            # only if it fails (owner: no point re-offering them mid-attempt).
+            self._show_connecting()
 
             def job():
                 # B3: narrate each step into the connect console AS IT HAPPENS (the
@@ -1960,7 +2023,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._show_connect_success(
                     "✓  Connected to %s — the link is live and read-only." % where)
 
-            self._run_bg(job, done)
+            self._run_bg(job, done, on_error=self._restore_connect_controls)
 
         # -- Phase 1: Read -----------------------------------------------------
         def _add_tooltip(self, widget, text):
@@ -2758,12 +2821,21 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         # -- Phase 3: Writes -------------------------------------------------------
         def _build_write_tab(self):
             f = self._scrollable_tab(" Writes ")     # D3: visible scrollbar
-            self._tab_header(f, "Change a setting",
-                             "advanced — whitelisted, backed up, reversible")
+            # header row: title on the left, the master UNLOCK toggle right-aligned
+            # in the same row (owner) so the gate sits with the page title.
+            hdr = ttk.Frame(f)
+            hdr.pack(fill="x")
+            htitle = ttk.Frame(hdr)
+            htitle.pack(side="left", anchor="w")
+            ttk.Label(htitle, text="Change a setting",
+                      style="Heading.TLabel").pack(anchor="w")
+            ttk.Label(htitle, text="advanced — whitelisted, backed up, reversible",
+                      style="Muted.TLabel").pack(anchor="w", pady=(1, 0))
             self.unlock_var = tk.BooleanVar(value=False)
-            ttk.Checkbutton(f, text="UNLOCK WRITES (master gate)",
+            ttk.Checkbutton(hdr, text="UNLOCK WRITES (master gate)",
                             style=self.sty["toggle"],
-                            variable=self.unlock_var).pack(anchor="w")
+                            variable=self.unlock_var).pack(side="right", anchor="e")
+            ttk.Frame(f, height=12).pack()      # match _tab_header's bottom spacing
             # D2/D4: one concise line (no redundant options button — it duplicated the
             # per-row description; the read-only reference is Help → Command reference).
             ttk.Label(f, foreground=P["dim"], wraplength=940, justify="left",
@@ -2799,8 +2871,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._pending_writes = {}
 
             self.lbl_effect = ttk.Label(
-                f, text="Double-click a row's 'New value' cell to edit it, then click "
-                "'Write' on that row.", wraplength=1000, justify="left", padding=(0, 4))
+                f, text="Click a row's 'New value' cell and type a value (or "
+                "double-click anywhere on the row). A '✎ Write →' appears on that "
+                "row — arm UNLOCK WRITES (top-right), then click it to apply.",
+                wraplength=1000, justify="left", padding=(0, 4))
             self.lbl_effect.pack(anchor="w")
 
             # (the read-only Sevcon safety guards moved off this action page — they
@@ -2885,25 +2959,44 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.lbl_effect.config(text="\n".join(parts))
 
         def _writes_edit_cell(self, event):
-            """Double-click the 'New value' cell -> an inline Entry to type into."""
+            """Double-click ANYWHERE on a whitelisted row -> inline editor over its
+            'New value' cell (forgiving: you don't have to hit that column exactly)."""
             row = self.tree.identify_row(event.y)
-            if not row or self.tree.identify_column(event.x) != "#4":   # "new" column
-                return
+            if row and row in WRITE_WHITELIST and row in self.settings:
+                self._open_new_editor(row)
+                return "break"
+
+        def _open_new_editor(self, row):
+            """Place an inline Entry over a row's 'New value' cell to type into. Used
+            by both the single-click-on-the-cell and double-click-the-row paths."""
+            if getattr(self, "_writes_editing_row", None) == row:
+                return                           # already editing this row
+            self.tree.selection_set(row)
+            self.tree.see(row)
+            self._show_effect()
+            self.tree.update_idletasks()
             bbox = self.tree.bbox(row, "new")
             if not bbox:
                 return
+            self._writes_editing_row = row
             x, y, w, h = bbox
             var = tk.StringVar(value=self._pending_writes.get(row, ""))
             ent = tk.Entry(self.tree, textvariable=var, font=(self.sty["mono"], 10),
                            bg=P["field"], fg=P["fg"], insertbackground=P["fg"],
                            relief="flat", highlightthickness=1,
-                           highlightbackground=P["green"])
+                           highlightbackground=P["green"], highlightcolor=P["green"])
             ent.place(x=x, y=y, width=w, height=h)
             ent.focus_set()
             ent.icursor("end")
             ent.select_range(0, "end")
 
             done = {"v": False}                 # Return destroys -> FocusOut fires too
+
+            def clear_marker():
+                # only clear if it still points at THIS row (a new editor for a
+                # different row may already have claimed it via focus-steal)
+                if getattr(self, "_writes_editing_row", None) == row:
+                    self._writes_editing_row = None
 
             def commit(_e=None):
                 if done["v"]:
@@ -2914,10 +3007,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     ent.destroy()
                 except Exception:
                     pass
+                clear_marker()
                 self._set_pending_write(row, val)
+
+            def cancel(_e=None):
+                done["v"] = True
+                clear_marker()
+                ent.destroy()
             ent.bind("<Return>", commit)
             ent.bind("<FocusOut>", commit)
-            ent.bind("<Escape>", lambda e: (done.__setitem__("v", True), ent.destroy()))
+            ent.bind("<Escape>", cancel)
 
         def _set_pending_write(self, name, val):
             """Stage/clear an inline pending write for a row: show the new value + a
@@ -2937,11 +3036,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                tags=("pending",))
 
         def _writes_action_click(self, event):
-            """Single click on a row's 'Write' cell -> apply that row's pending value."""
+            """Single click: the 'Write' cell (#5) applies a pending value; the 'New
+            value' cell (#4) opens the inline editor — so a plain click in that
+            column starts editing (no need to know it's a double-click)."""
             row = self.tree.identify_row(event.y)
-            if row and self.tree.identify_column(event.x) == "#5" \
-                    and row in self._pending_writes:
+            if not row or row not in WRITE_WHITELIST or row not in self.settings:
+                return
+            col = self.tree.identify_column(event.x)
+            if col == "#5" and row in self._pending_writes:
                 self._write_value(row, self._pending_writes[row])
+                return "break"
+            if col == "#4":                      # New-value cell -> start editing
+                self._open_new_editor(row)
                 return "break"
 
         def _write_value(self, name, new_val):
