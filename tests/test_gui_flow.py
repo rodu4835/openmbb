@@ -966,16 +966,24 @@ def test_writes_reset_to_default(app, monkeypatch):
 def test_safe_disconnect_resets_to_clean_slate(app):
     # owner: after Safely disconnect, a reconnect must NOT look pre-pulled — the
     # green command borders, loaded analysis, and last-read snapshot all clear.
+    import tkinter as tk
     app._connect()
     assert _pump(app, lambda: app.connected)
     app._baseline()
     assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._read_cmd("status")                   # leave text in the Read console
+    assert _pump(app, lambda: "### status" in app.txt_out.get("1.0", "end"))
     app._analyze_use_current()
     assert app.analyze_session is not None
     app._baseline_mark("status", "ok")
     assert str(app.cmd_cells["status"].cget("bg")) == app._cell_color("ok")
     app.baseline_heavy_var.set(True)          # opt-ins / zoom must also re-earn
     app._chart_xzoom = (1.0, 2.0)
+    app._cmd_history = ["bms", "status"]      # console history
+    app.compare_list = [object()]             # a loaded Compare session
+    app._analyze_hint_shown = True
+    gwin = app._show_gearing_calc()           # a stray helper window
+    assert gwin.winfo_exists()
 
     app._safe_disconnect()
     app.update()
@@ -985,6 +993,12 @@ def test_safe_disconnect_resets_to_clean_slate(app):
     assert str(app.cmd_cells["status"].cget("bg")) == str(app._cell_bg)  # cleared
     assert app.baseline_heavy_var.get() is False
     assert app._chart_xzoom is None
+    # the previous session's consoles/history/compare/helper windows are all gone
+    assert app.txt_out.get("1.0", "end").strip() == ""
+    assert app.txt_probe.get("1.0", "end").strip() == ""
+    assert app._cmd_history == [] and app.compare_list == []
+    assert app._analyze_hint_shown is False
+    assert not [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)]
 
 
 def test_top_menu_switches_in_one_action_without_grab(app):
@@ -1106,6 +1120,46 @@ def test_connect_hides_controls_then_restores_on_failure(app, monkeypatch):
     app._connect()
     assert _pump(app, lambda: app.connect_row.winfo_manager() == "pack")
     assert app.connect_busy.winfo_manager() == ""
+    # the fresh console isn't left blank after the error dialog — a retry line shows
+    assert "try again" in app.txt_probe.get("1.0", "end").lower()
+
+
+def test_connect_page_copy_is_calm_and_current(app):
+    # owner: the connect-fail fallback had stale text + orange-warning styling. The
+    # help is now muted (not P['warn']) and uses the ACTUAL button labels; the
+    # 'Connecting…' line is neutral, not a green success style.
+    from openmbb.gui import VERIFY_LABEL, CONNECT_LABEL
+    assert str(app.connect_help.cget("style")) == "Muted.TLabel"
+    txt = app.connect_help.cget("text")
+    assert VERIFY_LABEL in txt and CONNECT_LABEL in txt
+    busy_lbl = app.connect_busy.winfo_children()[0]
+    assert str(busy_lbl.cget("style")) == "Muted.TLabel"
+
+
+def test_writes_description_card_scrolls_and_is_readable(app):
+    # owner: (C) two-finger scroll must work over the description card (its dynamic
+    # labels get the page wheel binding); (D) it reads as a card — panel-coloured
+    # surface, labels on that surface, comfortable body measure/size.
+    from openmbb.theme import PALETTE as _P
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: "spfront" in app.tree.get_children())
+    app.tree.selection_set("spfront")
+    app._show_effect()
+
+    assert str(app.effect_card.cget("bg")) == _P["panel"]           # D: card surface
+    labels = [w for w in app.effect_card.winfo_children()
+              if w.winfo_class() == "Label"]
+    assert labels
+    assert all(str(w.cget("bg")) == _P["panel"] for w in labels)    # D: on the card
+    # C: every dynamic label carries the page's wheel binding (no scroll dead zone)
+    assert all(w.bind("<MouseWheel>") for w in labels)
+    bodies = [w for w in labels if int(w.cget("wraplength") or 0) > 0]
+    assert bodies and all(int(w.cget("wraplength")) <= 700 for w in bodies)  # D measure
 
 
 def test_baseline_heavy_optin_includes_eventlog(app, monkeypatch):

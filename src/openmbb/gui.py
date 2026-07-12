@@ -1676,8 +1676,23 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.unlock_var.set(False)
             if hasattr(self, "baseline_heavy_var"):
                 self.baseline_heavy_var.set(False)   # the '+event log' opt-in re-earns
+            if getattr(self, "watch_var", None) is not None:
+                self.watch_var.set(False)            # the repeat-read stops too
             self._chart_xzoom = None                 # drop any chart drag-zoom
             self._baseline_reset_marks()
+            # wipe every text console so a reconnect doesn't show the PREVIOUS session's
+            # output (owner: "still brings up previous windows"). This also runs at the
+            # top of every _connect, so a retry starts with a clean Connect log.
+            for cname in ("txt_probe", "txt_out", "txt_login", "txt_console",
+                          "txt_compare"):
+                self._clear_console(getattr(self, cname, None))
+            self._cmd_history = []
+            self._cmd_hist_idx = 0
+            self._analyze_hint_shown = False
+            self.compare_list = []                   # Compare tab: drop loaded sessions
+            if hasattr(self, "effect_panel"):
+                self._show_effect_hint()             # reset the Writes description panel
+            self._close_transient_toplevels()        # gearing calc / pickers / info wins
             self._hide_connect_success()     # a new/broken session re-earns it
             self._set_login_status(False)
             if hasattr(self, "lbl_prog"):
@@ -1690,6 +1705,28 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     t.delete(*t.get_children())
             self._refresh_write_rows()
             self._apply_gates()          # also refreshes the dashboard header
+
+        @staticmethod
+        def _clear_console(widget):
+            """Blank a read-only Text console (no-op if it doesn't exist yet)."""
+            if widget is None:
+                return
+            try:
+                widget.config(state="normal")
+                widget.delete("1.0", "end")
+                widget.config(state="disabled")
+            except Exception:
+                pass
+
+        def _close_transient_toplevels(self):
+            """Destroy any open helper windows (gearing calculator, recent-sessions
+            picker, settings, info popups) so a disconnect leaves nothing behind."""
+            for w in list(self.winfo_children()):
+                if isinstance(w, tk.Toplevel):
+                    try:
+                        w.destroy()
+                    except Exception:
+                        pass
 
         def _on_close(self):
             """Window X / File→Exit: guard an in-flight operation, then release
@@ -1882,26 +1919,27 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                           command=self._connect)
             self.btn_connect.pack(side="left", padx=12)
 
+            # calm/muted guidance (was an orange warning wall) using the ACTUAL button
+            # labels; power the bike (key ON or AC charger), or explore in Simulator.
             self.connect_help = ttk.Label(f, text=(
-                "Pick your COM port, then click Connect & probe — it wakes the console "
-                "and reads the firmware version. Not sure the cable is right? Click "
-                "Test your cable first: it only LISTENS (transmits nothing) to confirm "
-                "the wiring + baud before anything is sent. Power the bike during "
-                "connect — key ON, or plug in the AC charger (Mode: Charging).\n"
-                "No bike yet? Turn on Simulator mode on the Home screen (or Tools → "
-                "Settings → Connection). Cable wiring + pinout: Help → Wiring diagram. "
-                "Isolation-resistance reads are only valid OFF the charger."),
-                justify="left", padding=(0, 10), foreground=P["warn"])
+                "Pick your COM port, then '%s' — it wakes the console and reads the "
+                "firmware. Unsure of the cable? '%s' first: it only listens (sends "
+                "nothing) to confirm the wiring + baud. Power the bike (key ON, or the "
+                "AC charger in Charging mode).\n"
+                "No bike? Turn on Simulator mode on the Home screen. Cable wiring: "
+                "Help → Wiring diagram. Isolation reads are only valid OFF the charger."
+                % (CONNECT_LABEL, VERIFY_LABEL)),
+                justify="left", padding=(0, 10), style="Muted.TLabel")
             self.connect_help.pack(anchor="w")
 
             # while a connect attempt runs, the port/verify/connect controls are
-            # hidden and this "Connecting…" line shows instead — they only come back
-            # if the attempt fails (so the user can adjust the port + retry).
+            # hidden and this neutral "Connecting…" line shows instead — they come back
+            # only if the attempt fails (so the user can adjust the port + retry).
             self.connect_busy = ttk.Frame(f)
             ttk.Label(self.connect_busy,
-                      text="Connecting… waking the console and reading the firmware "
-                      "version. Progress shows in the log below.",
-                      style="Good.TLabel").pack(side="left")
+                      text="Connecting… waking the console and reading the firmware. "
+                      "Progress shows in the log below.",
+                      style="Muted.TLabel").pack(side="left")
 
             # success banner shown by _connect's done() (no button — the tabs are
             # right there). Hidden until connected; replaces the pre-connect controls.
@@ -1925,13 +1963,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _restore_connect_controls(self):
             # connect FAILED: bring back the port/verify/connect controls so the user
-            # can adjust and try again.
+            # can adjust and try again, and leave a plain retry line in the log (the
+            # error dialog closes; the fresh console shouldn't just go blank).
             if hasattr(self, "connect_busy"):
                 self.connect_busy.pack_forget()
             if hasattr(self, "connect_success"):
                 self.connect_success.pack_forget()
             self.connect_row.pack(fill="x", before=self.txt_probe)
             self.connect_help.pack(anchor="w", before=self.txt_probe)
+            self._probe_log("\nAttempt failed — adjust the COM port (or turn on "
+                            "Simulator mode on the Home screen) and try again.")
 
         def _show_connect_success(self, text):
             # connected: drop the pre-connect controls (port / verify / connect /
@@ -3009,12 +3050,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             f._owl_wheel = _wheel
             return f
 
-        def _bind_page_wheel(self, inner):
-            """Route wheel / two-finger scroll over the page's static widgets to the
-            scrollable canvas — child widgets otherwise eat the event so only the
-            scrollbar drag worked. Widgets that scroll themselves (Treeview / Text /
-            Listbox) are left alone."""
-            wheel = getattr(inner, "_owl_wheel", None)
+        def _bind_wheel_subtree(self, root, wheel):
+            """Bind <MouseWheel> -> `wheel` on `root` and every descendant that doesn't
+            scroll itself (Treeview / Text / Listbox). Safe to call repeatedly on a
+            REBUILT subtree — per-widget binds only, never bind_all (which churned the
+            interpreter-global bindtag across app lifecycles and broke the suite once)."""
             if wheel is None:
                 return
 
@@ -3026,7 +3066,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         pass
                 for c in w.winfo_children():
                     walk(c)
-            walk(inner)
+            walk(root)
+
+        def _bind_page_wheel(self, inner):
+            """Route wheel / two-finger scroll over the page's static widgets to the
+            scrollable canvas — child widgets otherwise eat the event so only the
+            scrollbar drag worked."""
+            self._bind_wheel_subtree(inner, getattr(inner, "_owl_wheel", None))
 
         # -- Phase 3: Writes -------------------------------------------------------
         def _build_write_tab(self):
@@ -3081,10 +3127,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.tree.bind("<Button-1>", self._writes_action_click)
             self._pending_writes = {}
 
-            # a styled description panel (rebuilt per selection) — readable rows with
-            # a colour-coded RISK chip + keyworded paragraphs, not one wall of text.
+            # description panel = a CARD (panel-grey with a thin border) so it reads as
+            # a contained block, not text floating on the page. Rebuilt per selection.
             self.effect_panel = ttk.Frame(f)
-            self.effect_panel.pack(anchor="w", fill="x", pady=(4, 0))
+            self.effect_panel.pack(anchor="w", fill="x", pady=(8, 0))
+            card = tk.Frame(self.effect_panel, bg=P["panel"], highlightthickness=1,
+                            highlightbackground="#39394a", highlightcolor="#39394a")
+            card.pack(fill="x")
+            self.effect_card = tk.Frame(card, bg=P["panel"])   # inner padding surface
+            self.effect_card.pack(fill="x", padx=12, pady=10)
+            # remember the page's wheel handler BEFORE building the card, so a REBUILT
+            # effect card re-binds the two-finger scroll (its dynamic labels otherwise
+            # become a scroll dead zone) — set it before the first _show_effect_hint.
+            self._writes_wheel = getattr(f, "_owl_wheel", None)
             self._show_effect_hint()
 
             # (No separate revert journal (owner): a changed row shows '↺ Reset' inline,
@@ -3180,31 +3235,37 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 out.append(("Caution", it["caution"], P["warn"]))
             if it.get("seen_on_rev41") is False:
                 out.append(("Note", "not confirmed on the verified rev-41 bike.",
-                            P["dim"]))
+                            self._CARD_DIM))
             return out
 
+        # a slightly brighter grey than P["dim"] for on-card secondary text (local —
+        # not the global P["dim"], to avoid an app-wide contrast change)
+        _CARD_DIM = "#aab2c5"
+
         def _clear_effect(self):
-            for w in self.effect_panel.winfo_children():
+            for w in self.effect_card.winfo_children():
                 w.destroy()
 
         def _effect_line(self, keyword, text, color):
-            """A keyworded paragraph: a bold colour-coded label + an indented, wrapped
-            body — scannable, unlike a run-on line."""
-            row = ttk.Frame(self.effect_panel)
-            row.pack(anchor="w", fill="x", pady=(4, 0))
-            ttk.Label(row, text=keyword, foreground=color,
-                      font=(self.sty["ui"], 9, "bold")).pack(anchor="w")
-            ttk.Label(row, text=text, wraplength=980, justify="left",
-                      foreground=P["fg"]).pack(anchor="w", padx=(12, 0))
+            """A keyworded paragraph on the card: a bold colour-coded keyword, then an
+            indented wrapped body at a comfortable reading measure (~680px, 10pt)."""
+            tk.Label(self.effect_card, text=keyword, foreground=color, bg=P["panel"],
+                     font=(self.sty["ui"], 10, "bold")).pack(anchor="w", pady=(6, 0))
+            tk.Label(self.effect_card, text=text, wraplength=680, justify="left",
+                     foreground=P["fg"], bg=P["panel"],
+                     font=(self.sty["ui"], 10)).pack(anchor="w", padx=(18, 0))
 
         def _show_effect_hint(self):
             self._clear_effect()
-            ttk.Label(self.effect_panel, wraplength=1000, justify="left",
-                      foreground=P["dim"],
-                      text="Select a setting to see what it does. Click its 'New value' "
-                      "cell to type a value (a '✎ Write →' appears); arm UNLOCK WRITES "
-                      "(top-right) and click it to apply. Changed a setting? Its row "
-                      "shows '↺ Reset' to restore the last full read.").pack(anchor="w")
+            tk.Label(self.effect_card, wraplength=660, justify="left",
+                     foreground=self._CARD_DIM, bg=P["panel"],
+                     font=(self.sty["ui"], 10),
+                     text="Select a setting to see what it does. Click its 'New value' "
+                     "cell to type a value (a '✎ Write →' appears); arm UNLOCK WRITES "
+                     "(top-right) and click it to apply. Changed a setting? Its row "
+                     "shows '↺ Reset' to restore the last full read.").pack(anchor="w")
+            self._bind_wheel_subtree(self.effect_panel,
+                                     getattr(self, "_writes_wheel", None))
 
         def _show_effect(self, _evt=None):
             sel = self.tree.selection()
@@ -3213,18 +3274,24 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._clear_effect()
             name = sel[0]
             label, effect, risk, _v, _w = WRITE_WHITELIST[name]
-            ttk.Label(self.effect_panel, text="%s — %s" % (name, label),
-                      style="Heading.TLabel").pack(anchor="w")
+            tk.Label(self.effect_card, text="%s — %s" % (name, label), bg=P["panel"],
+                     foreground=P["fg"], font=(self.sty["ui"], 12, "bold")).pack(
+                         anchor="w")
             safe = risk.upper().startswith("SAFE")
-            chip = ttk.Frame(self.effect_panel)
-            chip.pack(anchor="w", pady=(3, 0))
+            chip = tk.Frame(self.effect_card, bg=P["panel"])
+            chip.pack(anchor="w", pady=(5, 2))
             tk.Label(chip, text=" RISK ", bg=(P["green"] if safe else P["warn"]),
-                     fg="#0d0d0d", font=(self.sty["ui"], 8, "bold")).pack(side="left")
-            ttk.Label(chip, text="  " + risk,
-                      foreground=(P["green"] if safe else P["warn"])).pack(side="left")
+                     fg="#0d0d0d", font=(self.sty["ui"], 8, "bold")).pack(
+                         side="left", padx=(0, 5))
+            tk.Label(chip, text=risk, bg=P["panel"],
+                     foreground=(P["green"] if safe else P["warn"]),
+                     font=(self.sty["ui"], 9)).pack(side="left")
             self._effect_line("EFFECT", effect, "#8fd0ff")
             for keyword, body, color in self._write_help_parts(name):
                 self._effect_line(keyword, body, color)
+            # dynamic labels just replaced the card contents -> re-arm two-finger scroll
+            self._bind_wheel_subtree(self.effect_panel,
+                                     getattr(self, "_writes_wheel", None))
 
         def _writes_edit_cell(self, event):
             """Double-click ANYWHERE on a whitelisted row -> inline editor over its
