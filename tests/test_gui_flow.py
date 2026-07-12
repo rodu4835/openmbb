@@ -1142,6 +1142,49 @@ def test_trend_note_says_real_pulls(app, monkeypatch):
     assert not any("SIMULATED" in t for t in texts)
 
 
+def test_compare_renders_diff_and_points_to_charts(app, monkeypatch):
+    # v0.18 E: Compare is now the settings-diff; the capacity/gearing trend text
+    # blocks moved to the Charts tab ('Trend:' metrics).
+    from openmbb import sessions, gui as _gui
+    app.compare_list = [sessions.Session("/x/a_COM4", {}, ""),
+                        sessions.Session("/x/b_COM4", {}, "")]
+    monkeypatch.setattr(_gui.compare_mod, "compare_sessions", lambda ordered: {
+        "settings_diff": [("spfront", "20", "22")],
+        "capacity_trend": [("a", 6.5), ("b", 6.4)],
+        "gearing_trend": [("a", 4.5, "x"), ("b", 4.0, "y")]})
+    app._render_compare()
+    app.update()
+    out = app.txt_compare.get("1.0", "end")
+    assert "SETTINGS CHANGED" in out and "spfront" in out
+    assert "Charts tab" in out                       # pointer to the trends
+    assert "LEARNED PACK CAPACITY" not in out        # moved off Compare
+    assert "EFFECTIVE GEARING RATIO" not in out
+
+
+def test_gearing_trend_metric_available_and_computes(app, monkeypatch):
+    # v0.18 E: an 'effective gearing' Trend metric exists on Charts, derived per
+    # session from the odometer (rev/km) with the default wheel circ.
+    from openmbb.gui import _trend_gearing_ratio
+    assert "Trend: effective gearing" in app._CHART_METRICS
+    r = _trend_gearing_ratio({}, {"odo_motor_rev": 13_000_000, "odo_km": 6800})
+    assert r is not None and r > 0
+    assert _trend_gearing_ratio({}, {"odo_motor_rev": None, "odo_km": None}) is None
+    import datetime as dt
+    now = dt.datetime.now().timestamp()
+    monkeypatch.setattr(app, "_load_trend_sessions", lambda: [
+        (now - 40 * 86400, "a_COM4", {}, {"odo_motor_rev": 13_000_000, "odo_km": 6800}),
+        (now - 5 * 86400, "b_COM4", {}, {"odo_motor_rev": 13_200_000, "odo_km": 6850})])
+    app.sim_var.set(False)
+    app.chart_metric.set("Trend: effective gearing")
+    app.chart_range.set("All")
+    app._chart_xzoom = None
+    app._render_charts()
+    app.update()
+    cv = app.chart_canvas
+    texts = [cv.itemcget(i, "text") for i in cv.find_all() if cv.type(i) == "text"]
+    assert any("real pull" in t for t in texts)
+
+
 def test_chart_drag_sets_xzoom_and_double_click_resets(app):
     # v0.18 D: dragging across the plot sets an x-window in DATA coords (via the
     # transform _chart_line stashes); double-click clears it.

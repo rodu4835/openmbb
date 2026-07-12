@@ -65,6 +65,18 @@ READ_TIPS = {
 }
 
 
+def _trend_gearing_ratio(bms, stats):
+    """Per-session lifetime-average effective ratio from the odometer (default wheel
+    circ — the trend cache doesn't carry per-session rwhcirc, and a constant circ
+    preserves the SHAPE a trend shows; it steps after a re-gear once km accrue). The
+    delta-based 'current' ratio lives in compare.compare_sessions (Compare tab)."""
+    rev, km = stats.get("odo_motor_rev"), stats.get("odo_km")
+    if not rev or not km:
+        return None
+    return rides.effective_ratio(rides.revs_per_km(rev, km),
+                                 gearing_mod.DEFAULT_CIRC_MM)
+
+
 # MBB console login passwords tried by the "Try known passwords" button, in
 # order. These are community-reported guesses (unverified per firmware). When a
 # password is confirmed to work on a bike, ADD IT HERE so it is tried
@@ -3682,7 +3694,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                           "Temperatures vs distance", "Motor current vs distance",
                           "SOC vs pack voltage", "Efficiency per ride (bar)",
                           "Trend: pack capacity", "Trend: charge cycles",
-                          "Trend: max battery temp", "Trend: max motor temp")
+                          "Trend: max battery temp", "Trend: max motor temp",
+                          "Trend: effective gearing")
 
         # cross-session trends: label -> (extract(bms, stats), y-label, is_temp)
         _SESSION_TRENDS = {
@@ -3694,6 +3707,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                         "max battery temp", True),
             "Trend: max motor temp": (lambda b, s: s.get("max_motor_temp_c"),
                                       "max motor temp", True),
+            "Trend: effective gearing": (_trend_gearing_ratio,
+                                         "effective ratio (:1)", False),
         }
 
         def _build_charts_tab(self, sub):
@@ -3872,7 +3887,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if anchor is None:
                 anchor = {"Trend: pack capacity": 100.0, "Trend: charge cycles": 60.0,
                           "Trend: max battery temp": 34.0 if tu != "F" else 93.0,
-                          "Trend: max motor temp": 55.0 if tu != "F" else 131.0
+                          "Trend: max motor temp": 55.0 if tu != "F" else 131.0,
+                          "Trend: effective gearing": 4.0
                           }.get(metric, 50.0)
             now = _dt.datetime.now().timestamp()
             span, n = 365 * 86400, 26
@@ -3884,8 +3900,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     val = max(0.0, anchor - back * 4)   # cycles grow toward newest
                 elif metric == "Trend: pack capacity":
                     val = anchor + back * 0.15          # gentle decline toward newest
-                else:                                   # temps: wobble around anchor
-                    val = anchor + math.sin(i * 1.1) * (5 if (is_temp and tu == "F") else 3)
+                elif metric == "Trend: effective gearing":
+                    val = anchor + math.sin(i * 1.1) * 0.03   # ~flat (steps at a re-gear)
+                elif is_temp:
+                    val = anchor + math.sin(i * 1.1) * (5 if tu == "F" else 3)
+                else:
+                    val = anchor + math.sin(i * 1.1) * 3
                 pts.append((t, round(val, 2)))
             return pts
 
@@ -4204,6 +4224,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if len(ordered) < 2:
                 self._compare_out("\nAdd a second session to see the diff and trends.")
                 return
+            # Compare is now focused on WHAT CHANGED between two sessions (the
+            # settings diff). The over-time trends (pack capacity, charge cycles,
+            # temps, effective gearing) live on the Charts tab as 'Trend:' metrics —
+            # a real dated timeline instead of a text table (owner consolidation).
             res = compare_mod.compare_sessions(ordered)
             self._compare_out("\nSETTINGS CHANGED (%s -> %s):"
                               % (ordered[0].name, ordered[-1].name))
@@ -4212,14 +4236,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self._compare_out("  %-16s %s -> %s" % (name, old, new))
             else:
                 self._compare_out("  (none)")
-            self._compare_out("\nLEARNED PACK CAPACITY:")
-            for n, cap in res["capacity_trend"]:
-                self._compare_out("  %-28s %s Ah" % (n, cap if cap is not None else "n/a"))
-            self._compare_out("\nEFFECTIVE GEARING RATIO:")
-            for n, r, basis in res["gearing_trend"]:
-                self._compare_out("  %-28s %-9s [%s]"
-                                  % (n, ("%.2f:1" % r) if r is not None else "n/a",
-                                     basis or "?"))
+            self._compare_out("\nTrends across pulls (pack capacity, charge cycles, "
+                              "temps, effective gearing) live on the Charts tab — pick "
+                              "a 'Trend:' metric there for a dated timeline.")
 
         def _gearing_plan(self):
             try:
