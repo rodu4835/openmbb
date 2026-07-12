@@ -548,11 +548,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             else:
                 ttk.Frame(parent, height=10).pack(anchor="w")
 
-        def _new_tab(self, tab_label, title, subtitle=""):
-            """A notebook tab with generous padding + a consistent titled header."""
+        def _new_tab(self, tab_label, title=None, subtitle=""):
+            """A notebook tab with generous padding + an optional titled header."""
             f = ttk.Frame(self.nb, padding=18)
             self.nb.add(f, text=tab_label)
-            self._tab_header(f, title, subtitle)
+            if title:
+                self._tab_header(f, title, subtitle)
             return f
 
         def _console_text(self, parent, height, fg=None):
@@ -652,21 +653,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.after(40, self._pump_cbq)
 
         def _build_statusbar(self):
-            # owner: keep this row lean — connection + login (+ sim). The firmware
-            # rev shows in the Read dashboard header, the app version is in the title
-            # bar, and the save location lives in File / Tools -> Settings, so none
-            # of those are repeated here.
+            # owner: ONE connection/identity line lives here (the app's single
+            # status row) — connection + firmware rev + VIN + login state, kept in
+            # sync by _refresh_dash_header. The Read tab no longer repeats it.
             bar = ttk.Frame(self, padding=(8, 6))
             bar.pack(fill="x")
-            self.lbl_conn = ttk.Label(bar, text="● DISCONNECTED",
-                                      foreground=P["danger"],
-                                      font=(self.sty["ui"], 10, "bold"))
-            self.lbl_conn.pack(side="left")
-            self.lbl_login = ttk.Label(bar, text="not logged in",
-                                       foreground=P["dim"])
-            self.lbl_login.pack(side="left", padx=16)
+            self.dash_header = ttk.Label(bar, text="", style="Muted.TLabel")
+            self.dash_header.pack(side="left")
             self.lbl_sim = ttk.Label(bar, text="", style="Accent.TLabel")
-            self.lbl_sim.pack(side="left", padx=16)
+            self.lbl_sim.pack(side="right")
 
         # -- menu bar --------------------------------------------------------
         def _dismiss_open_menu(self):
@@ -1501,16 +1496,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ]
             for i, st in enumerate(states):
                 self.nb.tab(i, state=st)
-            self.lbl_conn.config(
-                text="● CONNECTED (%s)" % ("SIMULATOR" if self.sim_var.get()
-                                           else self.port_var.get())
-                if self.connected else "● DISCONNECTED",
-                foreground=P["green"] if self.connected else P["danger"])
-            self.lbl_login.config(
-                text="logged in (level shown in Login tab)" if self.logged_in
-                else "not logged in",
-                foreground=P["green"] if self.logged_in else P["dim"])
-            self._refresh_dash_header()      # T2: keep the dashboard banner in sync
+            self._refresh_dash_header()      # the single status line (conn/rev/login)
             self._refresh_action_buttons()   # T3: gate the action bar on connect/busy
 
         def _tab_unlock_hint(self, idx):
@@ -1601,13 +1587,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             bar = ttk.Frame(self, padding=(8, 6))
             bar.pack(side="bottom", fill="x")
             # T3: created here but HIDDEN until usable (owner: not visible until you
-            # actually connect) — _refresh_action_buttons packs/forgets it. The old
-            # "Done — what's next?" hub was retired: its choices all duplicated
-            # one-click affordances (Analyze tab, the Read completion banner's "Set
-            # up writes", and this button), so it was the last bit of a parallel
-            # navigation model.
+            # actually connect) — _refresh_action_buttons packs/forgets it.
             self.btn_safequit = ttk.Button(bar, text="Safely disconnect & quit",
                                             command=self._safe_quit)
+            # the Read completion banner lives here (owner: inline with safe-quit),
+            # shown by _show_read_success after a successful pull.
+            self.read_success = ttk.Frame(bar)
+            self.lbl_read_success = ttk.Label(self.read_success, text="",
+                                              style="Good.TLabel")
+            self.lbl_read_success.pack(side="left")
+            ttk.Button(self.read_success, text="Analyze results  →",
+                       style=self.sty["accent"], command=self._continue_to_analyze
+                       ).pack(side="left", padx=(10, 0))
+            ttk.Button(self.read_success, text="Set up writes  →",
+                       command=self._start_writes_flow).pack(side="left", padx=6)
             self._refresh_action_buttons()   # hidden until connected + idle
 
         def _set_busy(self, flag):
@@ -1739,7 +1732,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _build_connect_tab(self):
             f = self._new_tab(" Connect ", "Connect to your bike",
                               "verify the cable, then connect & probe")
-            row = ttk.Frame(f)
+            # the pre-connect controls (port row + how-to blurb) are hidden once
+            # connected — the success banner is all that's relevant then.
+            row = self.connect_row = ttk.Frame(f)
             row.pack(fill="x")
             ttk.Label(row, text="Port:").pack(side="left")
             # The port list is real COM ports only. Exploring without a bike is the
@@ -1761,7 +1756,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                           command=self._connect)
             self.btn_connect.pack(side="left", padx=12)
 
-            ttk.Label(f, text=(
+            self.connect_help = ttk.Label(f, text=(
                 "Pick your COM port, then click Connect & probe — it wakes the console "
                 "and reads the firmware version. Not sure the cable is right? Click "
                 "Test your cable first: it only LISTENS (transmits nothing) to confirm "
@@ -1770,8 +1765,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 "No bike yet? Turn on Simulator mode on the Home screen (or Tools → "
                 "Settings → Connection). Cable wiring + pinout: Help → Wiring diagram. "
                 "Isolation-resistance reads are only valid OFF the charger."),
-                justify="left", padding=(0, 10),
-                foreground=P["warn"]).pack(anchor="w")
+                justify="left", padding=(0, 10), foreground=P["warn"])
+            self.connect_help.pack(anchor="w")
 
             # success banner shown by _connect's done() instead of auto-jumping to
             # Read (owner: let the user confirm + click through). Hidden until then.
@@ -1788,12 +1783,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_probe.pack(fill="both", expand=True)
 
         def _show_connect_success(self, text):
+            # connected: drop the pre-connect controls (port / verify / connect /
+            # how-to) — they're pointless now — and show just the banner + console.
+            self.connect_row.pack_forget()
+            self.connect_help.pack_forget()
             self.lbl_connect_success.config(text=text)
             self.connect_success.pack(fill="x", pady=(0, 8), before=self.txt_probe)
 
         def _hide_connect_success(self):
-            if hasattr(self, "connect_success"):
-                self.connect_success.pack_forget()
+            if not hasattr(self, "connect_success"):
+                return
+            self.connect_success.pack_forget()
+            # restore the pre-connect controls (order: port row, then the blurb)
+            self.connect_row.pack(fill="x", before=self.txt_probe)
+            self.connect_help.pack(anchor="w", before=self.txt_probe)
 
         def _continue_to_read(self):
             self.nb.select(1)      # the Read tab
@@ -1806,7 +1809,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _show_read_success(self, text):
             self.lbl_read_success.config(text=text)
-            self.read_success.pack(fill="x", pady=(0, 8), before=self.read_body)
+            self.read_success.pack(side="left")     # in the bottom bar, left of safe-quit
 
         def _hide_read_success(self):
             if hasattr(self, "read_success"):
@@ -2022,33 +2025,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             widget.bind("<Destroy>", hide)
 
         def _build_read_tab(self):
-            f = self._new_tab(" Read ", "Read the bike",
-                              "pull the data, then review it in Analyze")
-
-            # T2 dashboard: a connected/identity header, then a two-column body —
-            # LEFT the output/status console, RIGHT the action column (primary
-            # "Pull full database" on top, raw box, quick reads, heavy at bottom).
-            header = ttk.Frame(f)
-            header.pack(fill="x", pady=(0, 8))
-            self.dash_header = ttk.Label(header, text="", style="Good.TLabel")
-            self.dash_header.pack(side="left")
-
-            # completion banner shown by _baseline done() on success — the primary
-            # "what next" signal (Analyze the data, or set up writes). Hidden until
-            # a full database pull succeeds; packed above the two-column body.
-            self.read_success = ttk.Frame(f)
-            self.lbl_read_success = ttk.Label(self.read_success, text="",
-                                              style="Good.TLabel")
-            self.lbl_read_success.pack(side="left")
-            ttk.Button(self.read_success, text="Analyze results  →",
-                       style=self.sty["accent"], command=self._continue_to_analyze
-                       ).pack(side="left", padx=(12, 0))
-            ttk.Button(self.read_success, text="Set up writes  →",
-                       command=self._start_writes_flow).pack(side="left", padx=8)
+            # no tab header + no dashboard row here (owner): the single status line
+            # at the top of the window carries connection / rev / VIN / login. This
+            # tab is just the two-column body — LEFT the output/status console, RIGHT
+            # the action column (primary "Pull full database" on top, raw box,
+            # commands, heavy at bottom).
+            f = self._new_tab(" Read ")
 
             body = ttk.Frame(f)
             body.pack(fill="both", expand=True)
-            self.read_body = body
 
             # RIGHT action column — a fixed-width SCROLLABLE panel so the heavy
             # reads at the bottom stay reachable at any window height (owner: the
@@ -2083,16 +2068,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._add_tooltip(self.btn_baseline,
                               "Reads everything at once (health, settings, errors, "
                               "gearing) and saves a backup — the smart first move.")
-            ttk.Label(right, text="reads everything + saves a backup",
-                      style="Muted.TLabel", wraplength=280).pack(anchor="w", pady=(1, 6))
-            prow = ttk.Frame(right)
-            prow.pack(fill="x", pady=(0, 12))
-            self.prg = ttk.Progressbar(prow, mode="determinate")
-            self.prg.pack(fill="x")
-            self.lbl_prog = ttk.Label(prow, text="", style="Muted.TLabel")
-            self.lbl_prog.pack(anchor="w")
+            # no caption (owner): the progress bar shows only DURING a pull, and the
+            # progress label is empty (invisible) when idle, so Commands sits right
+            # under the button.
+            self.prg = ttk.Progressbar(right, mode="determinate")     # packed on demand
+            self.lbl_prog = ttk.Label(right, text="", style="Muted.TLabel",
+                                      wraplength=280)
+            self.lbl_prog.pack(fill="x", pady=(4, 0))
 
-            ttk.Label(right, text="Quick reads", style="Heading.TLabel").pack(anchor="w")
+            ttk.Label(right, text="Commands", style="Heading.TLabel").pack(
+                anchor="w", pady=(8, 2))
             quick = ttk.Frame(right)
             quick.pack(fill="x", pady=(2, 0))
             quick.columnconfigure(0, weight=1)
@@ -2496,6 +2481,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             def done(result):
                 results, errors = result
                 self.prg.config(value=0)
+                self.prg.pack_forget()          # progress bar only shows during a pull
                 # C7: record power-state context (on-charger contaminates iso/SOC)
                 self._write_session_meta(results.get("status", ""))
                 for cmd in seq:
@@ -2521,8 +2507,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                   "buttons: %s)" % (len(errors), ", ".join(errors)))
                     # C1: a backup exists now — the completion banner is the primary
                     # next-step signal; this console line is a breadcrumb.
-                    self._out("→ Backup saved. Use the banner above to Analyze the "
-                              "results or set up writes.")
+                    self._out("→ Backup saved. Use the bar at the bottom to Analyze "
+                              "the results or set up writes.")
                     self._show_read_success(
                         "✓  Full database pulled & backed up — what next?")
                 else:
@@ -2535,6 +2521,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if then:                 # continue a chained flow (e.g. -> Writes)
                     then(self.baseline_done)
 
+            self.prg.pack(fill="x", pady=(4, 2), before=self.lbl_prog)  # show progress
             self._run_bg(job, done)
 
         def _write_session_meta(self, status_text):
@@ -2583,24 +2570,32 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Label(f, text=(
                 "Logging in is READ-ONLY — it reveals the tuning settings the console "
                 "hides and unlocks the Writes tab. It changes nothing on the bike, and "
-                "a failed attempt just leaves you read-only. Click 'Try known "
-                "passwords', or type your own and 'Try this password'."),
+                "a failed attempt just leaves you read-only. The box is pre-filled with "
+                "the last password that worked (or a community-known one); press Login, "
+                "or type a different one."),
                 wraplength=920, justify="left").pack(anchor="w")
 
             row = ttk.Frame(f)
             row.pack(fill="x", pady=8)
-            ttk.Button(row, text="Try known passwords", style=self.sty["accent"],
-                       command=self._login).pack(side="left")
-            ttk.Label(row, text="     Password:").pack(side="left")
-            self.login_pw = tk.StringVar()
-            ent = ttk.Entry(row, textvariable=self.login_pw, width=22, show="*")
-            ent.pack(side="left", padx=4)
+            ttk.Label(row, text="Password:").pack(side="left")
+            self.login_pw = tk.StringVar(value=self._default_login_pw())
+            ent = ttk.Entry(row, textvariable=self.login_pw, width=24, show="*")
+            ent.pack(side="left", padx=6)
             ent.bind("<Return>", lambda e: self._login_custom())
-            ttk.Button(row, text="Try this password",
+            ttk.Button(row, text="Login", style=self.sty["accent"],
                        command=self._login_custom).pack(side="left")
 
             self.txt_login = self._console_text(f, 24)
             self.txt_login.pack(fill="both", expand=True)
+
+        def _default_login_pw(self):
+            """Pre-fill the password box with the last password that worked (a saved
+            one), else a community-known default — the user can change it. The
+            'Set up writes' flow still auto-tries all known passwords under the hood."""
+            saved = config.get_saved_passwords()
+            if saved:
+                return saved[-1]
+            return COMMUNITY_PASSWORDS[0] if COMMUNITY_PASSWORDS else ""
 
         def _login_log(self, text):
             self.txt_login.config(state="normal")

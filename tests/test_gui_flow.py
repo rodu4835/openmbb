@@ -111,6 +111,25 @@ def test_full_flow(app):
     assert not app._errors
 
 
+def test_login_box_prefilled_no_try_known_button(app):
+    # owner: Login is now Password:[box=default][Login] — the box is pre-filled
+    # with a community-known default (no saved password in the hermetic config),
+    # and the separate "Try known passwords" button is gone.
+    from openmbb.gui import COMMUNITY_PASSWORDS
+    assert app.login_pw.get() == COMMUNITY_PASSWORDS[0]
+    def _texts(w, out):
+        try:
+            out.append(str(w.cget("text")))
+        except Exception:
+            pass
+        for c in w.winfo_children():
+            _texts(c, out)
+    texts = []
+    _texts(app, texts)
+    assert not any("try known passwords" in t.lower() for t in texts)
+    assert any(t == "Login" for t in texts)          # the single login button
+
+
 def test_login_custom_password_is_redacted(app):
     app._connect()
     assert _pump(app, lambda: app.connected)
@@ -279,6 +298,9 @@ def test_connect_shows_continue_banner_not_autojump(app):
     assert _pump(app, lambda: app.connected)
     assert app.connect_success.winfo_manager() == "pack"       # banner is shown
     assert "Connected" in app.lbl_connect_success.cget("text")
+    # the now-pointless pre-connect controls are hidden once connected
+    assert app.connect_row.winfo_manager() == ""
+    assert app.connect_help.winfo_manager() == ""
     assert app.nb.index(app.nb.select()) == 0                  # still on Connect
     app._continue_to_read()
     assert app.nb.index(app.nb.select()) == 1                  # now on Read
@@ -946,7 +968,7 @@ def test_read_tab_has_legend_and_tooltips(app):
     from openmbb.gui import READ_TIPS
     from openmbb.transport import READ_COMMANDS, DUMP_COMMANDS, HEAVY_COMMANDS
     labels = " ".join(_all_label_text(app)).lower()
-    assert "quick reads" in labels and "pull full database" in labels
+    assert "commands" in labels and "pull full database" in labels
     for cmd in READ_COMMANDS + DUMP_COMMANDS + HEAVY_COMMANDS:
         assert READ_TIPS.get(cmd), "no tooltip for read button %r" % cmd
 
