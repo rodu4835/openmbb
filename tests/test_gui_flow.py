@@ -1235,8 +1235,13 @@ def test_writes_description_card_scrolls_and_is_readable(app):
     assert all(str(w.cget("bg")) == _P["panel"] for w in labels)    # D: on the card
     # C: every dynamic label carries the page's wheel binding (no scroll dead zone)
     assert all(w.bind("<MouseWheel>") for w in labels)
-    bodies = [w for w in labels if int(w.cget("wraplength") or 0) > 0]
-    assert bodies and all(int(w.cget("wraplength")) <= 700 for w in bodies)  # D measure
+    # cget("wraplength") returns a str on Windows Tk but a _tkinter.Tcl_Obj on
+    # Linux Tk — int() rejects the Tcl_Obj (and `or 0` can't catch it, it's
+    # truthy), so normalize via str() first (works on both).
+    def _wrap(w):
+        return int(str(w.cget("wraplength") or 0))
+    bodies = [w for w in labels if _wrap(w) > 0]
+    assert bodies and all(_wrap(w) <= 700 for w in bodies)                  # D measure
 
 
 def test_baseline_heavy_optin_includes_eventlog(app, monkeypatch):
