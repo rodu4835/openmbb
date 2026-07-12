@@ -1556,7 +1556,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if hasattr(self, "lst_journal"):
                 self.lst_journal.delete(0, "end")
             self._hide_connect_success()     # a new/broken session re-earns it
-            self._hide_read_success()
+            self._set_login_status(False)
+            if hasattr(self, "lbl_prog"):
+                self.lbl_prog.config(text="", foreground=P["dim"])
             self._refresh_write_rows()
             self._apply_gates()          # also refreshes the dashboard header
 
@@ -1587,20 +1589,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             bar = ttk.Frame(self, padding=(8, 6))
             bar.pack(side="bottom", fill="x")
             # T3: created here but HIDDEN until usable (owner: not visible until you
-            # actually connect) — _refresh_action_buttons packs/forgets it.
+            # actually connect) — _refresh_action_buttons packs/forgets it. (The pull
+            # confirmation lives under the Pull-full-database button now, not here.)
             self.btn_safequit = ttk.Button(bar, text="Safely disconnect & quit",
                                             command=self._safe_quit)
-            # the Read completion banner lives here (owner: inline with safe-quit),
-            # shown by _show_read_success after a successful pull.
-            self.read_success = ttk.Frame(bar)
-            self.lbl_read_success = ttk.Label(self.read_success, text="",
-                                              style="Good.TLabel")
-            self.lbl_read_success.pack(side="left")
-            ttk.Button(self.read_success, text="Analyze results  →",
-                       style=self.sty["accent"], command=self._continue_to_analyze
-                       ).pack(side="left", padx=(10, 0))
-            ttk.Button(self.read_success, text="Set up writes  →",
-                       command=self._start_writes_flow).pack(side="left", padx=6)
             self._refresh_action_buttons()   # hidden until connected + idle
 
         def _set_busy(self, flag):
@@ -1800,20 +1792,6 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _continue_to_read(self):
             self.nb.select(1)      # the Read tab
-
-        def _continue_to_analyze(self):
-            # load the current session into Analyze and go there — but only navigate
-            # if it actually loaded (else the guidance message stands, no empty tab)
-            if self._analyze_use_current():
-                self._select_tab("Analyze")
-
-        def _show_read_success(self, text):
-            self.lbl_read_success.config(text=text)
-            self.read_success.pack(side="left")     # in the bottom bar, left of safe-quit
-
-        def _hide_read_success(self):
-            if hasattr(self, "read_success"):
-                self.read_success.pack_forget()
 
         def _refresh_ports(self):
             real_ports = list_serial_ports()
@@ -2500,20 +2478,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if not missing:
                     self.baseline_done = True
                     self._apply_gates()
-                    self.lbl_prog.config(text="database pull complete")
+                    # confirmation right under the Pull button (owner)
+                    self.lbl_prog.config(text="✓ Full database pulled & backed up",
+                                         foreground=P["green"])
                     self._out("\n=== Full database pulled -> %s ===" % self.logger.dir)
                     if errors:
                         self._out("(%d command(s) failed; retry them with the read "
                                   "buttons: %s)" % (len(errors), ", ".join(errors)))
-                    # C1: a backup exists now — the completion banner is the primary
-                    # next-step signal; this console line is a breadcrumb.
-                    self._out("→ Backup saved. Use the bar at the bottom to Analyze "
-                              "the results or set up writes.")
-                    self._show_read_success(
-                        "✓  Full database pulled & backed up — what next?")
+                    self._out("→ Backup saved. Review it on the Analyze tab.")
                 else:
-                    self._hide_read_success()
-                    self.lbl_prog.config(text="database pull incomplete")
+                    self.lbl_prog.config(text="database pull incomplete",
+                                         foreground=P["danger"])
                     self._out("\n[!] DATABASE PULL INCOMPLETE — essential reads missing/"
                               "unparsed: %s. No backup was saved, so Writes stays "
                               "LOCKED; fix the link and re-run ★ Pull full database."
@@ -2521,6 +2496,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if then:                 # continue a chained flow (e.g. -> Writes)
                     then(self.baseline_done)
 
+            self.lbl_prog.config(text="", foreground=P["dim"])          # reset from a prior run
             self.prg.pack(fill="x", pady=(4, 2), before=self.lbl_prog)  # show progress
             self._run_bg(job, done)
 
@@ -2579,14 +2555,30 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             row.pack(fill="x", pady=8)
             ttk.Label(row, text="Password:").pack(side="left")
             self.login_pw = tk.StringVar(value=self._default_login_pw())
-            ent = ttk.Entry(row, textvariable=self.login_pw, width=24, show="*")
+            # not masked (owner): these are community-known service passwords, and
+            # seeing what you're about to try is more useful than hiding it. The
+            # password is still REDACTED in the on-disk session logs.
+            ent = ttk.Entry(row, textvariable=self.login_pw, width=24)
             ent.pack(side="left", padx=6)
             ent.bind("<Return>", lambda e: self._login_custom())
             ttk.Button(row, text="Login", style=self.sty["accent"],
                        command=self._login_custom).pack(side="left")
+            # clear success/failure confirmation (owner)
+            self.lbl_login_status = ttk.Label(row, text="", style="Good.TLabel")
+            self.lbl_login_status.pack(side="left", padx=12)
 
             self.txt_login = self._console_text(f, 24)
             self.txt_login.pack(fill="both", expand=True)
+
+        def _set_login_status(self, ok):
+            lbl = getattr(self, "lbl_login_status", None)
+            if lbl is None:
+                return
+            if ok:
+                lbl.config(text="✓ Logged in — the Writes tab is unlocked",
+                           foreground=P["green"])
+            else:
+                lbl.config(text="", foreground=P["dim"])
 
         def _default_login_pw(self):
             """Pre-fill the password box with the last password that worked (a saved
@@ -2677,10 +2669,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if not success:
                     self._login_log("Rejected — staying read-only. (MBB passwords "
                                     "are community-held; try another.)")
+                    if getattr(self, "lbl_login_status", None) is not None:
+                        self.lbl_login_status.config(
+                            text="✗ That password was rejected — still read-only",
+                            foreground=P["danger"])
                     if then:
                         then(False)
                     return
                 self.logged_in = True
+                self._set_login_status(True)
                 lvl_txt = " (level %d)" % level if level else ""
                 if redact:
                     self._login_log("LOGIN OK%s with your typed password (masked in "
@@ -2817,27 +2814,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Button(wrow, text="Write…", style=self.sty["danger"],
                        command=self._write).pack(side="left")
 
-            ttk.Label(f, text="Safety guards (read-only, never writable) — Sevcon-side "
-                      "/ documented thresholds. A value shows only if your bike "
-                      "exposes it in `set`; rev 41 usually doesn't (you'll see "
-                      "'(not in live dump)'). The simulator fills in examples.",
-                      foreground=P["dim"], wraplength=940, justify="left").pack(
-                          anchor="w", pady=(10, 2))
-            grow = ttk.Frame(f)
-            grow.pack(fill="x")
-            gcols = ("guard", "value", "meaning")
-            self.guards_tree = ttk.Treeview(grow, columns=gcols, show="headings",
-                                            height=6)
-            for c, w in zip(gcols, (180, 150, 560)):
-                self.guards_tree.heading(c, text=c.title())
-                self.guards_tree.column(c, width=w, anchor="w")
-            gvsb = ttk.Scrollbar(grow, orient="vertical",
-                                 command=self.guards_tree.yview)
-            self.guards_tree.configure(yscrollcommand=gvsb.set)
-            gvsb.pack(side="right", fill="y")
-            self.guards_tree.pack(side="left", fill="both", expand=True)
-            self.guards_tree.tag_configure("guard", foreground=P["warn"])
-            self._attach_tree_copy(self.guards_tree)
+            # (the read-only Sevcon safety guards moved off this action page — they
+            # are documented context, available in Help -> Command reference and the
+            # "Write options (read-only)" reference, not editable here.)
 
             ttk.Label(f, text="Writes journal (select an entry to revert):",
                       foreground=P["dim"]).pack(anchor="w", pady=(10, 2))
@@ -2865,12 +2844,6 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     tag = "safe" if risk.startswith("SAFE") else "caution"
                     self.tree.insert("", "end", iid=name, tags=(tag,), values=(
                         name, self.settings[name]["value"], risk.split(" - ")[0]))
-            # guards pane
-            self.guards_tree.delete(*self.guards_tree.get_children())
-            for gname, gdesc in READONLY_GUARDS:
-                val = self.settings.get(gname, {}).get("value", "(not in live dump)")
-                self.guards_tree.insert("", "end", tags=("guard",),
-                                        values=(gname, val, gdesc))
 
         def _write_help_map(self):
             """T5: lazy-load the write-options explanations

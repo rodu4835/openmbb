@@ -464,28 +464,17 @@ def test_action_bar_hidden_until_connected(app):
     assert app.btn_safequit.winfo_manager() == "pack"
 
 
-def test_read_banner_analyze_button_navigates(app):
-    # the Read completion banner's "Analyze results" button loads the current
-    # session and navigates to the Analyze tab.
+def test_pull_shows_confirmation_under_button(app):
+    # after a successful pull, a "✓ Full database pulled & backed up" confirmation
+    # shows in the progress label under the Pull button (owner: no bottom banner /
+    # no extra buttons / no "what next").
     app._connect()
     assert _pump(app, lambda: app.connected)
     app._baseline()
     assert _pump(app, lambda: app.baseline_done, timeout=120)
-    assert app.read_success.winfo_manager() == "pack"     # banner shown after pull
-    app._continue_to_analyze()
-    assert "analyze" in str(app.nb.tab(app.nb.select(), "text")).lower()
-
-
-def test_continue_to_analyze_no_session_does_not_navigate(app, monkeypatch):
-    # guard: if there's no live session, _continue_to_analyze must NOT strand the
-    # user on an empty Analyze tab — it stays put and the guidance message stands.
-    from openmbb import dialogs as mb
-    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: None)
-    app._leave_landing()
-    app.nb.select(0)                                   # Connect tab
-    assert not app.logger                              # no live session
-    app._continue_to_analyze()
-    assert app.nb.index(app.nb.select()) == 0          # did not navigate away
+    assert "backed up" in app.lbl_prog.cget("text").lower()
+    assert not hasattr(app, "read_success")            # the bottom-bar banner is gone
+    assert not hasattr(app, "btn_done")
 
 
 def test_writes_flow_logs_in_and_lands_on_writes(app):
