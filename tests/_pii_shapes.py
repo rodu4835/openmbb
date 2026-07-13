@@ -25,9 +25,14 @@ _VIN_LOWER = (r"(?=[0-9a-hj-npr-z]{17}" + _R + r")"
 VIN_SHAPE = re.compile(_L + "(?:" + _VIN_UPPER + "|" + _VIN_LOWER + ")")
 MBB_SERIAL_SHAPE = re.compile(r"(?i)" + _L + r"sj\d{4}zer\d{4}" + _R)   # MBB/BMS serial
 MODULE_SERIAL_SHAPE = re.compile(r"(?i)" + _L + r"17gb\d{4}" + _R)      # module serial
+# Sevcon controller serial: a bare digit run has no distinctive shape, so anchor
+# on its console LABEL ("Sevcon Serial num : <digits>") — catches a real capture
+# while a lettered redaction placeholder (no digit run) passes clean.
+SEVCON_SERIAL_SHAPE = re.compile(r"(?i)Sevcon Serial num\s*:?\s*(\d{6,})")
 
 SHAPES = [("VIN", VIN_SHAPE), ("mbb-serial", MBB_SERIAL_SHAPE),
-          ("module-serial", MODULE_SERIAL_SHAPE)]
+          ("module-serial", MODULE_SERIAL_SHAPE),
+          ("sevcon-serial", SEVCON_SERIAL_SHAPE)]
 
 # same-width redaction placeholders that legitimately appear in the fixtures
 PLACEHOLDERS = {"REDACTEDVIN000000", "REDACTEDMBB00", "REDACTED17GB0"}

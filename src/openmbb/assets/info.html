@@ -229,6 +229,13 @@ open the drivetrain contactor — that's why they're gated and never run automat
 </svg>
 </div><table class='pin'><thead><tr><th>FTDI lead</th><th>OBD pin</th><th>Signal</th><th>Direction</th></tr></thead><tbody><tr><td>Black — GND</td><td>5</td><td>Diagnostic ground</td><td>—</td></tr><tr><td>Yellow — RXD</td><td>8</td><td>bike MBB Tx</td><td>bike &rarr; FTDI</td></tr><tr><td>Orange — TXD</td><td>9</td><td>bike MBB Rx</td><td>FTDI &rarr; bike</td></tr><tr><td>Red — +5V</td><td>—</td><td class='no'>NOT CONNECTED (taped off)</td><td>—</td></tr></tbody></table></div></section><section class='tab' id='tab-safety'><div class='doc'>
 <h2>Safety model</h2>
+<div class="note warn"><b>USE AT YOUR OWN RISK.</b> OpenMBB is an unofficial hobby tool,
+not affiliated with or endorsed by Zero Motorcycles or Sevcon/BorgWarner. Writing settings
+or sending console commands can <b>damage your motorcycle, brick components, void your
+warranty, or create an unsafe riding condition, and may be irreversible</b>. It has been
+verified only on a single <b>2017 Zero FXS (MBB rev 41)</b> — behavior on any other model
+or firmware is untested, so the effect/recovery notes may not apply to your bike. No
+warranty; the authors accept no liability. See the LICENSE file.</div>
 <p>Read-first, with a strong <b>informed-consent</b> gate for anything destructive.
 Nothing is hard-blocked — it's your bike — but a dangerous command typed into the raw
 command line makes you read what it does, what could happen, and how to recover, then

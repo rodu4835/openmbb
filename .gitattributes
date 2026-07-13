@@ -1,0 +1,18 @@
+# Never let Git alter binary assets.
+*.png  binary
+*.ico  binary
+*.exe  binary
+*.gif  binary
+*.jpg  binary
+
+# SVG is XML text.
+*.svg  text
+
+# Windows-only scripts must keep CRLF wherever they are checked out.
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+*.iss  text eol=crlf
+
+# NOTE: the tree is currently CRLF and is intentionally NOT force-renormalized
+# here (that would be a whole-repo noisy diff). New/edited text files are left as
+# committed; a deliberate `git add --renormalize .` to LF can be done separately.

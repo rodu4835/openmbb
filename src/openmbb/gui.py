@@ -2854,6 +2854,31 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     return two
             return ref.get(head)
 
+        def _hardware_verified(self):
+            """True only when we've positively confirmed this is the ONE bike the
+            safety lists / parsers / recovery notes were validated on: a 2017 Zero
+            FXS at MBB rev 41. Unknown model (before a Pull), a different model, or
+            a non-41 rev all count as UNVERIFIED so the write / destructive confirms
+            warn that the guidance may not apply."""
+            rev = _parse_fw_rev(self.version_text or "")
+            model = ""
+            try:
+                model = str((self.settings.get("model") or {}).get("value", ""))
+            except Exception:
+                pass
+            return rev in KNOWN_FIRMWARE_REVS and model.strip().upper() == "FXS"
+
+        def _unverified_hw_note(self):
+            """A leading warning block for a confirm dialog when the bike isn't a
+            verified FXS rev 41 (empty string when it is)."""
+            if self._hardware_verified():
+                return ""
+            return ("!! UNVERIFIED HARDWARE — this bike is not a confirmed 2017 Zero "
+                    "FXS at MBB rev 41, the only hardware OpenMBB's safety lists, "
+                    "parsers, and the effect/recovery notes below were checked "
+                    "against. On a different model or firmware they may be WRONG. "
+                    "Proceed only if you understand the risk.\n\n")
+
         def _confirm_dangerous(self, cmd, reason):
             """Informed-consent gate for a destructive command: show what it does /
             what could happen / how to recover, and require typing 'confirm'. No
@@ -2876,6 +2901,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       foreground=P["danger"]).pack(anchor="w")
             ttk.Label(body, text=cmd, font=(self.sty["mono"], 12, "bold"),
                       foreground=P["warn"]).pack(anchor="w", pady=(2, 10))
+
+            if not self._hardware_verified():
+                ttk.Label(body, text=(
+                    "⚠ UNVERIFIED HARDWARE — this bike is not a confirmed 2017 Zero "
+                    "FXS at MBB rev 41. The effect/recovery notes below were checked "
+                    "only on that bike and may be WRONG for a different model or "
+                    "firmware."), wraplength=470, justify="left",
+                    foreground=P["danger"]).pack(anchor="w", pady=(0, 10))
 
             def line(label, text, color=None):
                 if not text:
@@ -3747,14 +3780,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 notes = "".join("%s\n" % ln for ln in self._write_help_lines(name))
                 if warn:
                     notes += "WARNING: %s\n" % warn
-                text = ("%s — %s\n\n%s  ->  %s\n\nEFFECT: %s\nRISK: %s\n%s\n"
+                text = ("%s%s — %s\n\n%s  ->  %s\n\nEFFECT: %s\nRISK: %s\n%s\n"
                         "What happens when you click OK:\n"
                         "  1. a full backup of ALL current settings is saved to the "
                         "session folder,\n"
                         "  2. the change is sent, then read back to VERIFY it took.\n\n"
                         "Afterward, that row shows '↺ Reset' to put it back to the last "
                         "full read. Proceed?"
-                        % (name, label, old_val, new_val, effect, risk, notes))
+                        % (self._unverified_hw_note(), name, label, old_val, new_val,
+                           effect, risk, notes))
                 if not messagebox.askokcancel("Confirm write", text):
                     return
 

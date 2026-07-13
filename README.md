@@ -7,9 +7,16 @@ console** (OBD-II / C3 port); any writes are whitelist-only and gated. Try the
 whole thing with the built-in **simulator** — no bike needed. Windows-11-native
 look (Sun Valley theme).
 
-> Personal diagnostic tool for **your own** vehicle. Not affiliated with Zero
-> Motorcycles. No warranty — see LICENSE. Changing settings may affect your
-> vehicle warranty; you are responsible for what you write to your bike.
+> ⚠️ **USE AT YOUR OWN RISK.** OpenMBB is an unofficial, independent hobby tool
+> for diagnosing **your own** vehicle. It is **not affiliated with, authorized,
+> endorsed by, or sponsored by Zero Motorcycles, Inc. or Sevcon/BorgWarner**;
+> those names are used only to describe the hardware it talks to. Writing settings
+> or sending console commands **can damage your motorcycle, brick components,
+> void your warranty, or create an unsafe riding condition, and may be
+> irreversible.** It has been verified on a **single 2017 Zero FXS (MBB rev 41)**
+> only — behavior on any other model or firmware is untested. **No warranty; the
+> authors accept no liability** for any damage, injury, or loss. See
+> [LICENSE](LICENSE).
 
 OpenMBB is a **general read / diagnostics tool** for the Gen2 MBB console:
 connect, read everything the bike will tell you (identity, BMS, motor
@@ -27,13 +34,14 @@ Gen2 command set (`bms`, `set`, `spfront`, `maxcustspmph`, …). That pins the s
 | | |
 |---|---|
 | **Verified** | 2017 Zero FXS (MBB firmware rev 41) |
-| **Should work (same console, unverified)** | Gen2 MBB Zeros, ~2013–2019: **S, SR, DS, DSR, FX, FXS, FXE**. The write panel auto-adapts — it only shows whitelisted settings that appear in *that* bike's live dump. |
+| **Should work (same console, UNVERIFIED)** | Other Gen2 MBB Zeros of the ~2013–2019 era — **S, SR, DS, DSR, FX** (and the later **FXE**, a Gen2-platform rebadge) — *if* they run the same 38400-baud MBB console. Command set assumed compatible but **untested**; treat writes with extra caution. The write panel auto-adapts — it only shows whitelisted settings that appear in *that* bike's live dump. |
 | **Not compatible as-is** | Pre-2013 **Gen1** (9600 baud) and 2020+ **Cypher III / SR-F generation** (SR/F, SR/S, DSR/X, newer S/DS) — different baud *and* a different console language. |
 
 The console baud is fixed at 38400 (the Gen2 rate). Gen1/Gen3 would need both a
 different baud and a different command set, so OpenMBB is a Gen2 tool by design.
 
-Runs on **Windows and Linux** (and macOS from source).
+Built and tested on **Windows and Linux** (CI covers both). Runs from source on
+macOS too, but that isn't exercised by CI.
 
 ## Install & update
 
@@ -76,7 +84,8 @@ openmbb --selftest  # headless transport/safety tests
 openmbb --smoketest # build the GUI once, sim-connect, and exit
 ```
 
-Requires **Python 3.9+**; `pyserial` and `sv-ttk` install automatically (if
+Requires **Python 3.12+** (older 3.9–3.11 will likely work but are untested; CI
+runs 3.12); `pyserial` and `sv-ttk` install automatically (if
 `sv-ttk` is ever unavailable the app falls back to a built-in dark theme). Fonts
 and the file-manager "open folder" action work cross-platform. To **update**:
 `git pull`, then re-run `pip install -e .` if dependencies changed.
@@ -193,24 +202,32 @@ include show `n/a` rather than failing.
 
 ## Safety model
 
-- **Hard blocklist in the transport layer** (every UI path incl. the raw box):
-  `format/erase eeprom`, `settingsrst`, `statsrst`, log clears/adds, `reset`,
-  `exit_to_bl`, `test`, `wdt`, `timing`, `can`, `charger`, `sevcon preop`, plus
-  the destructive commands the real rev-41 menu revealed (`dtc_clear`,
-  `force_all_storage_mode`, `blcmds`, `burn`), and `set` of any protected name
-  (`abs_disable`, `bypass_bms`, `ov_*`, `motstage*/ctrlstage*`,
-  `sevnoregspeed/sevmaxregv/sevnoregfull`, `model/vin/serial`, …). Bare `eeprom`
-  (the read-only "EEPROM usage" summary) and `obd` are allowed reads; `eeprom`
-  with any argument is refused.
-- **No smuggling and no back-door writes.** The transport refuses any command
-  containing a control character (so a pasted `status⏎settingsrst` can't slip a
-  second line onto the wire), and **all** `set <name> <value>` writes are refused
-  from the raw box — writes go *only* through the gated Writes-tab flow
-  (`Transport.write_setting`), which re-validates the value. The **two-token
-  `set <name>`** single-setting *view* is also refused: its no-value behavior is
-  unverified on rev 41 (it could be a prompt-for-value, i.e. a write), so read a
-  value from the full `set` dump instead. That makes the "no UI path can send a
-  blocked command" guarantee actually hold.
+It's your own bike, so OpenMBB does **not** put a hard wall between you and the
+console — but it makes the dangerous things deliberate, loud, and hard to do by
+accident:
+
+- **Destructive commands are gated behind an informed-consent dialog, not
+  hard-blocked.** For the known-destructive set — `format/erase eeprom`,
+  `settingsrst`, `statsrst`, log clears/adds, `reset`, `exit_to_bl`, `test`,
+  `wdt`, `timing`, `can`, `charger`, `sevcon preop`, and the ones the real rev-41
+  menu revealed (`dtc_clear`, `force_all_storage_mode`, `blcmds`, `burn`) — the
+  raw Console will not send them casually: it shows a dialog spelling out what the
+  command does, what could happen, and how (if at all) to recover, and makes you
+  **type `confirm`** first. There is no such dialog on the read commands. Bare
+  `eeprom` (the read-only "EEPROM usage" summary) and `obd` are ordinary reads;
+  `eeprom` with any argument is treated as destructive.
+- **What IS refused outright (no override):** any command containing a **control
+  character** (so a pasted `status⏎settingsrst` can't smuggle a second line onto
+  the wire), and **every** `set <name> <value>` write from the raw box — writes
+  go *only* through the gated Writes-tab flow (`Transport.write_setting`), which
+  re-validates against the whitelist. The two-token `set <name>` single-setting
+  *view* is refused too (its no-value behavior is unverified on rev 41 — it could
+  prompt-to-write), so read values from the full `set` dump instead.
+- **Verified on ONE bike.** The blocklist, whitelist, parsers and per-command
+  recovery notes were checked against a single **2017 Zero FXS at MBB rev 41**.
+  On any other model or firmware they are *untested* — a "confirm" you type there
+  is trusting guidance that may not apply to your hardware. The app warns when it
+  can't confirm your bike is a verified FXS rev 41.
 - A typed password is masked in **everything** written to disk for the whole
   session (not just the one command), so a late console echo can't leak it.
 - Regen/thermal guards are shown **read-only** in the Writes tab.
@@ -265,3 +282,34 @@ top status strip and is clickable.
    simulator's menus are synthetic samples, not a live capture.
 4. Login attempt only after the backup is on disk.
 5. No writes on day one. Bring the session folder home first.
+
+## Development & contributing
+
+```bash
+pip install ".[dev]"      # editable install + test/build tools
+python -m pytest -q       # full suite (GUI tests need a display; skip cleanly without one)
+openmbb --selftest        # headless transport/safety self-test
+openmbb --smoketest       # frozen-GUI/pyserial smoke test
+```
+
+Everything runs against the built-in **simulator** — you can develop and test the
+whole app with no bike attached. Issues and pull requests are welcome; please run
+`pytest` + `--selftest` before opening a PR. If you have a captured `set`/`help`
+dump from a **different Gen2 model or firmware**, that's especially valuable — the
+safety lists are only ground-truthed against a 2017 FXS rev 41 today.
+
+## Security
+
+Found a way to get the tool to send something dangerous it shouldn't, or a way it
+could damage a bike? Please report it privately — see [SECURITY.md](SECURITY.md).
+
+## License
+
+**MIT** — Copyright © 2026 rodu4835. See [LICENSE](LICENSE). Bundled third-party
+components (pyserial, sv-ttk, Tcl/Tk, the CPython runtime) keep their own
+licenses — see [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt).
+
+*OpenMBB is an independent community project and is not affiliated with, endorsed
+by, or sponsored by Zero Motorcycles, Inc. or Sevcon/BorgWarner. "Zero
+Motorcycles", "Sevcon", and related marks belong to their respective owners and
+are used here only to describe the hardware this tool communicates with.*
