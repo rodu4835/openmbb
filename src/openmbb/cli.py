@@ -180,9 +180,61 @@ def _ensure_console():
             pass
 
 
+HEADLESS_COMMANDS = ("analyze", "sessions")
+
+
+def cmd_analyze(args):
+    """Analyze a saved session folder. No hardware, no GUI, no serial port."""
+    import os
+
+    from . import report as report_mod
+
+    # load_session globs a directory: a wrong path yields an empty Session rather
+    # than raising, so a bad argument would otherwise print an empty report and
+    # exit 0. Check the folder, then check it actually held a capture.
+    if not os.path.isdir(args.folder):
+        print("No such session folder: %s" % args.folder, file=sys.stderr)
+        return 2
+    rep = report_mod.analyze_folder(args.folder, args.units)
+    if not rep["session"]["commands"] and not rep["session"]["has_settings"]:
+        print("Nothing to analyze in %s — no recognizable command captures found.\n"
+              "Expected a session folder written by OpenMBB (NNN_<cmd>.txt files)."
+              % args.folder, file=sys.stderr)
+        return 2
+
+    if args.json:
+        import json
+        print(json.dumps(rep, indent=2, sort_keys=False))
+    else:
+        print(report_mod.format_report(rep))
+    # A non-zero exit on `alert` lets this drive a script or a health check.
+    return 1 if args.fail_on_alert and rep["counts"]["alert"] else 0
+
+
+def cmd_sessions(args):
+    """List saved session folders under the log directory."""
+    from .config import get_log_dir
+    from .sessions import list_sessions
+
+    base = args.logdir or get_log_dir()
+    found = list_sessions(base)
+    if not found:
+        print("No sessions under %s" % base)
+        return 0
+    if args.json:
+        import json
+        print(json.dumps({"base": base, "sessions": found}, indent=2))
+    else:
+        print("%d session(s) under %s" % (len(found), base))
+        for path in found:
+            print("  %s" % path)
+    return 0
+
+
 def main():
-    # attach a console for the headless flags before argparse needs to print
-    if any(a in ("--selftest", "--smoketest", "--help", "-h") for a in sys.argv[1:]):
+    # attach a console for anything that prints before argparse needs it
+    if any(a in ("--selftest", "--smoketest", "--help", "-h") or a in HEADLESS_COMMANDS
+           for a in sys.argv[1:]):
         _ensure_console()
     ap = argparse.ArgumentParser(
         description="OpenMBB — serial console for Gen2 MBB-based Zero motorcycles")
@@ -191,8 +243,29 @@ def main():
     ap.add_argument("--logdir", help="base dir for session logs (overrides saved config)")
     ap.add_argument("--selftest", action="store_true", help="headless tests, no GUI")
     ap.add_argument("--smoketest", action="store_true", help="build GUI once and exit")
+
+    # Subcommands are optional so the bare `openmbb` (and every existing flag)
+    # still launches the GUI exactly as before.
+    sub = ap.add_subparsers(dest="command")
+
+    p_an = sub.add_parser("analyze", help="analyze a saved session folder (no hardware)")
+    p_an.add_argument("folder", help="path to a session folder")
+    p_an.add_argument("--json", action="store_true", help="emit the structured report")
+    p_an.add_argument("--units", choices=("C", "F"), default="C",
+                      help="temperature units for display (default C)")
+    p_an.add_argument("--fail-on-alert", action="store_true",
+                      help="exit 1 if any metric is at alert, for scripts")
+    p_an.set_defaults(func=cmd_analyze)
+
+    p_se = sub.add_parser("sessions", help="list saved session folders")
+    p_se.add_argument("--logdir", help="base dir to list (defaults to the saved config)")
+    p_se.add_argument("--json", action="store_true", help="emit JSON")
+    p_se.set_defaults(func=cmd_sessions)
+
     args = ap.parse_args()
 
+    if getattr(args, "func", None):
+        sys.exit(args.func(args))
     if args.selftest:
         sys.exit(selftest())
     if args.smoketest:

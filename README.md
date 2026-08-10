@@ -246,10 +246,11 @@ src/openmbb/
   sim.py         fake serial port (synthetic fixtures for hardware-free use)
   theme.py       Sun Valley (Win11) theme with dark fallback
   gui.py         phase-gated panels + Analyze tab + menu bar
-  cli.py         entry point + --selftest / --smoketest
+  cli.py         entry point + analyze / sessions + --selftest / --smoketest
   parsers.py     tolerant console-output parsers (bms/stats/status/ride log)
   sessions.py    load saved session folders for analysis
-  health.py      health snapshot (metrics + ok/watch/alert status)
+  report.py      saved session -> JSON-ready report (the headless path)
+  health.py      health snapshot (typed metrics + ok/watch/alert status)
   rides.py       ride-log summaries + effective gearing from the odometer
   gearing.py     gearing math (teeth -> ratio -> speedo settings)
   compare.py     settings diff + capacity / gearing trends across sessions
@@ -272,6 +273,42 @@ Change it via **Session → Set save location…** (remembered across runs in
 folder ever goes missing (deleted, unplugged drive) the app falls back to the
 default instead of failing to connect. The current save target is shown in the
 top status strip and is clickable.
+
+## Analyzing a session without the bike
+
+A session folder is self-contained, so the analysis runs anywhere — no
+motorcycle, no serial port, no GUI. Useful for looking at a capture on another
+machine, diffing two of your own, or letting someone else look at yours.
+
+```bash
+openmbb sessions                       # list saved session folders
+openmbb analyze <session-folder>       # the health report as text
+openmbb analyze <folder> --json        # the same report, structured
+openmbb analyze <folder> --units F     # temperatures in Fahrenheit
+openmbb analyze <folder> --fail-on-alert   # exit 1 if any metric is at alert
+```
+
+`--fail-on-alert` is there so this can drive a script or a scheduled check
+rather than only a pair of eyes.
+
+**On the JSON.** Each health metric is
+`{label, value, unit, display, status, note}`. `value` is the datum — a number
+where the metric is numeric — and `unit` names it, so a threshold comparison
+needs no string parsing:
+
+```json
+{ "label": "Max battery temp (lifetime)", "value": 60.0, "unit": "C",
+  "display": "60 C", "status": "alert",
+  "note": "highest EVER recorded, not the current temperature; ..." }
+```
+
+`display` is the only field that follows `--units`; `value` and `unit` stay in
+canonical Celsius, because every threshold in the health module compares in
+Celsius. Read `value`/`unit` programmatically and `display` for humans.
+
+Ride telemetry is included when the session contains an event-log capture
+(`eventlogdump`, or the legacy `dumplogs`). A baseline pull deliberately skips
+the heavy event log, so `"rides": null` there is expected rather than a failure.
 
 ## First real session checklist
 
