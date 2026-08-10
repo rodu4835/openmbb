@@ -34,32 +34,50 @@ def _spec(kind):
 
 
 def _dark_titlebar(win):
-    """Match the app's dark title bar on Windows 10/11 (best-effort)."""
+    """Match the app's title bar to the active theme on Windows 10/11
+    (best-effort). Named for what it did originally; it now follows the mode."""
     try:
         from ctypes import windll, byref, sizeof, c_int
         win.update_idletasks()
         hwnd = windll.user32.GetParent(win.winfo_id())
+        dark = c_int(1 if theme.current_mode() == "dark" else 0)
         for attr in (20, 19):   # DWMWA_USE_IMMERSIVE_DARK_MODE (20, older 19)
             if windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, attr, byref(c_int(1)), sizeof(c_int)) == 0:
+                    hwnd, attr, byref(dark), sizeof(dark)) == 0:
                 break
     except Exception:
         pass
 
 
-def _center(win, parent):
+def _size(win):
+    """The window's real size. winfo_* is authoritative once the geometry
+    manager has run, but returns Tk's 1x1 placeholder if the window has neither
+    been mapped nor had a size requested — fall back to what it asked for."""
     win.update_idletasks()
     w, h = win.winfo_width(), win.winfo_height()
+    if w <= 1 or h <= 1:
+        w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+    return max(w, 1), max(h, 1)
+
+
+def _center(win, parent):
+    """Centre `win` on `parent` — both axes, and clamped to the screen so a
+    window near an edge (or on a second monitor) can't be pushed off it."""
+    w, h = _size(win)
     try:
         if parent is not None and parent.winfo_ismapped():
             x = parent.winfo_rootx() + (parent.winfo_width() - w) // 2
-            y = parent.winfo_rooty() + (parent.winfo_height() - h) // 3
+            y = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
         else:
             x = (win.winfo_screenwidth() - w) // 2
-            y = (win.winfo_screenheight() - h) // 3
+            y = (win.winfo_screenheight() - h) // 2
+        # Keep the title bar reachable: never off the top or left, and never so
+        # far right/down that the window starts past the edge of the screen.
+        x = min(max(x, 0), max(win.winfo_screenwidth() - w, 0))
+        y = min(max(y, 0), max(win.winfo_screenheight() - h, 0))
     except Exception:
         x, y = 220, 220
-    win.geometry("+%d+%d" % (max(x, 0), max(y, 0)))
+    win.geometry("+%d+%d" % (x, y))
 
 
 def _dialog(title, message, kind, buttons, default=None):

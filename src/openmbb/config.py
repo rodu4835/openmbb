@@ -113,6 +113,15 @@ def set_temp_units(units):
     return set("temp_units", "F" if units == "F" else "C")
 
 
+# appearance preference ("dark" or "light"); default dark, the original look.
+def get_theme():
+    return "light" if load_config().get("theme") == "light" else "dark"
+
+
+def set_theme(mode):
+    return set("theme", "light" if mode == "light" else "dark")
+
+
 def config_was_corrupt():
     """True if a prior load found a corrupt config and set it aside."""
     return _bad_path().exists()

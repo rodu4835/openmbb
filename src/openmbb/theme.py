@@ -11,22 +11,83 @@ registers a small set of restrained heading/label styles (calm accents, no neon)
 used by the guided screens.
 """
 
-# Colours for the tk (non-ttk) widgets: console panes, listbox. Tuned to sit
-# on the Sun Valley dark surface (#1c1c1c) and read as an instrument console.
-PALETTE = {
-    "console": "#0d0f12",   # terminal panes (near black)
-    "termfg":  "#8fe6ad",   # soft phosphor-green console text
-    "fg":      "#e6e6e6",
-    "dim":     "#9aa0aa",
-    "green":   "#4ade80",
-    "warn":    "#ffb454",
-    "danger":  "#ff6b6b",
-    "sel":     "#2f4f3a",
-    "panel":   "#2b2b2b",
-    # fallback-only surfaces (clam)
-    "bg":      "#15161a",
-    "field":   "#2a2d38",
+# Colours for the tk (non-ttk) widgets: console panes, listbox, status cells.
+# ttk widgets are themed by sv-ttk; these are the ones Tk makes us paint.
+PALETTES = {
+    # Tuned to sit on the Sun Valley dark surface (#1c1c1c) and read as an
+    # instrument console.
+    "dark": {
+        "console": "#0d0f12",   # terminal panes (near black)
+        "termfg":  "#8fe6ad",   # soft phosphor-green console text
+        "fg":      "#e6e6e6",
+        "dim":     "#9aa0aa",
+        "green":   "#4ade80",
+        "warn":    "#ffb454",
+        "danger":  "#ff6b6b",
+        "sel":     "#2f4f3a",
+        "selfg":   "#eafff2",   # text inside a selection
+        "panel":   "#2b2b2b",
+        "border":  "#39394a",
+        "chipfg":  "#0d0d0d",   # text on a solid green/amber chip
+        "menubg":  "#1d1d26",   # dropdown surface
+        "menuhov": "#33384a",   # dropdown hover row
+        "menubd":  "#4a4470",   # dropdown 1px border
+        "tooltip": "#4a4470",
+        "carddim": "#aab2c5",   # secondary text inside the effect card
+        "grid":    "#2a2d38",   # chart gridlines
+        # fallback-only surfaces (clam)
+        "bg":      "#15161a",
+        "field":   "#2a2d38",
+    },
+    # Sits on the Sun Valley light surface (#fafafa). The console keeps its
+    # green identity but inverted to a dark-on-white terminal — phosphor green
+    # on white is unreadable, so it darkens rather than merely lightening.
+    "light": {
+        "console": "#ffffff",
+        "termfg":  "#0f6d33",
+        "fg":      "#1a1a1a",
+        "dim":     "#5b6270",
+        "green":   "#177245",
+        "warn":    "#8a5200",
+        "danger":  "#b3261e",
+        "sel":     "#cfe8d8",
+        "selfg":   "#0f2417",
+        "panel":   "#eceff2",
+        "border":  "#c8ccd4",
+        "chipfg":  "#ffffff",
+        "menubg":  "#ffffff",
+        "menuhov": "#e4ecf7",
+        "menubd":  "#c2c7d0",
+        "tooltip": "#fbfbe6",   # the familiar pale-yellow tip surface
+        "carddim": "#5b6270",
+        "grid":    "#dfe3e9",
+        "bg":      "#fafafa",
+        "field":   "#ffffff",
+    },
 }
+
+MODES = tuple(PALETTES)
+DEFAULT_MODE = "dark"
+
+# The ACTIVE palette. Mutated in place by set_palette() and never rebound —
+# gui.py does `from .theme import PALETTE` and then `P = PALETTE` once at
+# import, so rebinding this name would leave every one of those references
+# pointing at the old colours.
+PALETTE = dict(PALETTES[DEFAULT_MODE])
+_mode = DEFAULT_MODE
+
+
+def current_mode():
+    return _mode
+
+
+def set_palette(mode):
+    """Swap the active palette in place. Returns the resolved mode."""
+    global _mode
+    _mode = mode if mode in PALETTES else DEFAULT_MODE
+    PALETTE.clear()
+    PALETTE.update(PALETTES[_mode])
+    return _mode
 
 # Restrained accent colours for headings/status text (calm, modern — no neon).
 ACCENT_BLUE = "#5aa8ff"
@@ -62,22 +123,24 @@ def _pick(avail, prefs, default):
     return default
 
 
-def apply_theme(root):
+def apply_theme(root, mode=DEFAULT_MODE):
     """Apply the best available theme; return resolved style names + fonts.
 
     Cross-platform: picks UI/monospace font families that actually exist on the
-    running OS, and falls back to a hand-rolled dark clam theme if sv-ttk is
-    unavailable.
+    running OS, and falls back to a hand-rolled clam theme if sv-ttk is
+    unavailable. Safe to call again to switch mode — sv-ttk restyles every ttk
+    widget in place, and set_palette() updates the colours the tk widgets read.
     """
     from tkinter import ttk
     global UI_FAMILY, MONO_FAMILY
+    mode = set_palette(mode)
     avail = _families(root)
     UI_FAMILY = _pick(avail, _UI_PREFS, "TkDefaultFont")
     MONO_FAMILY = _pick(avail, _MONO_PREFS, "TkFixedFont")
     ui = UI_FAMILY
     try:
         import sv_ttk
-        sv_ttk.set_theme("dark")
+        sv_ttk.set_theme(mode)
         style = ttk.Style(root)
         # Native accent (blue) and the toggle switch already exist; add a red
         # danger variant.
@@ -100,6 +163,7 @@ def apply_theme(root):
     _accent_labels(root, ui)
     out["ui"] = UI_FAMILY
     out["mono"] = MONO_FAMILY
+    out["mode"] = mode
     return out
 
 
@@ -111,12 +175,17 @@ def _accent_labels(root, ui):
     """
     from tkinter import ttk
     style = ttk.Style(root)
+    dim = PALETTE["dim"]
+    # Accents are palette-driven so they stay legible on a light surface — the
+    # dark-mode blue/green wash out on white.
+    accent = ACCENT_BLUE if current_mode() == "dark" else "#0a5ca8"
+    good = ACCENT_GREEN if current_mode() == "dark" else PALETTE["green"]
     style.configure("Title.TLabel", font=(ui, 26, "bold"))
     style.configure("Heading.TLabel", font=(ui, 15, "bold"))
-    style.configure("Subtitle.TLabel", font=(ui, 12), foreground="#9aa0aa")
-    style.configure("Muted.TLabel", foreground="#9aa0aa")
-    style.configure("Accent.TLabel", font=(ui, 12, "bold"), foreground=ACCENT_BLUE)
-    style.configure("Good.TLabel", font=(ui, 12, "bold"), foreground=ACCENT_GREEN)
+    style.configure("Subtitle.TLabel", font=(ui, 12), foreground=dim)
+    style.configure("Muted.TLabel", foreground=dim)
+    style.configure("Accent.TLabel", font=(ui, 12, "bold"), foreground=accent)
+    style.configure("Good.TLabel", font=(ui, 12, "bold"), foreground=good)
 
 
 def _apply_clam(root, ui):
