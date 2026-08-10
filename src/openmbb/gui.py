@@ -1415,7 +1415,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             lines += ["", "== Health (ok / watch / alert) =="]
             for m in health_mod.health_snapshot(s, config.get_temp_units()):
                 lines.append("  [%-5s] %-26s %s" % (m["status"].upper(),
-                                                    m["label"], m["value"]))
+                                                    m["label"], m["display"]))
                 if m["note"]:
                     lines.append("           %s" % m["note"])
             lines.append("")
@@ -4076,7 +4076,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self.analyze_session, config.get_temp_units())):
                 iid = str(i)
                 self.health_tree.insert("", "end", iid=iid, tags=(m["status"],),
-                                        values=(m["label"], m["value"],
+                                        values=(m["label"], m["display"],
                                                 m["status"].upper()))
                 self._health_notes[iid] = self._enrich_note(m, help_map)
 
