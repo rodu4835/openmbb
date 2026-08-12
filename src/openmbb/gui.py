@@ -30,6 +30,7 @@ from . import parsers, rides, sessions
 from .safety import (READONLY_GUARDS, REV41_FXS_SETTINGS, WRITE_PANEL_CONTEXT,
                      WRITE_WHITELIST, command_blocked)
 from .sim import SimPort
+from . import theme as theme_mod
 from .theme import PALETTE, apply_theme
 from .transport import (DUMP_COMMANDS, HEAVY_COMMANDS, LONG_COMMANDS,
                         READ_COMMANDS, ConsoleRebootError, SessionLogger, Transport,
@@ -235,7 +236,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.title("%s v%s  —  Zero MBB console (Gen2)" % (APP_NAME, __version__))
             self.geometry("1080x760")
             self.minsize(900, 620)
-            self.sty = apply_theme(self)
+            self.sty = apply_theme(self, config.get_theme())
             self._set_taskbar_app_id()   # before the icon so Windows uses ours
             self._set_window_icon()
             self._apply_dark_titlebar()
@@ -331,16 +332,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 print("window icon unavailable: %s" % exc)
 
         def _apply_dark_titlebar(self):
-            """Make the OS title bar dark to match the app (Windows 10 2004+/11).
-            Best-effort and Windows-only — the app theme is always dark. Never
-            blocks launch on other platforms or older builds."""
+            """Match the OS title bar to the app theme (Windows 10 2004+/11).
+            Best-effort and Windows-only; never blocks launch on other platforms
+            or older builds. Re-called on a theme switch so the bar follows."""
             if sys.platform != "win32":
                 return
             try:
                 import ctypes
                 self.update_idletasks()
                 hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
-                value = ctypes.c_int(1)
+                value = ctypes.c_int(1 if theme_mod.current_mode() == "dark" else 0)
                 # DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (build >= 19041); 19 before that
                 for attr in (20, 19):
                     if ctypes.windll.dwmapi.DwmSetWindowAttribute(
@@ -349,6 +350,67 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         break
             except Exception as exc:         # cosmetic only — never block launch
                 print("dark title bar unavailable: %s" % exc)
+
+        # -- appearance ------------------------------------------------------
+        def _surface(self):
+            """The current ttk frame background — what raw-tk widgets sit on."""
+            try:
+                return ttk.Style().lookup("TFrame", "background") or P["bg"]
+            except tk.TclError:
+                return P["bg"]
+
+        def _set_theme(self, mode):
+            """Switch appearance live and remember the choice.
+
+            sv-ttk restyles every ttk widget in place, which is most of the UI
+            and free. The raw-tk widgets Tk makes us paint ourselves — console
+            panes, the scrolling canvases, the status cells — have to be
+            repainted here. Menus and the info/settings windows are rebuilt each
+            time they open, so they pick the new palette up on their own.
+            """
+            if mode == theme_mod.current_mode():
+                return
+            old = self._surface()
+            self.sty = apply_theme(self, mode)
+            config.set_theme(mode)
+            new = self._surface()
+            self._cell_bg = new              # idle status cells sit on the surface
+            self._apply_dark_titlebar()      # follows the mode now, not always dark
+            self._repaint_raw_tk(self, old, new)
+
+        def _repaint_raw_tk(self, widget, old, new):
+            """Repaint the non-ttk widgets under `widget` for the active palette.
+
+            Frames and labels are only repainted when they still carry the OLD
+            surface colour: that leaves anything deliberately coloured — a status
+            cell mid-pull, a RISK chip — exactly as the app set it.
+            """
+            same = lambda a, b: str(a).lower() == str(b).lower()   # noqa: E731
+            for child in widget.winfo_children():
+                cls = child.winfo_class()
+                try:
+                    if cls == "Text":
+                        child.configure(bg=P["console"], fg=P["termfg"],
+                                        insertbackground=P["fg"],
+                                        selectbackground=P["sel"],
+                                        selectforeground=P["selfg"],
+                                        highlightbackground=P["panel"],
+                                        highlightcolor=P["panel"])
+                    elif cls == "Listbox":
+                        child.configure(bg=P["console"], fg=P["termfg"],
+                                        selectbackground=P["sel"],
+                                        selectforeground=P["fg"],
+                                        highlightbackground=P["panel"],
+                                        highlightcolor=P["panel"])
+                    elif cls == "Canvas":
+                        child.configure(bg=new)
+                    elif cls in ("Frame", "Label") and same(child.cget("bg"), old):
+                        child.configure(bg=new)
+                        if cls == "Label":
+                            child.configure(fg=P["fg"])
+                except tk.TclError:
+                    pass                     # a widget without that option; skip it
+                self._repaint_raw_tk(child, old, new)
 
         # -- landing / front door (T1) --------------------------------------
         def _build_landing(self):
@@ -594,7 +656,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         font=(self.sty["mono"], 9), bg=P["console"],
                         fg=fg or P["termfg"], insertbackground=P["fg"],
                         selectbackground=P["sel"],
-                        selectforeground="#eafff2",
+                        selectforeground=P["selfg"],
                         relief="flat", padx=10, pady=8,
                         highlightthickness=1,
                         highlightbackground=P["panel"],
@@ -745,7 +807,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if same:
                 self._open_menu_anchor = None
                 return
-            border, menu_bg, hover = "#4a4470", "#1d1d26", "#33384a"
+            border, menu_bg, hover = P["menubd"], P["menubg"], P["menuhov"]
 
             def close_all():
                 # destroy the submenu FIRST, then the root — be explicit rather
@@ -827,7 +889,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
                 for spec in items:
                     if spec[0] == "sep":
-                        tk.Frame(body, bg="#39394a", height=1).pack(
+                        tk.Frame(body, bg=P["border"], height=1).pack(
                             fill="x", padx=8, pady=4)
                     elif spec[0] == "cmd":
                         add_item(spec[1], cb=spec[2])
@@ -933,9 +995,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 ("cmd", "Gearing calculator…", self._show_gearing_calc),
                 ("submenu", "COM port:  %s" % self._current_port_label(),
                  self._com_port_menu),
+                ("submenu", "Appearance:  %s" % theme_mod.current_mode().capitalize(),
+                 self._appearance_menu),
                 ("sep",),
                 ("cmd", "Settings…", self._show_settings),
             ]
+
+        def _appearance_menu(self):
+            cur = theme_mod.current_mode()
+            return [("radio", mode.capitalize(), mode == cur,
+                     lambda m=mode: self._set_theme(m))
+                    for mode in theme_mod.MODES]
 
         def _current_port_label(self):
             if self.connected:
@@ -2255,7 +2325,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 # themed to match the dark UI (was a pale-yellow OS default): a dark
                 # panel surface, light text, a thin accent-grey border (the 1px win bg
                 # showing through the label's pad — same trick as the menu popups).
-                win.configure(bg="#4a4470")
+                win.configure(bg=P["tooltip"])
                 tk.Label(win, text=text, background=P["panel"], foreground=P["fg"],
                          justify="left", wraplength=320, padx=8, pady=5,
                          font=(self.sty["ui"], 9)).pack(padx=1, pady=1)
@@ -3502,7 +3572,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # the intro above). Built now but kept hidden until _show_effect packs it.
             self.effect_panel = ttk.Frame(f)      # packed on demand by _show_effect
             card = tk.Frame(self.effect_panel, bg=P["panel"], highlightthickness=1,
-                            highlightbackground="#39394a", highlightcolor="#39394a")
+                            highlightbackground=P["border"], highlightcolor=P["border"])
             card.pack(fill="x")
             self.effect_card = tk.Frame(card, bg=P["panel"])   # inner padding surface
             self.effect_card.pack(fill="x", padx=12, pady=10)
@@ -3606,9 +3676,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             self._CARD_DIM))
             return out
 
-        # a slightly brighter grey than P["dim"] for on-card secondary text (local —
-        # not the global P["dim"], to avoid an app-wide contrast change)
-        _CARD_DIM = "#aab2c5"
+        # Secondary text inside the effect card — a shade off P["dim"] so the
+        # card reads as its own surface without an app-wide contrast change.
+        # A property, not a class constant: a class attribute would freeze the
+        # dark-mode value at import and survive a theme switch.
+        @property
+        def _CARD_DIM(self):
+            return P["carddim"]
 
         def _clear_effect(self):
             for w in self.effect_card.winfo_children():
@@ -3648,7 +3722,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             chip = tk.Frame(self.effect_card, bg=P["panel"])
             chip.pack(anchor="w", pady=(5, 2))
             tk.Label(chip, text=" RISK ", bg=(P["green"] if safe else P["warn"]),
-                     fg="#0d0d0d", font=(self.sty["ui"], 8, "bold")).pack(
+                     fg=P["chipfg"], font=(self.sty["ui"], 8, "bold")).pack(
                          side="left", padx=(0, 5))
             tk.Label(chip, text=risk, bg=P["panel"],
                      foreground=(P["green"] if safe else P["warn"]),
@@ -4555,7 +4629,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             def sy(y):
                 return y1 - (y - ylo) / (yhi - ylo) * (y1 - y0)
 
-            grid, axcol, fg = "#2a2d38", P["dim"], P["fg"]
+            grid, axcol, fg = P["grid"], P["dim"], P["fg"]
             for xt in charts_mod.axis_ticks(xlo, xhi, xstep):
                 gx = sx(xt)
                 cv.create_line(gx, y0, gx, y1, fill=grid)
@@ -4603,7 +4677,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             def sy(y):
                 return y1 - (y - ylo) / (yhi - ylo) * (y1 - y0)
 
-            grid, axcol, fg = "#2a2d38", P["dim"], P["fg"]
+            grid, axcol, fg = P["grid"], P["dim"], P["fg"]
             for yt in charts_mod.axis_ticks(ylo, yhi, ystep):
                 gy = sy(yt)
                 cv.create_line(x0, gy, x1, gy, fill=grid)
