@@ -190,11 +190,43 @@ def test_load_session_from_sim(tmp_path):
 def test_health_snapshot_from_sim(tmp_path):
     s = _make_session(tmp_path, "a")
     snap = {m["label"]: m for m in health.health_snapshot(s)}
-    assert snap["Displayed SOC"]["value"] == "61 %"
+    # display is what the GUI shows; unchanged from before typed values existed
+    assert snap["Displayed SOC"]["display"] == "61 %"
+    assert snap["Effective gearing"]["display"] == "4.50:1"
     assert snap["Cell balance"]["status"] == "ok"
-    assert snap["Effective gearing"]["value"] == "4.50:1"
-    # no metric crashes to a None value slipping through
-    assert all(m["value"] is not None for m in health.health_snapshot(s))
+    # every metric renders something — "n/a" where the capture had no datum
+    assert all(m["display"] for m in health.health_snapshot(s))
+
+
+def test_health_metrics_carry_typed_values(tmp_path):
+    """The datum is a number with a unit beside it, not text to re-parse. This is
+    what makes a metric usable by anything other than a label printer."""
+    s = _make_session(tmp_path, "a")
+    snap = {m["label"]: m for m in health.health_snapshot(s)}
+
+    soc = snap["Displayed SOC"]
+    assert soc["value"] == 61 and soc["unit"] == "%"
+    assert isinstance(soc["value"], (int, float))
+
+    assert snap["Effective gearing"]["value"] == pytest.approx(4.50, abs=0.01)
+    assert snap["Pack voltage"]["unit"] == "V"
+    assert isinstance(snap["Pack voltage"]["value"], float)
+
+    # A threshold comparison needs no string handling at all.
+    bal = snap["Cell balance"]
+    assert bal["unit"] == "mV" and bal["value"] < 30 and bal["status"] == "ok"
+
+    # Every row has the full shape, whatever kind of metric it is.
+    for m in health.health_snapshot(s):
+        assert set(m) == {"label", "value", "unit", "display", "status", "note"}
+
+
+def test_health_value_is_none_when_the_capture_lacks_it(tmp_path):
+    """Absent data is None, not the string "n/a" — that belongs in display only."""
+    empty = sessions.Session(str(tmp_path), {"stats": "", "bms": "", "status": ""}, "")
+    fw = {m["label"]: m for m in health.health_snapshot(empty)}["Firmware rev"]
+    assert fw["value"] is None
+    assert fw["display"] == "n/a"
 
 
 def test_rides_summary_from_sim(tmp_path):
@@ -254,12 +286,25 @@ def test_health_temp_units_convert(tmp_path):
                           "bms": "", "status": ""}, "")
     c = {m["label"]: m for m in health.health_snapshot(s, "C")}
     f = {m["label"]: m for m in health.health_snapshot(s, "F")}
-    assert c["Max motor temp (lifetime)"]["value"] == "100 C"
-    assert f["Max motor temp (lifetime)"]["value"] == "212 F"       # 100C -> 212F
-    assert c["Max battery temp (lifetime)"]["value"] == "40 C"
-    assert f["Max battery temp (lifetime)"]["value"] == "104 F"     # 40C -> 104F
-    assert "122-140 F" in f["Max battery temp (lifetime)"]["note"]  # thresholds too
+    assert c["Max motor temp (lifetime)"]["display"] == "100 C"
+    assert f["Max motor temp (lifetime)"]["display"] == "212 F"       # 100C -> 212F
+    assert c["Max battery temp (lifetime)"]["display"] == "40 C"
+    assert f["Max battery temp (lifetime)"]["display"] == "104 F"     # 40C -> 104F
+    assert "122-140 F" in f["Max battery temp (lifetime)"]["note"]    # thresholds too
     assert health.health_snapshot(s) == health.health_snapshot(s, "C")
+
+
+def test_health_temp_value_stays_canonical_celsius(tmp_path):
+    """Only `display` follows the user's unit preference. `value` is always the
+    Celsius number, because every threshold in health.py compares in Celsius —
+    a consumer must not have to know what the GUI happens to be set to."""
+    s = sessions.Session(str(tmp_path),
+                         {"stats": "  - Max Motor Temp   : 100 C\n", "bms": "", "status": ""}, "")
+    for units in ("C", "F"):
+        m = {x["label"]: x for x in health.health_snapshot(s, units)}["Max motor temp (lifetime)"]
+        assert m["value"] == 100 and m["unit"] == "C"
+    f = {x["label"]: x for x in health.health_snapshot(s, "F")}["Max motor temp (lifetime)"]
+    assert f["display"] == "212 F"     # only the rendering moved
 
 
 def test_health_on_empty_session_does_not_crash(tmp_path):

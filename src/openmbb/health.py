@@ -1,11 +1,30 @@
-"""Health snapshot: a saved session -> a list of readable health metrics.
+"""Health snapshot: a saved session -> a list of health metrics.
 
-Each metric is {label, value, status, note}. status is one of:
+Each metric is {label, value, unit, display, status, note}:
+
+  value    the datum itself — a number where the metric is numeric, a string
+           where it is not (firmware rev, a warning message), or None when the
+           capture did not include it. ALWAYS in canonical units, so a
+           threshold comparison never has to care what the user set.
+  unit     canonical unit for `value` ("V", "mV", "C", "kOhm", ...) or None.
+  display  the human-facing rendering, honouring `temp_units`. This is what the
+           GUI shows; it is the only field that changes with a display setting.
+  status   ok | watch | alert | info  (see below)
+  note     rationale, thresholds, and caveats
+
+Why value and display are separate: temperatures render in F when the user asks
+for it, but every threshold in here is in Celsius. Keeping `value` canonical
+means an automated consumer gets stable numbers, while the GUI reads `display`.
+Anything programmatic should use value/unit and ignore display.
+
+status is one of:
   ok    — within a healthy range
   watch — elevated / worth keeping an eye on
   alert — past a safety threshold
   info  — informational, no judgement
-Everything degrades gracefully: a field the capture didn't include shows "n/a".
+
+Everything degrades gracefully: a field the capture didn't include has
+value None and displays "n/a".
 """
 
 from . import gearing, rides
@@ -28,9 +47,23 @@ GAUGE_NOTE = ("Matched before/after firmware analysis (MBB 12 vs 41) found the "
 KNOWN_OFF_MODES = ("stopped", "standby", "run", "running", "riding", "idle")
 
 
-def _metric(label, value, status="info", note=""):
-    return {"label": label, "value": value if value is not None else "n/a",
-            "status": status, "note": note}
+def _metric(label, value, unit=None, status="info", note="", display=None):
+    """One metric row. `display` defaults to "<value> <unit>"; pass it explicitly
+    for composites ("61% @ 116.24 V") or any non-default formatting."""
+    if display is None:
+        if value is None:
+            display = "n/a"
+        elif unit:
+            display = "%s %s" % (_num(value), unit)
+        else:
+            display = "%s" % (_num(value),)
+    return {"label": label, "value": value, "unit": unit,
+            "display": display, "status": status, "note": note}
+
+
+def _num(v):
+    """Render a number the way %g does (no trailing .0) but leave strings alone."""
+    return "%g" % v if isinstance(v, (int, float)) and not isinstance(v, bool) else str(v)
 
 
 def _setting_num(settings, name, default=None):
@@ -81,48 +114,51 @@ def health_snapshot(session, temp_units="C"):
     if soc is None:
         soc = status.get("soc_pct")
     pack_v = bms.get("pack_v")
-    out.append(_metric("Displayed SOC", "%g %%" % soc if soc is not None else None))
-    out.append(_metric("Pack voltage", "%.2f V" % pack_v if pack_v is not None else None))
+    out.append(_metric("Displayed SOC", soc, "%"))
+    out.append(_metric("Pack voltage", pack_v, "V",
+                       display=("%.2f V" % pack_v) if pack_v is not None else None))
     if soc is not None and pack_v is not None:
-        out.append(_metric("SOC vs voltage", "%g%% @ %.2f V" % (soc, pack_v),
-                           "info", GAUGE_NOTE))
+        # A cross-check row, not a measurement — both numbers already have their
+        # own rows above, so this one carries the caveat rather than a datum.
+        out.append(_metric("SOC vs voltage", None,
+                           display="%g%% @ %.2f V" % (soc, pack_v), note=GAUGE_NOTE))
 
     bal = bms.get("balance_mv")
     if bal is not None:
         st = "ok" if bal < 30 else ("watch" if bal < 60 else "alert")
-        out.append(_metric("Cell balance", "%g mV" % bal, st,
-                           "spread across cells; <30 mV is healthy"))
+        out.append(_metric("Cell balance", bal, "mV", status=st,
+                           note="spread across cells; <30 mV is healthy"))
     low = bms.get("low_cell_mv")
     if low is not None:
-        out.append(_metric("Lowest cell", "%g mV" % low, "info"))
+        out.append(_metric("Lowest cell", low, "mV"))
     high = bms.get("high_cell_mv")
     if high is not None:
-        out.append(_metric("Highest cell", "%g mV" % high, "info"))
+        out.append(_metric("Highest cell", high, "mV"))
     if low is not None and high is not None:
         spread = high - low
         st = "ok" if spread < 40 else ("watch" if spread < 80 else "alert")
-        out.append(_metric("Cell spread", "%g mV" % spread, st,
-                           "highest minus lowest cell — a large spread signals "
-                           "imbalance"))
+        out.append(_metric("Cell spread", spread, "mV", status=st,
+                           note="highest minus lowest cell — a large spread signals "
+                                "imbalance"))
 
     cap, rem = bms.get("capacity_ah"), bms.get("remaining_ah")
     if cap is not None:
         val = "%g Ah nominal" % cap + (" (%g Ah at this charge)" % rem
                                        if rem is not None else "")
-        out.append(_metric("Pack capacity", val, "info",
-                           "the design nominal (~52 Ah) and how much is left at the "
-                           "CURRENT charge — not a degradation measurement. Learned "
-                           "capacity comes from the ride-log analysis."))
+        out.append(_metric("Pack capacity", cap, "Ah", display=val,
+                           note="the design nominal (~52 Ah) and how much is left at the "
+                                "CURRENT charge — not a degradation measurement. Learned "
+                                "capacity comes from the ride-log analysis."))
     cyc = bms.get("cycles")
     if cyc is not None:
-        out.append(_metric("Charge cycles", "%g" % cyc, "info"))
+        out.append(_metric("Charge cycles", cyc))
     odo = stats.get("odo_km")
     if odo is not None:
-        out.append(_metric("Odometer", "%g km" % odo, "info", "lifetime distance"))
+        out.append(_metric("Odometer", odo, "km", note="lifetime distance"))
     eff = stats.get("lifetime_wh_km")
     if eff is not None:
-        out.append(_metric("Lifetime efficiency", "%g Wh/km" % eff, "info",
-                           "lifetime-average energy use"))
+        out.append(_metric("Lifetime efficiency", eff, "Wh/km",
+                           note="lifetime-average energy use"))
 
     mot_t = stats.get("max_motor_temp_c")
     if mot_t is not None:
@@ -138,19 +174,24 @@ def health_snapshot(session, temp_units="C"):
                 "stages at %s / %s" % (_lbl(s1, live1), _lbl(s2, live2)))
         if not (live1 and live2):
             note += " — '(default)' = documented default, not read from this bike"
-        out.append(_metric("Max motor temp (lifetime)", _t(mot_t), st, note))
+        # value stays Celsius whatever the user displays in: every threshold
+        # compared above is Celsius, so that is the canonical unit.
+        out.append(_metric("Max motor temp (lifetime)", mot_t, "C",
+                           status=st, note=note, display=_t(mot_t)))
     batt_t = first_val(stats.get("max_batt_temp_c"), bms.get("pack_max_temp_c"))
     if batt_t is not None:
         st = "ok" if batt_t < 50 else ("watch" if batt_t < 60 else "alert")
-        out.append(_metric("Max battery temp (lifetime)", _t(batt_t), st,
-                           "highest EVER recorded, not the current temperature; "
-                           "charge tapers ~%s, operation stop ~%s"
-                           % (_rng(43, 50), _rng(50, 60))))
+        out.append(_metric("Max battery temp (lifetime)", batt_t, "C",
+                           status=st, display=_t(batt_t),
+                           note="highest EVER recorded, not the current temperature; "
+                                "charge tapers ~%s, operation stop ~%s"
+                                % (_rng(43, 50), _rng(50, 60))))
     ctrl_t = stats.get("max_ctrl_temp_c")
     if ctrl_t is not None:
         st = "ok" if ctrl_t < 70 else ("watch" if ctrl_t < 90 else "alert")
-        out.append(_metric("Max controller temp (lifetime)", _t(ctrl_t), st,
-                           "Sevcon controller — highest ever recorded"))
+        out.append(_metric("Max controller temp (lifetime)", ctrl_t, "C",
+                           status=st, display=_t(ctrl_t),
+                           note="Sevcon controller — highest ever recorded"))
 
     # F5: isolation resistance — healthy is megohms (>1000 kΩ). A low reading on
     # the charger is a documented false-positive, so soften the flag when the
@@ -180,20 +221,21 @@ def health_snapshot(session, temp_units="C"):
             st, ctx = "watch", ("Charge state unknown — a low reading on the charger "
                                 "is a documented false-low; re-read unplugged + dry "
                                 "before acting.")
-        out.append(_metric("Isolation resistance", "%g kOhm" % iso, st,
-                           ("healthy is megohms (>1000 kOhm). " + ctx).strip()))
+        out.append(_metric("Isolation resistance", iso, "kOhm", status=st,
+                           note=("healthy is megohms (>1000 kOhm). " + ctx).strip()))
 
     # F5: surface any live console warning as its own row
     for w in (status.get("warnings") or []):
-        out.append(_metric("Warning", w, "watch", "live console warning message"))
+        out.append(_metric("Warning", w, status="watch",
+                           note="live console warning message"))
 
     circ = _setting_num(settings, "rwhcirc", gearing.DEFAULT_CIRC_MM)
     ratio, rpk, desc = rides.gearing_from_stats(stats, circ)
     if ratio is not None:
         # F2: this is the LIFETIME-average ratio from the cumulative odometer —
         # it lags a recent re-gear for thousands of km. Say so in the note.
-        out.append(_metric("Effective gearing", "%.2f:1" % ratio, "info",
-                           "LIFETIME-average ratio (lags a recent re-gear for "
-                           "thousands of km) — %s (%.0f motor-rev/km @ %g mm)"
-                           % (desc or "?", rpk, circ)))
+        out.append(_metric("Effective gearing", ratio, display="%.2f:1" % ratio,
+                           note="LIFETIME-average ratio (lags a recent re-gear for "
+                                "thousands of km) — %s (%.0f motor-rev/km @ %g mm)"
+                                % (desc or "?", rpk, circ)))
     return out
