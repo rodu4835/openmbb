@@ -1,0 +1,45 @@
+name: tests
+
+# Runs the full suite on every pull request and every push to main. build.yml
+# runs the same tests, but only on a tag push or manual dispatch — so until this
+# existed a PR could merge with no automated signal at all. Nothing is packaged
+# here: PyInstaller and the installer stay on the release path, where a broken
+# binary is what actually matters.
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # the GUI flow tests instantiate real Tk widgets; headless Linux needs both
+      - name: Linux GUI deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
+
+      - name: Install package + dev tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Full test suite
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m pytest -q; \
+          else python -m pytest -q; fi
