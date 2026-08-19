@@ -155,6 +155,34 @@ def test_parse_real_status_section():
     assert st["soc_pct"] == 100
 
 
+def test_parse_real_bms_capacity_and_isolation_extras():
+    # rev 41 labels the remaining charge separately ("Pack Capacity Remaining"),
+    # so the one-line simulator form the parser was written for never matched and
+    # remaining_ah came back None off the real bike. The isolation block likewise
+    # carries a live sample and the BMS's own verdict beside the steady reading.
+    bms = parsers.parse_bms(_section(_load(), "bms"))
+    assert bms["capacity_ah"] == 52.0 and bms["remaining_ah"] == 33.0
+    assert bms["isolation_kohm"] == 32.0          # the steady reading
+    assert bms["instant_isolation_kohm"] == 0.0   # keyed "instant iso", not "isolation"
+    assert bms["isolation_fault"] == "No"
+
+
+def test_parse_real_status_remaining_capacity():
+    # "Total Capacity" and "Remaining Capacity" are two labels on rev 41, not one
+    # line with two numbers, so indexing the first label's numbers found nothing.
+    st = parsers.parse_status(_section(_load(), "status"))
+    assert st["capacity_ah"] == 52.0 and st["remaining_ah"] == 52.0
+
+
+def test_parse_real_top_speed_is_mph_not_kph():
+    # the bike prints "Top Speed : 144 KPH" then a bare-label ": 90 MPH"; taking
+    # the last number on the first label's value handed back the KPH figure
+    st = parsers.parse_stats(_section(_load(), "stats"))
+    assert st["top_speed_mph"] == 90.0
+    # the simulator's one-line form must keep working
+    assert parsers.parse_stats("Top speed : 137 kph (85 mph)")["top_speed_mph"] == 85.0
+
+
 def test_parse_real_stats_odometer():
     st = parsers.parse_stats(_section(_load(), "stats"))
     assert st["odo_motor_rev"] == 14260802

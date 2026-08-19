@@ -5,6 +5,7 @@ these tests build sessions on disk and never construct a Tk root.
 """
 
 import json
+import re
 import subprocess
 import sys
 
@@ -76,6 +77,34 @@ def test_rides_fall_back_to_the_legacy_dumplogs_command(tmp_path):
     rep = report.analyze_session(_session_with(tmp_path, dumplogs=RIDE_LOG))
     assert rep["ride_source"] == "dumplogs"
     assert rep["rides"]["totals"]["ride_count"] >= 1
+
+
+def _eventlog(promised, kept, banner=""):
+    """A synthetic eventlogdump: the 'Printing N of M' header, `kept` numbered
+    entries, and optionally the banner a capture appended at the time."""
+    rows = RIDE_LOG.strip().splitlines()
+    out = ["Printing %d of %d log entries.." % (promised, promised)]
+    for i in range(kept):
+        out.append(re.sub(r"^ \d{5}", " %05d" % (i + 1), rows[i % len(rows)]))
+    return "\n".join(out) + (("\n" + banner) if banner else "")
+
+
+def test_completeness_is_re_derived_not_read_off_the_banner(tmp_path):
+    # A session captured by an older OpenMBB carries a flat TRUNCATED banner even
+    # when all but a couple of entries arrived (a real 2026-07-10 pull: 8593 of
+    # 8595). Trusting it told the owner to re-run a 1 MB heavy read for nothing.
+    stale = "### TRUNCATED: no console prompt seen before the read ended ###"
+    rep = report.analyze_session(
+        _session_with(tmp_path, eventlogdump=_eventlog(100, 98, stale)))
+    assert rep["ride_log_truncated"] is False
+    assert "floor" not in report.format_report(rep)
+
+
+def test_a_genuinely_short_capture_is_still_flagged(tmp_path):
+    rep = report.analyze_session(
+        _session_with(tmp_path, eventlogdump=_eventlog(100, 50)))
+    assert rep["ride_log_truncated"] is True
+    assert "floor" in report.format_report(rep)
 
 
 def test_a_truncated_capture_is_flagged_not_reported_as_whole(tmp_path):

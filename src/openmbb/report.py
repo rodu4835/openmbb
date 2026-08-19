@@ -11,7 +11,7 @@ None, list, or dict — so `json.dumps` on the result never needs a custom
 encoder.
 """
 
-from . import health, parsers, rides, sessions
+from . import health, parsers, rides, sessions, transport
 
 # Where ride telemetry lives in a capture, best first. `eventlogdump` is the
 # full console event log; `dumplogs` is the older command kept for sessions
@@ -38,7 +38,14 @@ def analyze_session(session, temp_units="C"):
             ride_summary = rides.summarize_rides(records)
             # A capture that ended early is missing entries, so its totals are a
             # floor, not a measurement. Say so rather than let them read as whole.
-            truncated = "### TRUNCATED" in ride_text
+            # Re-derive that from the stored entry counts instead of trusting the
+            # capture-time banner: a session written by an older OpenMBB carries a
+            # flat TRUNCATED note even when all but a couple of entries arrived,
+            # and telling the owner to re-pull a heavy read on that is wrong.
+            promised, got = transport.eventlog_completeness(ride_text)
+            complete = transport.eventlog_complete_enough(promised, got)
+            truncated = (not complete if complete is not None
+                         else "### TRUNCATED" in ride_text)
         else:
             ride_source = None
 

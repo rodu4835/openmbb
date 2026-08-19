@@ -109,6 +109,35 @@ def parse_odometer(text):
     return motor_rev, km
 
 
+def top_speed_mph(text):
+    """Top speed in MPH from a stats block.
+
+    rev 41 prints the two units as separate lines, the second with a bare label:
+        Top Speed     : 144 KPH
+                      : 90 MPH
+    while the simulator puts both on one line ("137 kph (85 mph)"). Read the
+    explicit MPH figure wherever it sits, and convert from KPH only when the
+    block never names MPH — so this can never hand back a KPH number as MPH.
+    """
+    block, saw = [], False
+    for line in (text or "").splitlines():
+        low = line.lower()
+        stripped = line.strip()
+        is_cont = stripped.startswith(":")           # a bare-label continuation
+        if "top" in low and "speed" in low:
+            saw = True
+        elif stripped and not is_cont:
+            saw = False                              # a new real label ends the block
+        if saw:
+            block.append(low)
+    blob = " ".join(block)
+    m = re.search(r"(-?\d+(?:\.\d+)?)\s*mph", blob)
+    if m:
+        return float(m.group(1))
+    m = re.search(r"(-?\d+(?:\.\d+)?)\s*k(?:p|m/)h", blob)
+    return round(float(m.group(1)) * 0.621371, 1) if m else None
+
+
 def parse_bms(text):
     """Normalize `bms` output. All fields optional."""
     kv = parse_kv(text)
@@ -118,8 +147,11 @@ def parse_bms(text):
     temps = [t for t in all_nums(g("pack", "temp")) if t > -50]
     cap_raw = first_val(g("capacity"), g("pack", "capacity"))
     caps = all_nums(cap_raw)
-    remaining = None
-    if len(caps) > 1 and "remain" in (cap_raw or "").lower():
+    # rev 41 gives the remaining charge its OWN label ("Pack Capacity Remaining
+    # : 19 AH"); the simulator packs both onto one line ("52 Ah (32 Ah
+    # remaining)"). Read the separate label first, then fall back to that form.
+    remaining = num(g("capacity", "remaining"))
+    if remaining is None and len(caps) > 1 and "remain" in (cap_raw or "").lower():
         remaining = caps[1]
     return {
         "soc_pct": first_val(num(g("pack", "soc")), num(g("soc"))),
@@ -133,8 +165,13 @@ def parse_bms(text):
         "cycles": num(g("cycle")),
         "pack_max_temp_c": max(temps) if temps else None,
         # F5: isolation resistance (healthy = megohms; low can be an on-charger
-        # false-positive). First 'isolation' key is the steady reading.
+        # false-positive). First 'isolation' key is the steady reading; it pins
+        # at 0x7FFE (32766) when the measurement tops out. The live sample keys
+        # off "instant iso", which the "isolation" needle can never reach, and
+        # the BMS's own fault flag is the authoritative yes/no.
         "isolation_kohm": num(g("isolation")),
+        "instant_isolation_kohm": num(g("instant", "iso")),
+        "isolation_fault": g("isolation", "fault"),
         "bms_fw_rev": first_val(g("bms", "firmware", "rev"), g("firmware", "rev")),
     }
 
@@ -153,8 +190,7 @@ def parse_stats(text):
         "max_motor_temp_c": num(g("max", "motor", "temp")),
         "max_ctrl_temp_c": num(g("max", "controller", "temp")),
         "lifetime_wh_km": first_val(num(g("lifetime")), num(g("efficiency"))),
-        "top_speed_mph": (all_nums(g("top", "speed"))[-1]
-                          if all_nums(g("top", "speed")) else None),
+        "top_speed_mph": top_speed_mph(text),
         "max_motor_rpm": first_val(num(g("max", "motor", "speed")), num(g("max", "rpm"))),
     }
 
@@ -185,7 +221,9 @@ def parse_status(text):
         "motor_temp_c": num(g("motor", "temp")),
         "ctrl_temp_c": num(g("controller", "temp")),
         "capacity_ah": caps[0] if caps else None,
-        "remaining_ah": (caps[1] if len(caps) > 1 else None),
+        # "Total Capacity" and "Remaining Capacity" are separate labels on rev 41
+        "remaining_ah": first_val(num(g("remaining", "capacity")),
+                                  caps[1] if len(caps) > 1 else None),
         "faults": first_val(g("number", "faults"), g("faults")),
         "warnings": warning_lines(text),
     }

@@ -46,6 +46,20 @@ def eventlog_completeness(text):
     return (int(m.group(1)) if m else None), got
 
 
+def eventlog_complete_enough(promised, got):
+    """Whether a dump holds essentially every entry it promised.
+
+    Forgive the last few entries (~0.5%, floor 3 for counting noise) BUT never
+    call a mostly-missing log captured — the 90% gate stops the floor from
+    swallowing a genuinely short SMALL log (review v0.18: promised//200 is 0
+    under 200, so the floor alone was too loose). None when there was no
+    'Printing N of M' header to judge against.
+    """
+    if promised is None:
+        return None
+    return got >= promised - max(3, promised // 200) and got >= promised * 0.9
+
+
 READ_COMMANDS = ["version", "help", "status", "stats", "runtime", "bms",
                  "sevcon", "chargers", "inputs", "outputs", "dash", "bluetooth",
                  "obd"]
@@ -361,13 +375,7 @@ class Transport:
             # "counting noise / the last few entries" from a real mid-stream cut.
             promised, got = (eventlog_completeness(result)
                              if head == "eventlogdump" else (None, 0))
-            # tolerance: forgive the last few entries (~0.5%, floor 3 for counting
-            # noise) BUT never call a mostly-missing log "captured" — the 90% gate
-            # stops the floor from swallowing a genuinely short SMALL log (review
-            # v0.18: promised//200 is 0 under 200, so the floor alone was too loose).
-            if (promised is not None
-                    and got >= promised - max(3, promised // 200)
-                    and got >= promised * 0.9):
+            if eventlog_complete_enough(promised, got):
                 result += ("\n### NOTE: event log captured (%d of %d entries) — the "
                            "console prompt wasn't seen at the end, so the link will "
                            "resync on the next command; the ride/health data is "

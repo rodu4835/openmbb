@@ -46,6 +46,11 @@ GAUGE_NOTE = ("Matched before/after firmware analysis (MBB 12 vs 41) found the "
 # must NOT be treated as a confirmed off-charger reading.
 KNOWN_OFF_MODES = ("stopped", "standby", "run", "running", "riding", "idle")
 
+# The BMS pins its steady isolation reading at 0x7FFE when the measurement is at
+# the top of its scale — a ceiling code, not a 32.8 MOhm measurement. Seen
+# bit-identical across every healthy real capture while neighbouring fields moved.
+ISO_CEILING_KOHM = 32766
+
 
 def _metric(label, value, unit=None, status="info", note="", display=None):
     """One metric row. `display` defaults to "<value> <unit>"; pass it explicitly
@@ -221,8 +226,20 @@ def health_snapshot(session, temp_units="C"):
             st, ctx = "watch", ("Charge state unknown — a low reading on the charger "
                                 "is a documented false-low; re-read unplugged + dry "
                                 "before acting.")
-        out.append(_metric("Isolation resistance", iso, "kOhm", status=st,
-                           note=("healthy is megohms (>1000 kOhm). " + ctx).strip()))
+        note = ("healthy is megohms (>1000 kOhm). " + ctx).strip()
+        # the live sample and the BMS's own verdict were captured all along and
+        # never shown; the flag is the authoritative yes/no, the sample is noisy
+        detail = []
+        inst = bms.get("instant_isolation_kohm")
+        if inst is not None:
+            detail.append("live sample %g kOhm" % inst)
+        if bms.get("isolation_fault"):
+            detail.append("BMS isolation fault: %s" % bms["isolation_fault"])
+        if detail:
+            note += "  (%s)" % "; ".join(detail)
+        out.append(_metric("Isolation resistance", iso, "kOhm", status=st, note=note,
+                           display=("at or above %g kOhm (sensor ceiling)" % iso
+                                    if iso >= ISO_CEILING_KOHM else None)))
 
     # F5: surface any live console warning as its own row
     for w in (status.get("warnings") or []):
