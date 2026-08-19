@@ -162,7 +162,14 @@ def health_snapshot(session, temp_units="C"):
                                 "capacity comes from the ride-log analysis."))
     cyc = bms.get("cycles")
     if cyc is not None:
-        out.append(_metric("Charge cycles", cyc))
+        # Not full pack cycles, and sandwiched between two rows that DO say what
+        # they are, a bare number reads as pack wear. On the one bike this was
+        # measured against it advanced several times per charge session.
+        out.append(_metric("Charge cycles", cyc,
+                           note="the BMS's own counter — NOT full pack cycles; it "
+                                "advanced several times per charge session on the "
+                                "bike this was measured against, so read it as a "
+                                "relative trend, not a wear figure"))
     odo = stats.get("odo_km")
     if odo is not None:
         out.append(_metric("Odometer", odo, "km", note="lifetime distance"))
@@ -189,7 +196,12 @@ def health_snapshot(session, temp_units="C"):
         # compared above is Celsius, so that is the canonical unit.
         out.append(_metric("Max motor temp (lifetime)", mot_t, "C",
                            status=st, note=note, display=_t(mot_t)))
-    batt_t = first_val(stats.get("max_batt_temp_c"), bms.get("pack_max_temp_c"))
+    # NO fallback to the bms live pack sensor: that is the CURRENT temperature,
+    # and substituting it here published a reassuring "[OK] 28 C" under the label
+    # "highest EVER recorded" on a capture whose stats block was missing, where
+    # the bike's real lifetime peak was 60 C (alert). A lifetime row reports a
+    # lifetime stat or it reports nothing, same as the controller row below.
+    batt_t = stats.get("max_batt_temp_c")
     if batt_t is not None:
         st = "ok" if batt_t < 50 else ("watch" if batt_t < 60 else "alert")
         out.append(_metric("Max battery temp (lifetime)", batt_t, "C",

@@ -393,6 +393,32 @@ def test_health_isolation_charging_softened_offcharger_alerts(tmp_path):
     assert off["Isolation resistance"]["status"] == "alert"    # off-charger = real
 
 
+def test_lifetime_battery_temp_never_falls_back_to_the_live_sensor(tmp_path):
+    # A capture whose stats block is missing used to borrow the bms LIVE pack
+    # sensor for the "highest EVER recorded" row: a real 2026-08-19 session with
+    # 005_stats.txt removed reported "[OK] Max battery temp (lifetime) 28 C"
+    # when the bike's actual lifetime peak was 60 C (alert). Falsely reassuring,
+    # and reachable whenever one command of a pull fails.
+    bms = ("  - Pack Temps : 27 C, 28 C, -100 C, -100 C\n"
+           "  - Pack SOC : 96%\n  - Num Charge Cycles : 243")
+    s = sessions.Session(str(tmp_path), {"bms": bms, "stats": ""}, "")
+    labels = {m["label"] for m in health.health_snapshot(s)}
+    assert "Max battery temp (lifetime)" not in labels
+    # with a real lifetime stat present it still reports, and still alerts
+    s2 = sessions.Session(str(tmp_path),
+                          {"bms": bms, "stats": "  - Max Battery Temp : 60 C"}, "")
+    m = {x["label"]: x for x in health.health_snapshot(s2)}["Max battery temp (lifetime)"]
+    assert m["value"] == 60.0 and m["status"] == "alert"
+
+
+def test_charge_cycles_row_says_what_the_counter_is_not(tmp_path):
+    # a bare number between two rows that carry provenance reads as pack wear
+    s = sessions.Session(str(tmp_path), {"bms": "  - Num Charge Cycles : 243"}, "")
+    m = {x["label"]: x for x in health.health_snapshot(s)}["Charge cycles"]
+    assert m["value"] == 243.0
+    assert "NOT full pack cycles" in m["note"]
+
+
 def test_health_isolation_negative_live_sample_is_not_a_reading(tmp_path):
     # the real bike printed "Instant Iso Resistance : -25 KOhms (0xFFFFFFE7)" on
     # 2026-08-19 - a signed sentinel. A negative resistance is not a measurement.
