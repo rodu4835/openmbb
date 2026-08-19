@@ -886,6 +886,26 @@ def test_rides_render_honors_unit_preference(app, monkeypatch, tmp_path):
     app._render_ride_records(recs, "test")
     assert str(app.ride_tree.heading("km")["text"]) == "Distance mi"
     assert " mi ·" in app.lbl_ride_totals.cget("text")
+    assert str(app.ride_tree.heading("socpkm")["text"]) == "SOC%/mi"
+
+
+def test_ride_temperatures_follow_the_unit_setting_and_gaps_say_n_a(app):
+    # the Rides table showed raw Celsius under a fixed "Max pack C" heading
+    # whatever was picked in Tools, and printed a missing datum as "None"
+    from openmbb import config
+    config.set_temp_units("F")
+    recs = [{"ts": "t1", "soc": 50, "odo_km": 100.0, "pack_temp_c": 30.0,
+             "motor_temp_c": 40.0, "motrpm": 1200},
+            {"ts": "t2", "soc": 48, "odo_km": 100.0, "pack_temp_c": None,
+             "motor_temp_c": None, "motrpm": None}]      # same odo -> no distance
+    app._render_ride_records(recs, "test")
+    assert str(app.ride_tree.heading("ptemp")["text"]) == "Max pack F"
+    totals = app.lbl_ride_totals.cget("text")
+    assert "86 F" in totals                              # the 30 C pack maximum
+    assert "None" not in totals and "n/a" in totals      # no distance -> no SOC/km
+    row = [str(v) for v in
+           app.ride_tree.item(app.ride_tree.get_children()[0])["values"]]
+    assert "86" in row and "104" in row and "n/a" in row
 
 
 def test_login_tab_is_concise_read_only(app):

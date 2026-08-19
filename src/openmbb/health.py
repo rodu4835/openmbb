@@ -66,6 +66,16 @@ def _metric(label, value, unit=None, status="info", note="", display=None):
             "display": display, "status": status, "note": note}
 
 
+def fmt_temp(v, temp_units="C"):
+    """A Celsius datum rendered for display. Every threshold in this program
+    compares in Celsius; this is the one place a temperature follows the user's
+    setting, so anything showing a temperature should render it through here.
+    Returns None for a missing datum — the caller decides how to say "n/a"."""
+    if v is None:
+        return None
+    return "%g F" % round(v * 9 / 5 + 32) if temp_units == "F" else "%g C" % v
+
+
 def _num(v):
     """Render a number the way %g does (no trailing .0) but leave strings alone."""
     return "%g" % v if isinstance(v, (int, float)) and not isinstance(v, bool) else str(v)
@@ -100,12 +110,8 @@ def health_snapshot(session, temp_units="C"):
     settings, _ = parse_settings_dump(session.settings_text)
     out = []
 
-    # display-only temperature conversion (comparisons stay in Celsius; default C
-    # keeps the output byte-identical to before)
     def _t(v):
-        if v is None:
-            return None
-        return "%g F" % round(v * 9 / 5 + 32) if temp_units == "F" else "%g C" % v
+        return fmt_temp(v, temp_units)
 
     def _rng(a, b):
         if temp_units == "F":

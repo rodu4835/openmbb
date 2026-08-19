@@ -1348,6 +1348,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             config.set_temp_units(self.temp_units_var.get())
             if self.analyze_session:      # re-render temps in the new unit
                 self._render_health()
+                self._render_rides()      # the ride table carries temps too
             self._render_charts()
 
         # -- Settings (tabbed) -----------------------------------------------
@@ -4246,24 +4247,39 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # E6: show distances in the user's chosen unit (default km, the bike's own)
             unit = "mi" if config.get_units() == "mi" else "km"
             f = 0.621371 if unit == "mi" else 1.0
+            tu = config.get_temp_units()
             self.ride_tree.heading("km", text="Distance %s" % unit)
+            self.ride_tree.heading("socpkm", text="SOC%%/%s" % unit)
+            self.ride_tree.heading("ptemp", text="Max pack %s" % tu)
+            self.ride_tree.heading("mtemp", text="Max motor %s" % tu)
 
             def _d(km):
                 return round(km * f, 1) if isinstance(km, (int, float)) else km
 
+            def _e(per_km):        # SOC% per km -> per the displayed distance unit
+                return round(per_km / f, 2) if isinstance(per_km, (int, float)) else None
+
+            def _t(c):             # a Celsius datum as a bare number in the user's scale
+                if not isinstance(c, (int, float)):
+                    return None
+                return round(c * 9 / 5 + 32) if tu == "F" else c
+
+            def _na(v):
+                return "n/a" if v is None else v
+
             self.lbl_ride_totals.config(
-                text="%s: %d rides · %.1f %s · mean %s SOC%%/km · max pack %s C / "
-                "motor %s C · %d samples%s"
+                text="%s: %d rides · %.1f %s · mean %s SOC%%/%s · max pack %s / "
+                "motor %s · %d samples%s"
                 % (source, t["ride_count"], _d(t["total_km"]), unit,
-                   t["mean_soc_per_km"], t["max_pack_temp_c"],
-                   t["max_motor_temp_c"], t["samples"], warn))
+                   _na(_e(t["mean_soc_per_km"])), unit,
+                   _na(health_mod.fmt_temp(t["max_pack_temp_c"], tu)),
+                   _na(health_mod.fmt_temp(t["max_motor_temp_c"], tu)),
+                   t["samples"], warn))
             for r in summ["rides"]:
                 self.ride_tree.insert("", "end", values=(
                     r["start_ts"] or "?", _d(r["distance_km"]), r["soc_used_pct"],
-                    r["soc_per_km"] if r["soc_per_km"] is not None else "n/a",
-                    r["max_pack_temp_c"] if r["max_pack_temp_c"] is not None else "n/a",
-                    r["max_motor_temp_c"] if r["max_motor_temp_c"] is not None else "n/a",
-                    r["max_rpm"] if r["max_rpm"] is not None else "n/a"))
+                    _na(_e(r["soc_per_km"])), _na(_t(r["max_pack_temp_c"])),
+                    _na(_t(r["max_motor_temp_c"])), _na(r["max_rpm"])))
 
         # -- Analyze: Charts (dependency-free tk.Canvas plots) ---------------
         # ride-log time series + cross-session trends (one point per saved pull).

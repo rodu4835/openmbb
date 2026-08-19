@@ -106,7 +106,10 @@ def format_report(report):
         for key, label in (("max_pack_temp_c", "max pack temp"),
                            ("max_motor_temp_c", "max motor temp")):
             if t[key] is not None:
-                out.append("  %s: %g C" % (label, t[key]))
+                # the ride block follows the requested units too — F health rows
+                # above a hard-coded C here read as one capture in two scales
+                out.append("  %s: %s"
+                           % (label, health.fmt_temp(t[key], report["units"])))
     else:
         out += ["", "No ride telemetry in this session "
                     "(pull the event log from the bike to add it)."]

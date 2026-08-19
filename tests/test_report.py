@@ -130,6 +130,17 @@ def test_format_report_renders_display_not_raw_values(tmp_path):
     assert " F" in text
 
 
+def test_ride_temperatures_follow_the_requested_units(tmp_path):
+    # the ride block was hard-coded to C: a report with health rows in F and ride
+    # rows in C reads as one capture measured in two scales
+    session = _session_with(tmp_path, eventlogdump=RIDE_LOG)
+    rep_f = report.analyze_session(session, "F")
+    assert rep_f["rides"]["totals"]["max_motor_temp_c"] == 44      # value stays C
+    assert "max motor temp: 111 F" in report.format_report(rep_f)
+    assert "max motor temp: 44 C" in report.format_report(
+        report.analyze_session(session))                          # C unchanged
+
+
 # ------------------------------------------------------------------------ CLI
 
 def _cli(*args):
