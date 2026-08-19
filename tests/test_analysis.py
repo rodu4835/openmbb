@@ -393,6 +393,22 @@ def test_health_isolation_charging_softened_offcharger_alerts(tmp_path):
     assert off["Isolation resistance"]["status"] == "alert"    # off-charger = real
 
 
+def test_health_isolation_negative_live_sample_is_not_a_reading(tmp_path):
+    # the real bike printed "Instant Iso Resistance : -25 KOhms (0xFFFFFFE7)" on
+    # 2026-08-19 - a signed sentinel. A negative resistance is not a measurement.
+    bms = ("  - Isolation Resistance : 32766 KOhms\n"
+           "  - Instant Iso Resistance : -25 KOhms\n  - Pack SOC : 96%")
+    s = sessions.Session(str(tmp_path), {"bms": bms}, "")
+    note = {x["label"]: x for x in
+            health.health_snapshot(s)}["Isolation resistance"]["note"]
+    assert "-25" not in note and "unavailable this read" in note
+    # a plausible sample still shows
+    ok = sessions.Session(str(tmp_path), {"bms": bms.replace("-25", "21")}, "")
+    note_ok = {x["label"]: x for x in
+               health.health_snapshot(ok)}["Isolation resistance"]["note"]
+    assert "live sample 21 kOhm" in note_ok
+
+
 def test_health_isolation_unknown_mode_is_watch(tmp_path):
     # T12: an absent/unrecognized Mode must NOT be asserted as off-charger 'alert'
     bms = "  - Isolation Resistance : 32 KOhms\n  - Pack SOC : 100%"

@@ -237,8 +237,13 @@ def health_snapshot(session, temp_units="C"):
         # never shown; the flag is the authoritative yes/no, the sample is noisy
         detail = []
         inst = bms.get("instant_isolation_kohm")
-        if inst is not None:
+        if inst is not None and inst >= 0:
             detail.append("live sample %g kOhm" % inst)
+        elif inst is not None:
+            # the field can come back as a signed sentinel (a real 2026-08-19 read
+            # printed "-25 KOhms (0xFFFFFFE7)"); a negative resistance is not a
+            # measurement, so say it was unavailable rather than render nonsense
+            detail.append("live sample unavailable this read")
         if bms.get("isolation_fault"):
             detail.append("BMS isolation fault: %s" % bms["isolation_fault"])
         if detail:
