@@ -34,6 +34,7 @@ PALETTES = {
         "menubd":  "#4a4470",   # dropdown 1px border
         "tooltip": "#4a4470",
         "carddim": "#aab2c5",   # secondary text inside the effect card
+        "accent":  "#8fd0ff",   # a changed/attention row in a table
         "grid":    "#2a2d38",   # chart gridlines
         # fallback-only surfaces (clam)
         "bg":      "#15161a",
@@ -60,6 +61,7 @@ PALETTES = {
         "menubd":  "#c2c7d0",
         "tooltip": "#fbfbe6",   # the familiar pale-yellow tip surface
         "carddim": "#5b6270",
+        "accent":  "#1a5fb4",
         "grid":    "#dfe3e9",
         "bg":      "#fafafa",
         "field":   "#ffffff",

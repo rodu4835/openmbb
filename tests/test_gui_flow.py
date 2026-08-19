@@ -908,6 +908,24 @@ def test_ride_temperatures_follow_the_unit_setting_and_gaps_say_n_a(app):
     assert "86" in row and "104" in row and "n/a" in row
 
 
+def test_tree_tag_colours_follow_a_live_theme_switch(app):
+    # tag_configure COPIES the colour into the widget, so unlike the ttk styles
+    # sv-ttk restyles for us, tree tags kept whatever palette they were built
+    # with: switching to light left INFO rows at the dark palette's near-white
+    # #e6e6e6 on a white surface, and the Writes risk column at its palest.
+    from openmbb import theme
+    app._set_theme("light")
+    light = theme.PALETTES["light"]
+    assert str(app.health_tree.tag_configure("info", "foreground")) == light["fg"]
+    assert str(app.health_tree.tag_configure("alert", "foreground")) == light["danger"]
+    assert str(app.tree.tag_configure("safe", "foreground")) == light["green"]
+    assert str(app.tree.tag_configure("caution", "foreground")) == light["warn"]
+    app._set_theme("dark")
+    dark = theme.PALETTES["dark"]
+    assert str(app.health_tree.tag_configure("info", "foreground")) == dark["fg"]
+    assert str(app.tree.tag_configure("safe", "foreground")) == dark["green"]
+
+
 def test_login_tab_is_concise_read_only(app):
     # D1 (v0.12): the Login intro is trimmed to WHAT logging in does — read-only,
     # reveals the tunables, unlocks Writes — with no password strings listed.

@@ -377,6 +377,29 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._cell_bg = new              # idle status cells sit on the surface
             self._apply_dark_titlebar()      # follows the mode now, not always dark
             self._repaint_raw_tk(self, old, new)
+            self._restyle_trees()            # tag colours don't follow sv-ttk
+
+        # Treeview tag colours are copied into the widget by tag_configure, so
+        # unlike the ttk styles sv-ttk restyles for us they do NOT follow a live
+        # theme switch — they keep whatever palette was current when the tree was
+        # built. Left unre-applied, light mode painted INFO rows in the dark
+        # palette's near-white #e6e6e6 on a white surface (invisible), and the
+        # Writes risk column — SAFE vs CAUTION — in its palest colours.
+        _TREE_TAGS = {
+            "health_tree": (("ok", "green"), ("watch", "warn"),
+                            ("alert", "danger"), ("info", "fg")),
+            "tree": (("safe", "green"), ("caution", "warn"),
+                     ("pending", "green"), ("reset", "accent")),
+        }
+
+        def _restyle_trees(self):
+            """(Re-)apply every Treeview tag colour from the live palette."""
+            for attr, tags in self._TREE_TAGS.items():
+                tree = getattr(self, attr, None)
+                if tree is None:
+                    continue
+                for tag, key in tags:
+                    tree.tag_configure(tag, foreground=P[key])
 
         def _repaint_raw_tk(self, widget, old, new):
             """Repaint the non-ttk widgets under `widget` for the active palette.
@@ -3559,10 +3582,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.tree.heading(c, text=hd)
                 self.tree.column(c, width=w, anchor="w")
             self._attach_tree_copy(self.tree)       # E4
-            self.tree.tag_configure("safe", foreground="#7fe0a0")
-            self.tree.tag_configure("caution", foreground=P["warn"])
-            self.tree.tag_configure("pending", foreground=P["green"])
-            self.tree.tag_configure("reset", foreground="#8fd0ff")   # changed-from-read
+            self._restyle_trees()
             self.tree.bind("<<TreeviewSelect>>", self._show_effect)
             self.tree.bind("<Double-1>", self._writes_edit_cell)
             self.tree.bind("<Button-1>", self._writes_action_click)
@@ -3978,9 +3998,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             for c, w in zip(cols, (200, 260, 90)):
                 self.health_tree.heading(c, text=c.title())
                 self.health_tree.column(c, width=w, anchor="w")
-            for tag, col in (("ok", "#7fe0a0"), ("watch", P["warn"]),
-                             ("alert", P["danger"]), ("info", P["fg"])):
-                self.health_tree.tag_configure(tag, foreground=col)
+            self._restyle_trees()
             self.health_tree.pack(fill="both", expand=True)
             self._attach_tree_copy(self.health_tree)       # E4
             self.health_tree.bind("<<TreeviewSelect>>", self._health_note)
