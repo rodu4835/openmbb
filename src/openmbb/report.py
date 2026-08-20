@@ -175,6 +175,9 @@ def _condition_lines(c):
         out.append("  discharge allowance: median %g%%, worst %g%% at %g C / %g%% SOC"
                    % (der["median_pct"], der["worst_pct"],
                       der["worst_at_pack_temp_c"], der["worst_at_soc_pct"]))
+    for f in c.get("faults") or []:
+        out.append("  %-27s %d logged, %s"
+                   % (f["name"] + ":", f["count"], condition.fault_span(f)))
     for ev in c.get("stats_resets") or []:
         out.append("  ! statistics were RESET at %s - every 'lifetime' figure "
                    "above dates from then, not from" % (ev["when"] or "an unlogged time"))

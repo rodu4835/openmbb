@@ -254,6 +254,7 @@ def assess(event_log):
     first, last = log_coverage(rides)
 
     resets = stats_reset_events(event_log)
+    faults = fault_history(event_log)
     sag = cell_sag(rides)
     dev = cell_deviation(rides)
     floor = cell_floor(rides, limits)
@@ -294,6 +295,7 @@ def assess(event_log):
                      # not decodable, which is a coverage limit, not a pass
                      "ride_samples_with_cell": with_cell},
         "stats_resets": resets,
+        "faults": faults,
         "cell_sag": sag,
         "cell_deviation": dev,
         "cell_floor": floor,
@@ -511,3 +513,64 @@ def cell_deviation(records, cells=28):
         "cells_assumed": cells,
         "graded": True,
     }
+
+
+# Fault classes worth counting, and deliberately NOT the routine ones. On the
+# reference bike - believed healthy - a six-week log holds 838 contactor
+# openings, 161 power-on resets and 366 current-limit events, so counting those
+# as faults would bury the reader in normal operation.
+#
+# What survives here still occurs on that healthy bike: 18 module connect
+# failures, 33 precharge problems, 22 Sevcon emergency frames, 4 isolation
+# events, 2 watchdog resets. So PRESENCE IS NOT A VERDICT. These are counted and
+# dated, never graded - a buyer comparing 18 module failures against 300 can
+# judge, and this module has no business pretending it knows where the line is
+# from a single bike.
+_FAULT_CLASSES = (
+    ("Module connect failures", r"cannot connect module"),
+    ("Precharge problems", r"precharge lost|failed to fully precharge|precharge decay"),
+    ("Sevcon emergency frames", r"sevcon can emcy"),
+    ("Isolation events", r"low chassis isolation|bms isolation fault"),
+    ("Watchdog / abnormal resets", r"watchdog timer|abnormal reset"),
+    ("Critical error shutdowns", r"critical error"),
+    ("Cell voltage difference", r"max allowed voltage difference"),
+    ("ABS errors", r"abs .{0,20}error"),
+)
+
+
+def fault_span(f):
+    """A fault class's date range, phrased for a reader. Some console entries
+    carry no clock at all — they are logged before the bike knows the time —
+    and saying so beats printing a question mark."""
+    if not f.get("first"):
+        return "no dates logged"
+    if f["first"] == f["last"]:
+        return f["first"]
+    return "%s to %s" % (f["first"], f["last"])
+
+
+def fault_history(event_log):
+    """Counted, dated fault classes from an event log. Ungraded on purpose.
+
+    The error log is a small rolling buffer holding a handful of entries; the
+    event log holds thousands, so this reads the event log and sees months where
+    the error log sees days.
+    """
+    out = []
+    for name, pattern in _FAULT_CLASSES:
+        rx = re.compile(pattern, re.I)
+        stamps = []
+        count = 0
+        for line in (event_log or "").splitlines():
+            if not rx.search(line):
+                continue
+            count += 1
+            ts = _TS_RE.search(line)
+            if ts:
+                stamps.append(ts.group(0))
+        if count:
+            out.append({"name": name, "count": count,
+                        "first": stamps[0] if stamps else None,
+                        "last": stamps[-1] if stamps else None,
+                        "graded": False})
+    return sorted(out, key=lambda f: -f["count"])

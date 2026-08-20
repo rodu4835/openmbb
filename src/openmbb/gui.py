@@ -4227,13 +4227,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
             cov = a["coverage"]
             if cov["first"]:
-                _row("Log window", "%s \u2192 %s  \u00b7  %d ride / %d charge samples"
+                _row("Log window", "%s → %s  ·  %d ride / %d charge samples"
                      % (cov["first"], cov["last"], cov["ride_samples"],
                         cov["charge_samples"]), "measured")
             cap = a["charge_capacity"]
             if cap:
                 _row("Charge capacity",
-                     "median %g Ah across %g\u2013%g V \u00b7 %d sessions "
+                     "median %g Ah across %g–%g V · %d sessions "
                      "(an index, not the pack's capacity)"
                      % (cap["median_ah"], cap["window_v"][0], cap["window_v"][1],
                         cap["sessions"]), "measured")
@@ -4247,19 +4247,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             sag = a["cell_sag"]
             if sag:
                 _row("Weakest cell, loaded",
-                     "%g mV at %g A \u00b7 %g%% SOC \u00b7 %s"
+                     "%g mV at %g A · %g%% SOC · %s"
                      % (sag["min_cell_mv"], sag["at_amps"], sag["at_soc_pct"],
                         _t(sag["at_pack_temp_c"])), "measured")
             der = a["derate"]
             if der:
                 _row("Discharge allowance",
-                     "median %g%% \u00b7 worst %g%% at %s / %g%% SOC"
+                     "median %g%% · worst %g%% at %s / %g%% SOC"
                      % (der["median_pct"], der["worst_pct"],
                         _t(der["worst_at_pack_temp_c"]), der["worst_at_soc_pct"]),
                      "measured")
+            for f in a["faults"]:
+                _row(f["name"], "%d logged · %s · counted, not graded"
+                     % (f["count"], condition_mod.fault_span(f)), "measured")
             for ev in a["stats_resets"]:
                 _row("Statistics RESET",
-                     "%s \u2014 every 'lifetime' figure on the Health tab dates "
+                     "%s — every 'lifetime' figure on the Health tab dates "
                      "from here, not from the bike's build date"
                      % (ev["when"] or "an unlogged time"), "attention")
             for u in a["undetermined"]:
