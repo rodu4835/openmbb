@@ -250,20 +250,29 @@ def assess(event_log):
     """
     rides = parsers.parse_ride_log(event_log)
     charges = parsers.parse_charge_log(event_log)
+    limits = parsers.parse_limit_events(event_log)
     first, last = log_coverage(rides)
 
     resets = stats_reset_events(event_log)
     sag = cell_sag(rides)
+    floor = cell_floor(rides, limits)
     der = derate_profile(rides)
     cap = charge_capacity(charges)
+
+    with_cell = sum(1 for r in rides if r.get("mincell_mv") is not None)
 
     undetermined = []
     if not rides:
         undetermined.append("no riding samples in this capture — pull the event "
                             "log (eventlogdump) to answer anything here")
-    if sag is None and rides:
-        undetermined.append("weakest cell under load: no sample carried both a "
-                            "MinCell reading and real current")
+    if sag is None and rides and floor is None:
+        undetermined.append(
+            "weakest cell under load: no sample carried both a decodable cell "
+            "voltage and real current" if with_cell else
+            "weakest cell under load: NOT ONE ride record in this capture carries "
+            "a decodable cell voltage. Records written before a firmware change "
+            "do not survive being re-read by the newer firmware, so a reflashed "
+            "bike can look silent here when it has simply not been measured")
     if der is None and rides:
         undetermined.append("discharge allowance: this firmware does not print a "
                             "current limit on its riding lines")
@@ -278,10 +287,49 @@ def assess(event_log):
 
     return {
         "coverage": {"first": first, "last": last,
-                     "ride_samples": len(rides), "charge_samples": len(charges)},
+                     "ride_samples": len(rides), "charge_samples": len(charges),
+                     # how much of the ride log can answer the cell question at
+                     # all — the rest was written by an older firmware and is
+                     # not decodable, which is a coverage limit, not a pass
+                     "ride_samples_with_cell": with_cell},
         "stats_resets": resets,
         "cell_sag": sag,
+        "cell_floor": floor,
         "derate": der,
         "charge_capacity": cap,
         "undetermined": undetermined,
     }
+
+
+def cell_floor(ride_records, limit_events):
+    """Lowest cell voltage seen under real load, from whichever channel exists.
+
+    An ABSOLUTE check: a lithium cell dragged low under load is stressed on any
+    bike, so unlike the deviation-from-pack-average measure this needs no
+    comparison at all. It reads the riding lines where the firmware puts a cell
+    voltage there, and falls back to the current-limit events where it does not
+    — which is what makes it survive a firmware boundary that leaves the riding
+    records undecodable.
+
+    `source` names the channel so the reader can see which evidence answered.
+    """
+    from_ride = [r for r in ride_records
+                 if isinstance(r.get("battamps"), (int, float))
+                 and r["battamps"] >= LOADED_AMPS
+                 and isinstance(r.get("mincell_mv"), (int, float))]
+    if from_ride:
+        worst = min(from_ride, key=lambda r: r["mincell_mv"])
+        return {"min_cell_mv": worst["mincell_mv"], "source": "riding samples",
+                "samples": len(from_ride), "when": worst.get("ts"),
+                "at_pack_temp_c": worst.get("pack_temp_c"), "graded": False}
+    limited = [e for e in limit_events if e["kind"] == "discharge"]
+    if limited:
+        worst = min(limited, key=lambda e: e["mincell_mv"])
+        # the BMS only logs these while holding current back, so the pack was
+        # under genuine demand — but there is no current or pack voltage on the
+        # line, so this cannot feed the deviation-from-average measure
+        return {"min_cell_mv": worst["mincell_mv"],
+                "source": "discharge-limit events", "samples": len(limited),
+                "when": worst.get("ts"), "at_pack_temp_c": worst.get("pack_temp_c"),
+                "graded": False}
+    return None

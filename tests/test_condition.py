@@ -153,3 +153,100 @@ def test_assess_qualifies_a_missing_reset_with_the_log_window():
     assert a["stats_resets"] == []
     reason = [u for u in a["undetermined"] if "ever reset" in u][0]
     assert "06/24/2026 21:59:31" in reason
+
+
+# --- records written by an older firmware -----------------------------------
+
+# The real shape: rev 41 re-reads a shorter rev-12 record with its own layout
+# and runs off the end, so the two trailing fields are stale bytes. 8241 mV is
+# 0x2031, the ASCII " 1". Measured at 502 of 502 pre-update ride records.
+STALE_RECORD = (" 04101  06/01/2026 02:16:49  Riding  PackTemp: h 26C, "
+                "PackSOC: 74%, Vpack:115.177V, BattAmps: 120, MotRPM:3300, "
+                "Odo: 5399km, Curr limit: 8295 A (31%), MinCell: 8241mV")
+
+
+def test_a_fabricated_cell_voltage_is_refused():
+    r = parsers.parse_ride_log(STALE_RECORD)[0]
+    assert r["mincell_mv"] is None
+    # the real fields on the same line still decode
+    assert r["soc"] == 74 and r["odo_km"] == 5399 and r["battamps"] == 120
+
+
+def test_the_whole_trailing_pair_goes_not_just_the_impossible_one():
+    # the fabricated Curr limit PERCENTAGE lands inside 0-100 (observed: 0, 30,
+    # 31, 90, 91), so it cannot be caught by range-checking itself. Both fields
+    # sit at the end of the record, so one being impossible condemns the pair.
+    r = parsers.parse_ride_log(STALE_RECORD)[0]
+    assert r["curr_limit_pct"] is None
+
+
+def test_the_guard_is_two_sided():
+    # the fabrications seen here run high, but a rev-12 decode of the same era
+    # contains a 66 mV MinCell, so a one-sided guard would let that through
+    low = STALE_RECORD.replace("MinCell: 8241mV", "MinCell: 66mV")
+    assert parsers.parse_ride_log(low)[0]["mincell_mv"] is None
+    good = STALE_RECORD.replace("MinCell: 8241mV", "MinCell: 3411mV")
+    r = parsers.parse_ride_log(good)[0]
+    assert r["mincell_mv"] == 3411 and r["curr_limit_pct"] == 31
+
+
+def test_a_wholly_stale_log_says_so_instead_of_reading_as_healthy():
+    # The used-bike case that makes this matter: the seller reflashed the MBB,
+    # so every retained ride record predates the flash. Unguarded, cell_sag
+    # returned 8241 mV - a pack whose weakest cell never sags - which is the
+    # most expensive wrong answer this tool could give.
+    a = condition.assess("\n".join([STALE_RECORD] * 5))
+    assert a["coverage"]["ride_samples"] == 5
+    assert a["coverage"]["ride_samples_with_cell"] == 0
+    assert a["cell_sag"] is None
+    assert a["derate"] is None
+    reason = [u for u in a["undetermined"] if "weakest cell" in u][0]
+    assert "NOT ONE" in reason and "firmware" in reason
+
+
+# --- the legacy weakest-cell channel ----------------------------------------
+
+LIMIT_LOG = """
+ 00124  05/28/2026 02:41:23  Batt Dischg Cur Limited    379 A (72%), MinCell: 3567mV, MaxPackTemp: 49C
+ 00312  05/28/2026 02:43:02  Batt Dischg Cur Limited    383 A (73%), MinCell: 3214mV, MaxPackTemp: 38C
+ 00424  05/28/2026 12:05:59  Batt Dischg Cur Limited    483 A (92%), MinCell: 3492mV, MaxPackTemp: 40C
+"""
+
+
+def test_limit_events_carry_a_cell_voltage_of_their_own():
+    ev = parsers.parse_limit_events(LIMIT_LOG)
+    assert len(ev) == 3
+    assert ev[0]["kind"] == "discharge"
+    assert ev[0]["limit_amps"] == 379 and ev[0]["limit_pct"] == 72
+    assert ev[0]["mincell_mv"] == 3567 and ev[0]["pack_temp_c"] == 49
+
+
+def test_limit_events_get_the_same_plausibility_guard():
+    bad = LIMIT_LOG.replace("MinCell: 3567mV", "MinCell: 8241mV")
+    assert len(parsers.parse_limit_events(bad)) == 2      # the fabricated one drops
+
+
+def test_cell_floor_prefers_the_riding_channel_when_it_has_one():
+    rides = parsers.parse_ride_log(RIDE)
+    floor = condition.cell_floor(rides, parsers.parse_limit_events(LIMIT_LOG))
+    assert floor["source"] == "riding samples"
+    assert floor["min_cell_mv"] == 3300         # from RIDE, not the 3214 above
+
+
+def test_cell_floor_falls_back_when_the_riding_records_are_undecodable():
+    # The reflashed-bike case: every riding record predates the flash and its
+    # trailing fields are stale bytes, so the modern channel is silent. The
+    # current-limit events survive, and they hold the worst reading of all.
+    stale = "\n".join([STALE_RECORD] * 4) + LIMIT_LOG
+    a = condition.assess(stale)
+    assert a["coverage"]["ride_samples_with_cell"] == 0
+    assert a["cell_sag"] is None                 # riding channel correctly dead
+    assert a["cell_floor"]["source"] == "discharge-limit events"
+    assert a["cell_floor"]["min_cell_mv"] == 3214
+    assert a["cell_floor"]["samples"] == 3
+    # and with the floor recovered it must NOT claim the cells are unmeasured
+    assert not any("weakest cell" in u for u in a["undetermined"])
+
+
+def test_cell_floor_is_none_when_neither_channel_has_anything():
+    assert condition.cell_floor([], []) is None
