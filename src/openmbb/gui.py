@@ -24,6 +24,7 @@ def open_in_file_manager(path):
 from . import APP_NAME, __version__
 from . import charts as charts_mod
 from . import compare as compare_mod
+from . import condition as condition_mod
 from . import gearing as gearing_mod
 from . import health as health_mod
 from . import parsers, rides, sessions
@@ -378,6 +379,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._apply_dark_titlebar()      # follows the mode now, not always dark
             self._repaint_raw_tk(self, old, new)
             self._restyle_trees()            # tag colours don't follow sv-ttk
+            self._paint_verdict()            # nor does a widget-set foreground
 
         # Treeview tag colours are copied into the widget by tag_configure, so
         # unlike the ttk styles sv-ttk restyles for us they do NOT follow a live
@@ -390,6 +392,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             ("alert", "danger"), ("info", "fg")),
             "tree": (("safe", "green"), ("caution", "warn"),
                      ("pending", "green"), ("reset", "accent")),
+            "cond_tree": (("measured", "fg"), ("attention", "warn"),
+                          ("unknown", "dim")),
         }
 
         def _restyle_trees(self):
@@ -1371,6 +1375,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             config.set_temp_units(self.temp_units_var.get())
             if self.analyze_session:      # re-render temps in the new unit
                 self._render_health()
+                self._render_condition()  # carries pack temperatures too
                 self._render_rides()      # the ride table carries temps too
             self._render_charts()
 
@@ -4012,6 +4017,42 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                              justify="left")
             self.lbl_health_note.pack(anchor="w", pady=(6, 0))
 
+            # Condition — what the ride/charge SAMPLES say about the pack, as
+            # distinct from Health, which reads single current values. Nothing
+            # here is graded: two of its three measurements have no reference
+            # bike to be judged against yet.
+            nf = ttk.Frame(sub, padding=8)
+            sub.add(nf, text=" Condition ")
+            self.lbl_cond_verdict = ttk.Label(
+                nf, text="Load a session to assess the pack.",
+                font=(self.sty["ui"], 11, "bold"), wraplength=980,
+                justify="left", foreground=P["dim"])
+            self.lbl_cond_verdict.pack(anchor="w", pady=(0, 8))
+            ccols = ("check", "finding")
+            self.cond_tree = ttk.Treeview(nf, columns=ccols, show="headings",
+                                          height=12)
+            for c, hd, w in zip(ccols, ("Check", "What the log says"), (210, 660)):
+                self.cond_tree.heading(c, text=hd)
+                self.cond_tree.column(c, width=w, anchor="w")
+            self._restyle_trees()
+            self.cond_tree.pack(fill="both", expand=True)
+            self._attach_tree_copy(self.cond_tree)
+            # Treeview cells do not wrap and these findings are sentences, so the
+            # full text of the selected row goes here — the same pattern the
+            # Health tab uses for its per-metric explanations.
+            self._cond_hint = ("Click any row for its full text. The verdict grades "
+                               "only what can be judged without another bike to "
+                               "compare against: the weakest cell against its own "
+                               "pack, absolute cell voltage under load, resting "
+                               "spread, and faults. Charge capacity and discharge "
+                               "allowance are measured but NOT graded. Rows marked "
+                               "'not determined' are checks this capture could not "
+                               "answer — they are not passes.")
+            self.lbl_cond_note = ttk.Label(nf, text=self._cond_hint, wraplength=980,
+                                           foreground=P["dim"], justify="left")
+            self.lbl_cond_note.pack(anchor="w", pady=(6, 0))
+            self.cond_tree.bind("<<TreeviewSelect>>", self._cond_note)
+
             # Rides
             rf = ttk.Frame(sub, padding=8)
             sub.add(rf, text=" Rides ")
@@ -4119,6 +4160,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _analyze_set(self, session):
             self.analyze_session = session
             self._render_health()
+            self._render_condition()
             self._render_rides()
             # C6: a folder with no readable session data would render as all-n/a with
             # no hint — flag it instead of silently "loading" nothing.
@@ -4158,6 +4200,102 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 return False
             self._analyze_set(sessions.load_session(self.logger.dir))
             return True
+
+        def _render_condition(self):
+            """Fill the Condition tab from condition.assess()."""
+            self.cond_tree.delete(*self.cond_tree.get_children())
+            if not self.analyze_session:
+                return
+            text = ""
+            for cmd in ("eventlogdump", "dumplogs"):
+                text = self.analyze_session.cmd(cmd) or ""
+                if text.strip():
+                    break
+            a = condition_mod.assess(text)
+            self._cond_verdict = condition_mod.verdict(
+                a, health_mod.health_snapshot(self.analyze_session,
+                                              config.get_temp_units()))
+            self._paint_verdict()
+            tu = config.get_temp_units()
+
+            def _t(c):
+                return health_mod.fmt_temp(c, tu) or "n/a"
+
+            def _row(check, finding, tag):
+                self.cond_tree.insert("", "end", tags=(tag,),
+                                      values=(check, finding))
+
+            cov = a["coverage"]
+            if cov["first"]:
+                _row("Log window", "%s → %s  ·  %d ride / %d charge samples"
+                     % (cov["first"], cov["last"], cov["ride_samples"],
+                        cov["charge_samples"]), "measured")
+            cap = a["charge_capacity"]
+            if cap:
+                _row("Charge capacity",
+                     "median %g Ah across %g–%g V · %d sessions "
+                     "(an index, not the pack's capacity)"
+                     % (cap["median_ah"], cap["window_v"][0], cap["window_v"][1],
+                        cap["sessions"]), "measured")
+            floor = a["cell_floor"]
+            if floor and (not a["cell_sag"]
+                          or floor["source"] != "riding samples"):
+                _row("Lowest cell, loaded",
+                     "%g mV · from %d %s"
+                     % (floor["min_cell_mv"], floor["samples"], floor["source"]),
+                     "measured")
+            sag = a["cell_sag"]
+            if sag:
+                _row("Weakest cell, loaded",
+                     "%g mV at %g A · %g%% SOC · %s"
+                     % (sag["min_cell_mv"], sag["at_amps"], sag["at_soc_pct"],
+                        _t(sag["at_pack_temp_c"])), "measured")
+            der = a["derate"]
+            if der:
+                _row("Discharge allowance",
+                     "median %g%% · worst %g%% at %s / %g%% SOC"
+                     % (der["median_pct"], der["worst_pct"],
+                        _t(der["worst_at_pack_temp_c"]), der["worst_at_soc_pct"]),
+                     "measured")
+            for f in a["faults"]:
+                _row(f["name"], "%d logged · %s · counted, not graded"
+                     % (f["count"], condition_mod.fault_span(f)), "measured")
+            for ev in a["stats_resets"]:
+                _row("Statistics RESET",
+                     "%s — every 'lifetime' figure on the Health tab dates "
+                     "from here, not from the bike's build date"
+                     % (ev["when"] or "an unlogged time"), "attention")
+            for u in a["undetermined"]:
+                _row("Not determined", u, "unknown")
+
+        # the verdict colour is set on the widget, not through a ttk style, so
+        # like the Treeview tags it does NOT follow a live theme switch on its
+        # own and has to be re-applied
+        _VERDICT_COLOUR = {"concern": "danger", "watch": "warn",
+                           "ok": "green", "unknown": "dim"}
+
+        def _cond_note(self, _evt=None):
+            """Show the selected row in full; Treeview clips its cells."""
+            sel = self.cond_tree.selection()
+            if not sel:
+                self.lbl_cond_note.config(text=self._cond_hint)
+                return
+            vals = self.cond_tree.item(sel[0])["values"]
+            self.lbl_cond_note.config(
+                text="%s: %s" % (vals[0], vals[1]) if len(vals) > 1
+                else self._cond_hint)
+
+        def _paint_verdict(self):
+            v = getattr(self, "_cond_verdict", None)
+            if not getattr(self, "lbl_cond_verdict", None):
+                return
+            if not v:
+                self.lbl_cond_verdict.config(text="Load a session to assess the "
+                                             "pack.", foreground=P["dim"])
+                return
+            self.lbl_cond_verdict.config(
+                text="%s  —  %s" % (v["level"].upper(), v["headline"]),
+                foreground=P[self._VERDICT_COLOUR.get(v["level"], "dim")])
 
         def _render_health(self):
             self.health_tree.delete(*self.health_tree.get_children())

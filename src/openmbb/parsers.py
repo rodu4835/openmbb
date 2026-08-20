@@ -258,6 +258,13 @@ def _pack_temp(line):
     return float(m.group(1)) if m else None
 
 
+# A cell in a pack that is on its feet at all sits between these. A reading
+# outside them is a decode artifact, not a cell. Two-sided on purpose: the
+# fabrications seen on this platform run HIGH (8241 mV), but a rev-12 decode of
+# the same era contains a 66 mV MinCell, so a one-sided guard would miss it.
+CELL_MV_MIN, CELL_MV_MAX = 2000.0, 4300.0
+
+
 def _curr_limit_pct(line):
     """The BMS discharge allowance as a percentage, from 'Curr limit: 520 A (100%)'.
 
@@ -269,6 +276,44 @@ def _curr_limit_pct(line):
     return float(m.group(1)) if m else None
 
 
+def _mode_samples(text, mode_word, required):
+    """Every sample line for one bike mode, as dicts.
+
+    `required` names the fields a line must carry to count: a line missing one
+    of them is not a usable sample of that mode, rather than a sample with holes
+    in it.
+    """
+    records = []
+    for line in (text or "").splitlines():
+        if mode_word not in line.lower():
+            continue
+        rec = {name: _ride_field(line, pat) for name, pat in _RIDE_FIELDS.items()}
+        if any(rec.get(k) is None for k in required):
+            continue
+        rec["pack_temp_c"] = _pack_temp(line)
+        rec["curr_limit_pct"] = _curr_limit_pct(line)
+        rec["motor_temp_c"] = _ride_field(line, r"mottemp|motor temp")
+        ts = _TS_RE.search(line)
+        rec["ts"] = ts.group(0) if ts else None
+        # Firmware re-reads records written by an OLDER firmware using its own,
+        # longer layout and runs off the end of them, so the two trailing fields
+        # come back as stale bytes: MinCell 8241 mV is 0x2031, the ASCII " 1".
+        # Both fields sit at the end of the record, so when one is impossible
+        # NEITHER is decodable — and the fabricated Curr limit percentage lands
+        # inside 0-100 (observed: 0, 30, 31, 90, 91), so it cannot be caught by
+        # range-checking itself. This is not an edge case on a used bike: if the
+        # seller reflashed the MBB, every retained ride record predates the
+        # flash, and an unguarded read reports a pack whose weakest cell never
+        # sags at all. Measured: 502 of 502 pre-update ride records fabricated,
+        # 0 of 635 after.
+        mv = rec.get("mincell_mv")
+        if mv is not None and not (CELL_MV_MIN <= mv <= CELL_MV_MAX):
+            rec["mincell_mv"] = None
+            rec["curr_limit_pct"] = None
+        records.append(rec)
+    return records
+
+
 def parse_ride_log(text):
     """Extract riding records from a dumplogs/eventlog block.
 
@@ -277,17 +322,61 @@ def parse_ride_log(text):
     and an odometer are kept, so charging/boot lines are ignored. Pack and motor
     temperature are separate fields — conflating them hides a real thermal alert.
     """
-    records = []
+    return _mode_samples(text, "riding", ("soc", "odo_km"))
+
+
+_LIMIT_RE = re.compile(
+    r"Batt\s+(Dischg|Chg)\s+Cur\s+Limited\s+(\d+)\s*A\s*\(\s*([\d.]+)\s*%\)", re.I)
+
+
+def parse_limit_events(text):
+    """Current-limit events, which carry a weakest-cell reading of their own.
+
+    A different channel from the riding lines, and the important one on older
+    firmware: the BMS logs a line like
+
+        Batt Dischg Cur Limited    379 A (72%), MinCell: 3567mV, MaxPackTemp: 49C
+
+    every time it holds the discharge current back, and that line carries a
+    cell voltage under genuine load. On this platform the two channels are
+    complementary rather than redundant — the firmware that prints MinCell on
+    its riding lines stops emitting these, and the firmware that emits these
+    prints no MinCell on riding lines at all (366 of them against 0 either side
+    of one bike's update). So a capture from a bike whose riding records carry
+    no usable cell voltage is not necessarily silent about its cells.
+
+    No pack voltage or state of charge on these lines, so they support an
+    ABSOLUTE cell-floor check but not a comparison against the pack average.
+    """
+    out = []
     for line in (text or "").splitlines():
-        if "riding" not in line.lower():
+        m = _LIMIT_RE.search(line)
+        if not m:
             continue
-        rec = {name: _ride_field(line, pat) for name, pat in _RIDE_FIELDS.items()}
-        if rec["soc"] is None or rec["odo_km"] is None:
+        mv = _ride_field(line, r"mincell|min cell")
+        if mv is None or not (CELL_MV_MIN <= mv <= CELL_MV_MAX):
             continue
-        rec["pack_temp_c"] = _pack_temp(line)
-        rec["curr_limit_pct"] = _curr_limit_pct(line)
-        rec["motor_temp_c"] = _ride_field(line, r"mottemp|motor temp")
         ts = _TS_RE.search(line)
-        rec["ts"] = ts.group(0) if ts else None
-        records.append(rec)
-    return records
+        out.append({
+            "ts": ts.group(0) if ts else None,
+            "kind": "discharge" if m.group(1).lower().startswith("dis") else "charge",
+            "limit_amps": float(m.group(2)),
+            "limit_pct": float(m.group(3)),
+            "mincell_mv": mv,
+            "pack_temp_c": _ride_field(line, r"maxpacktemp|max pack temp"),
+        })
+    return out
+
+
+def parse_charge_log(text):
+    """Extract charging records from the same block.
+
+    A charging line carries no odometer, so pack voltage is required instead of
+    distance — which suits what the charge side is for: measuring how much charge
+    the pack accepts between two FIXED PACK VOLTAGES. That measurement does not
+    go through the SOC display, which is the whole point of it. On this bike the
+    displayed scale moved ~1.4x at a firmware update while charge accepted
+    between the same two voltages moved ~3%, so anything anchored to the gauge is
+    not comparable across firmware and anything anchored to voltage is.
+    """
+    return _mode_samples(text, "charging", ("soc", "vpack"))
