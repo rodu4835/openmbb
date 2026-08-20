@@ -31,13 +31,23 @@ from . import gearing, rides
 from .parsers import first_val, parse_bms, parse_stats, parse_status
 from .transport import first_number, parse_settings_dump
 
-# F1: the matched before/after firmware log analysis (MBB 12 vs 41, ~1100
-# samples) REFUTED the "gauge reads ~1.55x steeper" theory — the SoC-vs-voltage
-# curve and the 100% top voltage were unchanged. Read displayed SOC as-is.
-GAUGE_NOTE = ("Matched before/after firmware analysis (MBB 12 vs 41) found the "
-              "SoC-vs-voltage curve UNCHANGED (+/-1%) and 100% top voltage "
-              "unchanged (116.9 V). Read displayed SOC as-is — do NOT mentally "
-              "inflate a low reading.")
+# F1 (revised 2026-08-20, SUPERSEDES the earlier reading): the 2026-06-13 reflash
+# rescaled the SOC display. The MBB log prints "New Rev 41 is replacing Rev 12"
+# and the BMS crossed Rev 25 -> 48 in the same minute, so which processor owns
+# the change is NOT established. The pack did not change: charge accepted between
+# the same two pack voltages moved ~3% across the update while the display spent
+# ~1.4x as many points on it — 1.35x measured between fixed voltages, 1.38x per
+# 100% displayed, 1.41x ride %/Ah, 1.48x from the BMS's own coulomb counter. The
+# earlier "curve UNCHANGED" finding survives only at the top of the scale, where
+# the top-of-charge voltage really is unchanged.
+GAUGE_NOTE = ("The 2026-06-13 firmware update rescaled this gauge: it now spends "
+              "about 1.4x as many SOC points per real amp-hour, while the pack "
+              "itself measured within ~3% across the same update. The BMS still "
+              "reports 52 Ah nominal but a remaining figure implying a ~31-38 Ah "
+              "full scale, so do NOT treat 52 Ah as the gauge's range. "
+              "Top-of-charge voltage is unchanged (116.9 V). Readings either "
+              "side of that update are not comparable, and what 0% means is NOT "
+              "established — the lowest ever logged on this bike is 13%.")
 
 
 # T12: Modes that POSITIVELY mean "not on the charger" (seen in real rev-41

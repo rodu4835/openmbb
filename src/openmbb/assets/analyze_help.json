@@ -10,7 +10,7 @@
     "key": "Displayed SOC",
     "label": "State of Charge (SOC)",
     "what": "The battery's charge level as a percentage, exactly as the bike's BMS reports it \u2014 the same number you see on the instrument cluster gauge.",
-    "how_it_fits": "The BMS (Battery Management System) inside the pack continuously estimates remaining energy using a voltage-vs-SOC curve and reports this over the CAN bus to the MBB. A careful firmware-matched analysis of MBB rev 12 vs rev 41 confirmed the SOC curve and the 100% top voltage (116.9 V) are unchanged between those revisions, so the displayed number is accurate as-is.",
+    "how_it_fits": "The BMS (Battery Management System) inside the pack continuously estimates remaining energy and reports this over the CAN bus to the MBB. The 2026-06-13 firmware update (MBB rev 12 -> 41, BMS rev 25 -> 48) rescaled that estimate: the display now spends about 1.4x as many SOC points per real amp-hour, measured four independent ways, while charge accepted between fixed pack voltages moved only ~3% \u2014 so the gauge changed and the pack did not. The 100% top voltage (116.9 V) is unchanged. Readings from either side of that update are not comparable with each other.",
     "healthy_note": "Read the displayed number at face value. Do not mentally add to a low reading \u2014 the analysis found no systematic under-reporting bias in the firmware transition."
   },
   {
@@ -45,7 +45,7 @@
     "key": "Pack capacity",
     "label": "Pack Capacity",
     "what": "Two numbers: the nominal (design) capacity of the pack in amp-hours, and how many amp-hours are estimated to remain at the current charge level.",
-    "how_it_fits": "The BMS stores and reports the nominal pack size (approximately 52 Ah for the ZF6.5). The 'remaining' figure is just the fraction of that nominal figure corresponding to the current SOC \u2014 it is not a learned measurement of actual battery health or degradation.",
+    "how_it_fits": "The BMS stores and reports a nominal pack size (approximately 52 Ah for the ZF6.5). The 'remaining' figure is NOT simply that nominal scaled by the current SOC \u2014 on this bike it reads 14 Ah at 45%, 19 Ah at 51% and 37 Ah at 96%, implying a full scale nearer 31-38 Ah than 52. Neither number is a learned measurement of battery health, and the gap between them is a property of the gauge, not evidence of degradation.",
     "healthy_note": "The nominal figure should match the factory spec for your pack size. The remaining figure will naturally vary with charge level. True capacity degradation over time is tracked in the Compare tab (multiple sessions), not from this single snapshot."
   },
   {
