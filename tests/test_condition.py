@@ -250,3 +250,91 @@ def test_cell_floor_falls_back_when_the_riding_records_are_undecodable():
 
 def test_cell_floor_is_none_when_neither_channel_has_anything():
     assert condition.cell_floor([], []) is None
+
+
+# --- the verdict -------------------------------------------------------------
+
+def _loaded_log(mincell_mv, vpack=112.0, n=40, amps=120):
+    """n loaded riding samples with a given weakest cell."""
+    import datetime as dt
+    t = dt.datetime(2026, 6, 24, 22, 0, 0)
+    return "\n".join(
+        " %05d  %s  Riding  PackTemp: h 30C, PackSOC: %d%%, Vpack:%.3fV, "
+        "BattAmps: %d, Odo: %dkm, Curr limit: 520 A (100%%), MinCell: %dmV"
+        % (i + 1, (t + dt.timedelta(seconds=i * 60)).strftime("%m/%d/%Y %H:%M:%S"),
+           90 - i, vpack, amps, 6400 + i, mincell_mv)
+        for i in range(n))
+
+
+def test_a_matched_pack_under_load_reads_ok():
+    # 112 V / 28 = 4000 mV average; a cell at 3940 is 60 mV down, in line with
+    # the one healthy pack measured (64-67 mV median)
+    v = condition.verdict(condition.assess(_loaded_log(3940)))
+    assert v["level"] == "ok"
+    assert v["confidence"] in ("partial", "full")
+    assert "went unanswered" in v["headline"] or "looks wrong" in v["headline"]
+
+
+def test_a_cell_far_below_its_siblings_is_a_concern():
+    # 4000 mV average, this cell at 3700 = 300 mV down, past CELL_DEV_WATCH_MV
+    v = condition.verdict(condition.assess(_loaded_log(3700)))
+    assert v["level"] == "concern"
+    assert "Walk away" in v["headline"]
+    dev = [c for c in v["checks"] if c["name"] == "Weakest cell vs pack"][0]
+    assert dev["level"] == "concern"
+
+
+def test_a_middling_deviation_is_worth_a_look():
+    v = condition.verdict(condition.assess(_loaded_log(3850)))   # 150 mV down
+    assert v["level"] == "watch"
+    assert "closer look" in v["headline"]
+
+
+def test_an_absolutely_low_cell_is_a_concern_whatever_the_spread():
+    # every cell low together: deviation stays small, but 2700 mV under load is
+    # past the chemistry floor and must be caught by the absolute check
+    v = condition.verdict(condition.assess(_loaded_log(2700, vpack=76.0)))
+    floor = [c for c in v["checks"] if c["name"] == "Lowest cell under load"][0]
+    assert floor["level"] == "concern"
+    assert v["level"] == "concern"
+
+
+def test_a_capture_with_no_evidence_says_cannot_tell():
+    v = condition.verdict(condition.assess(""))
+    assert v["level"] == "unknown"
+    assert v["confidence"] == "none"
+    assert "Cannot tell" in v["headline"]
+    assert all(c["level"] == "unknown" for c in v["checks"])
+
+
+def test_a_gently_ridden_capture_cannot_answer_the_cell_questions():
+    # the seller charges it and lets it sit: samples exist, none under load
+    v = condition.verdict(condition.assess(_loaded_log(4020, amps=3)))
+    assert v["level"] == "unknown"
+    assert "Cannot tell" in v["headline"]
+
+
+def test_a_partial_answer_says_so_in_the_headline_not_just_a_field():
+    # the reflashed-bike shape: riding records undecodable, but the legacy
+    # discharge-limit channel still carries a cell voltage
+    a = condition.assess("\n".join([STALE_RECORD] * 4) + LIMIT_LOG)
+    v = condition.verdict(a)
+    assert v["level"] == "ok"
+    assert v["confidence"] == "partial"
+    # the count must be IN the headline - a buyer does not read a side field
+    assert "unanswered" in v["headline"]
+
+
+def test_the_worst_check_decides_the_verdict():
+    a = condition.assess(_loaded_log(3940))          # ok on its own
+    metrics = [{"label": "Cell spread", "value": 120.0, "display": "120 mV",
+                "status": "alert"},
+               {"label": "Displayed SOC", "value": 50, "display": "50 %",
+                "status": "info"}]
+    v = condition.verdict(a, metrics)
+    assert v["level"] == "concern"
+
+
+def test_a_stats_reset_becomes_a_caveat_on_the_verdict():
+    v = condition.verdict(condition.assess(RESET_LOG + _loaded_log(3940)))
+    assert any("statistics were reset" in c.lower() for c in v["caveats"])

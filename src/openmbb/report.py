@@ -66,6 +66,7 @@ def analyze_session(session, temp_units="C"):
         # health block's single-reading metrics. Empty-ish rather than absent
         # when there is no event log: its `undetermined` list is the answer.
         "condition": condition.assess(ride_text),
+        "verdict": condition.verdict(condition.assess(ride_text), metrics),
     }
 
 
@@ -119,8 +120,23 @@ def format_report(report):
                     "(pull the event log from the bike to add it)."]
 
     out += _condition_lines(report.get("condition") or {})
+    out += _verdict_lines(report.get("verdict") or {})
     out.append("")
     return "\n".join(out)
+
+
+def _verdict_lines(v):
+    """The buyer's line. Deliberately last: it is a summary of what is above it,
+    and a reader who stops here should still have been told what went
+    unanswered, which is why the count is in the headline and not in a field."""
+    if not v:
+        return []
+    out = ["", "== Verdict ==", "  %s" % v["headline"]]
+    for c in v["checks"]:
+        out.append("    [%-7s] %-24s %s" % (c["level"], c["name"], c["detail"]))
+    for c in v["caveats"]:
+        out.append("    note: %s" % c)
+    return out
 
 
 def _condition_lines(c):

@@ -379,6 +379,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._apply_dark_titlebar()      # follows the mode now, not always dark
             self._repaint_raw_tk(self, old, new)
             self._restyle_trees()            # tag colours don't follow sv-ttk
+            self._paint_verdict()            # nor does a widget-set foreground
 
         # Treeview tag colours are copied into the widget by tag_configure, so
         # unlike the ttk styles sv-ttk restyles for us they do NOT follow a live
@@ -4022,6 +4023,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # bike to be judged against yet.
             nf = ttk.Frame(sub, padding=8)
             sub.add(nf, text=" Condition ")
+            self.lbl_cond_verdict = ttk.Label(
+                nf, text="Load a session to assess the pack.",
+                font=(self.sty["ui"], 11, "bold"), wraplength=980,
+                justify="left", foreground=P["dim"])
+            self.lbl_cond_verdict.pack(anchor="w", pady=(0, 8))
             ccols = ("check", "finding")
             self.cond_tree = ttk.Treeview(nf, columns=ccols, show="headings",
                                           height=12)
@@ -4031,13 +4037,21 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._restyle_trees()
             self.cond_tree.pack(fill="both", expand=True)
             self._attach_tree_copy(self.cond_tree)
-            self.lbl_cond_note = ttk.Label(
-                nf, text="Measured from the event log, not graded — a pass/fail "
-                         "needs a second bike to calibrate against. Rows marked "
-                         "'not determined' are checks this capture could not "
-                         "answer; they are not passes.",
-                wraplength=980, foreground=P["dim"], justify="left")
+            # Treeview cells do not wrap and these findings are sentences, so the
+            # full text of the selected row goes here — the same pattern the
+            # Health tab uses for its per-metric explanations.
+            self._cond_hint = ("Click any row for its full text. The verdict grades "
+                               "only what can be judged without another bike to "
+                               "compare against: the weakest cell against its own "
+                               "pack, absolute cell voltage under load, resting "
+                               "spread, and faults. Charge capacity and discharge "
+                               "allowance are measured but NOT graded. Rows marked "
+                               "'not determined' are checks this capture could not "
+                               "answer — they are not passes.")
+            self.lbl_cond_note = ttk.Label(nf, text=self._cond_hint, wraplength=980,
+                                           foreground=P["dim"], justify="left")
             self.lbl_cond_note.pack(anchor="w", pady=(6, 0))
+            self.cond_tree.bind("<<TreeviewSelect>>", self._cond_note)
 
             # Rides
             rf = ttk.Frame(sub, padding=8)
@@ -4198,6 +4212,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if text.strip():
                     break
             a = condition_mod.assess(text)
+            self._cond_verdict = condition_mod.verdict(
+                a, health_mod.health_snapshot(self.analyze_session,
+                                              config.get_temp_units()))
+            self._paint_verdict()
             tu = config.get_temp_units()
 
             def _t(c):
@@ -4246,6 +4264,35 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                      % (ev["when"] or "an unlogged time"), "attention")
             for u in a["undetermined"]:
                 _row("Not determined", u, "unknown")
+
+        # the verdict colour is set on the widget, not through a ttk style, so
+        # like the Treeview tags it does NOT follow a live theme switch on its
+        # own and has to be re-applied
+        _VERDICT_COLOUR = {"concern": "danger", "watch": "warn",
+                           "ok": "green", "unknown": "dim"}
+
+        def _cond_note(self, _evt=None):
+            """Show the selected row in full; Treeview clips its cells."""
+            sel = self.cond_tree.selection()
+            if not sel:
+                self.lbl_cond_note.config(text=self._cond_hint)
+                return
+            vals = self.cond_tree.item(sel[0])["values"]
+            self.lbl_cond_note.config(
+                text="%s: %s" % (vals[0], vals[1]) if len(vals) > 1
+                else self._cond_hint)
+
+        def _paint_verdict(self):
+            v = getattr(self, "_cond_verdict", None)
+            if not getattr(self, "lbl_cond_verdict", None):
+                return
+            if not v:
+                self.lbl_cond_verdict.config(text="Load a session to assess the "
+                                             "pack.", foreground=P["dim"])
+                return
+            self.lbl_cond_verdict.config(
+                text="%s  —  %s" % (v["level"].upper(), v["headline"]),
+                foreground=P[self._VERDICT_COLOUR.get(v["level"], "dim")])
 
         def _render_health(self):
             self.health_tree.delete(*self.health_tree.get_children())

@@ -255,6 +255,7 @@ def assess(event_log):
 
     resets = stats_reset_events(event_log)
     sag = cell_sag(rides)
+    dev = cell_deviation(rides)
     floor = cell_floor(rides, limits)
     der = derate_profile(rides)
     cap = charge_capacity(charges)
@@ -294,6 +295,7 @@ def assess(event_log):
                      "ride_samples_with_cell": with_cell},
         "stats_resets": resets,
         "cell_sag": sag,
+        "cell_deviation": dev,
         "cell_floor": floor,
         "derate": der,
         "charge_capacity": cap,
@@ -333,3 +335,179 @@ def cell_floor(ride_records, limit_events):
                 "when": worst.get("ts"), "at_pack_temp_c": worst.get("pack_temp_c"),
                 "graded": False}
     return None
+
+
+# --- the verdict -------------------------------------------------------------
+#
+# Bands for the weakest cell's deviation below its OWN pack average under load.
+# Self-referencing, so it needs no reference bike: the other 27 cells are the
+# control. The statistic is the MEDIAN, not the worst sample - a failing cell
+# drags the middle of the distribution up and keeps it there, while one hard
+# launch produces a single deep outlier that says nothing about the pack. The
+# reference bike has a 425 mV worst sample against a 64 mV median.
+#
+# MEASURED: the one healthy pack available reads a 64-67 mV median across two
+# overlapping captures of the same bike, p90 101-110 mV.
+# REASONED, not measured - this is the part that could be wrong on a bike unlike
+# that one: at 28 cells in series, a cell sitting a quarter of a volt below its
+# siblings under load is carrying roughly two to three times their internal
+# resistance, which is a cell on its way out rather than a matched pack.
+CELL_DEV_OK_MV = 100.0
+CELL_DEV_WATCH_MV = 250.0
+
+# Absolute floor, in the class that needs no comparison at all: a lithium cell
+# dragged this low under load is stressed whatever other bikes do.
+CELL_FLOOR_OK_MV = 3000.0
+CELL_FLOOR_WATCH_MV = 2800.0
+
+# Below this there is not enough loaded evidence to say anything about cells.
+# 60-second samples inside one ride are highly correlated, so this is a floor on
+# having looked at all, not a statistical sample size.
+MIN_LOADED_SAMPLES = 30
+
+_RANK = {"concern": 3, "watch": 2, "ok": 1, "unknown": 0}
+
+# health.py grades ok/watch/alert/info; this module speaks in buyer's terms and
+# has no "info" level, because a row that carries no judgement answers nothing.
+_FROM_HEALTH = {"ok": "ok", "watch": "watch", "alert": "concern",
+                "info": "unknown"}
+
+def _headline(level, answered, total):
+    """The one line a buyer reads. It carries the evidence count, because a
+    clean result off one check out of three is not the same statement as a
+    clean result off all three - and putting that difference in a separate
+    'confidence' field is putting it where nobody looks."""
+    if level == "concern":
+        return "Walk away, or get the pack checked before you buy"
+    if level == "watch":
+        return "Worth a closer look - something here is not clean"
+    if level == "unknown":
+        return "Cannot tell from this capture - it does not contain the evidence"
+    if answered < total:
+        return ("Nothing wrong in what this capture could measure - but %d of %d "
+                "checks went unanswered" % (total - answered, total))
+    return "Nothing in this capture looks wrong with the pack"
+
+
+def verdict(assessment, metrics=None):
+    """A plain-language read on the pack, from one capture.
+
+    Returns {level, headline, checks, confidence, caveats}. `level` is one of
+    concern / watch / ok / unknown, worst-wins across the checks.
+
+    Only checks that need NO reference bike are used: self-referencing ones
+    where the pack is its own control, absolute ones fixed by chemistry, and
+    presence-or-absence of a fault. Anything needing a population to compare
+    against is left out rather than guessed at.
+
+    "unknown" is a real answer and is never a polite way of saying fine. A
+    capture with no hard riding in it, or whose records predate a firmware
+    flash, genuinely cannot answer the cell questions - and a seller who charges
+    the bike and lets it sit produces exactly that capture.
+    """
+    checks, caveats = [], []
+
+    def add(name, level, detail):
+        checks.append({"name": name, "level": level, "detail": detail})
+
+    # 1. weakest cell vs its own pack average, under load  (self-referencing)
+    dev = assessment.get("cell_deviation")
+    if dev and dev["samples"] >= MIN_LOADED_SAMPLES:
+        med = dev["median_mv"]
+        lvl = ("ok" if med < CELL_DEV_OK_MV else
+               "watch" if med < CELL_DEV_WATCH_MV else "concern")
+        add("Weakest cell vs pack", lvl,
+            "median %g mV below the pack average under load, over %d loaded "
+            "samples" % (med, dev["samples"]))
+    else:
+        add("Weakest cell vs pack", "unknown",
+            "not enough loaded samples carrying both a cell voltage and pack "
+            "voltage (%d, need %d)"
+            % (dev["samples"] if dev else 0, MIN_LOADED_SAMPLES))
+
+    # 2. absolute cell floor under load  (chemistry)
+    floor = assessment.get("cell_floor")
+    if floor:
+        mv = floor["min_cell_mv"]
+        lvl = ("ok" if mv >= CELL_FLOOR_OK_MV else
+               "watch" if mv >= CELL_FLOOR_WATCH_MV else "concern")
+        add("Lowest cell under load", lvl,
+            "%g mV, from %d %s" % (mv, floor["samples"], floor["source"]))
+    else:
+        add("Lowest cell under load", "unknown",
+            "no channel in this capture carries a cell voltage under load")
+
+    # 3. resting cell spread, and any live fault  (from the health metrics)
+    by_label = {m["label"]: m for m in (metrics or [])}
+    spread = by_label.get("Cell spread")
+    if spread and spread.get("value") is not None:
+        add("Cell spread at rest", _FROM_HEALTH.get(spread["status"], "unknown"),
+            "%s (read at %s state of charge)"
+            % (spread["display"],
+               (by_label.get("Displayed SOC") or {}).get("display", "an unknown")))
+    else:
+        add("Cell spread at rest", "unknown", "no cell voltages in this capture")
+    for label in ("Isolation resistance", "Warning"):
+        m = by_label.get(label)
+        if m and m.get("status") in ("watch", "alert"):
+            add(label, _FROM_HEALTH[m["status"]],
+                str(m.get("display") or m.get("value") or ""))
+
+    # 4. preconditions that weaken whatever the checks said
+    if assessment.get("stats_resets"):
+        caveats.append("This bike's statistics were reset at %s, so every "
+                       "'lifetime' figure is younger than the bike and cannot "
+                       "be compared with another bike's."
+                       % assessment["stats_resets"][0]["when"])
+    # the "no reset found, but the log only reaches back to X" case is already
+    # phrased by assess(), so it arrives with the rest of the undetermined list
+    for u in assessment.get("undetermined") or []:
+        caveats.append(u)
+
+    answered = [c for c in checks if c["level"] != "unknown"]
+    level = "unknown"
+    for c in checks:
+        if _RANK[c["level"]] > _RANK[level]:
+            level = c["level"]
+    if not answered:
+        level = "unknown"
+    return {
+        "level": level,
+        "headline": _headline(level, len(answered), len(checks)),
+        "checks": checks,
+        "answered": len(answered),
+        "total_checks": len(checks),
+        "confidence": ("none" if not answered else
+                       "partial" if len(answered) < len(checks) else "full"),
+        "caveats": caveats,
+    }
+
+
+def cell_deviation(records, cells=28):
+    """How far the weakest cell sits below its OWN pack average, under load.
+
+    The strongest check available without a reference bike, because the pack is
+    its own control. Needs pack voltage as well as the cell reading, so it works
+    only on the riding channel; `cells` is the series count, derived from the
+    pack's resting voltage over its cell voltage where that is known.
+
+    Reports the median rather than the worst sample: one hard launch produces a
+    single deep outlier, while a genuinely weak cell keeps the whole
+    distribution shifted.
+    """
+    devs = sorted((r["vpack"] * 1000.0 / cells) - r["mincell_mv"]
+                  for r in records
+                  if isinstance(r.get("vpack"), (int, float))
+                  and isinstance(r.get("mincell_mv"), (int, float))
+                  and isinstance(r.get("battamps"), (int, float))
+                  and r["battamps"] >= LOADED_AMPS)
+    if not devs:
+        return None
+    return {
+        "samples": len(devs),
+        "median_mv": round(devs[len(devs) // 2], 1),
+        "p90_mv": round(devs[int(len(devs) * 0.9)], 1),
+        "worst_mv": round(devs[-1], 1),
+        "cells_assumed": cells,
+        "graded": True,
+    }

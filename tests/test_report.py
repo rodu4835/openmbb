@@ -37,7 +37,11 @@ def _sim_session(tmp_path, tag="rep"):
 def test_report_shape_from_a_real_capture(tmp_path):
     rep = report.analyze_folder(_sim_session(tmp_path))
     assert set(rep) == {"session", "units", "counts", "health", "rides",
-                        "ride_source", "ride_log_truncated", "condition"}
+                        "ride_source", "ride_log_truncated", "condition",
+                        "verdict"}
+    # the verdict is always present; "unknown" is its answer when a capture
+    # carries no evidence, never an absent key that reads as fine
+    assert rep["verdict"]["level"] in ("ok", "watch", "concern", "unknown")
     # the condition block is always present, even with nothing to say: its
     # `undetermined` list is the answer when a capture carries no event log
     assert "undetermined" in rep["condition"]
