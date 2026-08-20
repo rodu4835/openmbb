@@ -376,9 +376,28 @@ def test_load_session_latest_wins_numerically(tmp_path):
 
 # --- Phase F: analysis honesty ----------------------------------------------
 
-def test_gauge_note_drops_refuted_recalibration_claim():
-    assert "1.55" not in health.GAUGE_NOTE
-    assert "unchanged" in health.GAUGE_NOTE.lower()
+def test_gauge_note_records_the_measured_rescaling():
+    # Repointed 2026-08-20. The note used to assert the SoC-vs-voltage curve was
+    # UNCHANGED across the firmware update and to tell the owner to read
+    # displayed SOC as-is. Measurement says otherwise: the 2026-06-13 reflash
+    # rescaled the display by ~1.4x (1.35x between fixed pack voltages, 1.38x per
+    # 100% displayed, 1.41x ride %/Ah, 1.48x from the BMS coulomb counter) while
+    # charge accepted between the same two pack voltages moved only ~3%.
+    note = health.GAUGE_NOTE
+    assert "2026-06-13" in note              # the note dates the change it describes
+    assert "1.4x" in note
+    assert "116.9 V" in note                 # the one part of the old note that held
+    assert "as-is" not in note.lower()       # the superseded advice must not return
+    assert "NOT established" in note         # what 0% means is still open
+    # and the in-app help must not contradict the note
+    import json
+    import os
+    from openmbb import health as _h
+    path = os.path.join(os.path.dirname(_h.__file__), "assets", "analyze_help.json")
+    with open(path, encoding="utf-8") as f:
+        blob = " ".join(e.get("how_it_fits", "") for e in json.load(f))
+    assert "accurate as-is" not in blob
+    assert "1.4x" in blob
 
 
 def test_first_val_keeps_zero():
