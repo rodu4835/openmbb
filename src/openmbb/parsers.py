@@ -269,20 +269,19 @@ def _curr_limit_pct(line):
     return float(m.group(1)) if m else None
 
 
-def parse_ride_log(text):
-    """Extract riding records from a dumplogs/eventlog block.
+def _mode_samples(text, mode_word, required):
+    """Every sample line for one bike mode, as dicts.
 
-    Returns a list of dicts (ts, soc, vpack, pack_temp_c, motor_temp_c, motrpm,
-    motamps, odo_km); only lines that mention "riding" and yield at least an soc
-    and an odometer are kept, so charging/boot lines are ignored. Pack and motor
-    temperature are separate fields — conflating them hides a real thermal alert.
+    `required` names the fields a line must carry to count: a line missing one
+    of them is not a usable sample of that mode, rather than a sample with holes
+    in it.
     """
     records = []
     for line in (text or "").splitlines():
-        if "riding" not in line.lower():
+        if mode_word not in line.lower():
             continue
         rec = {name: _ride_field(line, pat) for name, pat in _RIDE_FIELDS.items()}
-        if rec["soc"] is None or rec["odo_km"] is None:
+        if any(rec.get(k) is None for k in required):
             continue
         rec["pack_temp_c"] = _pack_temp(line)
         rec["curr_limit_pct"] = _curr_limit_pct(line)
@@ -291,3 +290,28 @@ def parse_ride_log(text):
         rec["ts"] = ts.group(0) if ts else None
         records.append(rec)
     return records
+
+
+def parse_ride_log(text):
+    """Extract riding records from a dumplogs/eventlog block.
+
+    Returns a list of dicts (ts, soc, vpack, pack_temp_c, motor_temp_c, motrpm,
+    motamps, odo_km); only lines that mention "riding" and yield at least an soc
+    and an odometer are kept, so charging/boot lines are ignored. Pack and motor
+    temperature are separate fields — conflating them hides a real thermal alert.
+    """
+    return _mode_samples(text, "riding", ("soc", "odo_km"))
+
+
+def parse_charge_log(text):
+    """Extract charging records from the same block.
+
+    A charging line carries no odometer, so pack voltage is required instead of
+    distance — which suits what the charge side is for: measuring how much charge
+    the pack accepts between two FIXED PACK VOLTAGES. That measurement does not
+    go through the SOC display, which is the whole point of it. On this bike the
+    displayed scale moved ~1.4x at a firmware update while charge accepted
+    between the same two voltages moved ~3%, so anything anchored to the gauge is
+    not comparable across firmware and anything anchored to voltage is.
+    """
+    return _mode_samples(text, "charging", ("soc", "vpack"))

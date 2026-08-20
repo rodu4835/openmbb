@@ -83,3 +83,73 @@ def test_derate_and_sag_degrade_to_none_on_a_dialect_without_them():
         "Vpack:106.412V, MotAmps: 100, MotRPM:3100, Odo:6120km")
     assert condition.derate_profile(old) is None
     assert condition.cell_sag(old) is None
+
+
+# --- charge side: the one measurement that ignores the SOC display -----------
+
+def _charge_log(start_v=100.0, step_v=1.0, n=19, amps=-5, step_s=600):
+    """A synthetic charge session: samples `step_s` apart, pack voltage rising."""
+    import datetime as dt
+    t = dt.datetime(2026, 6, 24, 22, 0, 0)
+    out = []
+    for i in range(n):
+        out.append(" %05d     %s   Charging   PackTemp: h 27C, AmbTemp: 16C, "
+                   "PackSOC: %d%%, Vpack:%.3fV, BattAmps: %4d, Mods: 01"
+                   % (i + 1, (t + dt.timedelta(seconds=i * step_s)).strftime(
+                       "%m/%d/%Y %H:%M:%S"), 20 + i * 4, start_v + i * step_v, amps))
+    return "\n".join(out)
+
+
+def test_charge_log_is_parsed_separately_from_riding():
+    c = parsers.parse_charge_log(_charge_log())
+    assert len(c) == 19
+    assert c[0]["vpack"] == 100.0 and c[0]["battamps"] == -5
+    assert c[0]["odo_km"] is None            # a charging line carries no odometer
+    # and the riding parser must not pick these up
+    assert parsers.parse_ride_log(_charge_log()) == []
+
+
+def test_charge_capacity_integrates_between_fixed_voltages():
+    # 1 V per 600 s at 5 A: each interval is 5 * 600/3600 = 0.8333 Ah, and the
+    # 103-113 V window contains 10 intervals with both endpoints inside it
+    cap = condition.charge_capacity(parsers.parse_charge_log(_charge_log()))
+    assert cap["sessions"] == 1
+    assert cap["median_ah"] == round(10 * 5 * 600 / 3600.0, 2)     # 8.33 Ah
+    assert cap["window_v"] == [103.0, 113.0]
+    assert cap["gauge_independent"] is True
+
+
+def test_charge_capacity_is_none_when_the_window_is_never_crossed():
+    # a session that stops at 108 V never traverses 103-113, so there is no
+    # measurement - and that must read as "could not determine", not as zero
+    assert condition.charge_capacity(
+        parsers.parse_charge_log(_charge_log(start_v=100.0, n=9))) is None
+    assert condition.charge_capacity([]) is None
+
+
+# --- the assessment ----------------------------------------------------------
+
+def test_assess_reports_a_reset_it_found():
+    a = condition.assess(RESET_LOG + RIDE + _charge_log())
+    assert a["stats_resets"][0]["when"] == "06/13/2026 06:52:42"
+    # having found one, it must not also claim it could not determine this
+    assert not any("ever reset" in u for u in a["undetermined"])
+
+
+def test_assess_names_every_check_it_could_not_answer():
+    a = condition.assess("")
+    assert a["coverage"]["ride_samples"] == 0
+    joined = " ".join(a["undetermined"])
+    assert "no riding samples" in joined
+    assert "charge capacity" in joined
+    assert "ever reset" in joined            # silence is not a pass
+    assert a["cell_sag"] is None and a["derate"] is None
+
+
+def test_assess_qualifies_a_missing_reset_with_the_log_window():
+    # the August capture reaches back only to after that bike's own update, so
+    # "no reset found" there is meaningless without the window beside it
+    a = condition.assess(RIDE + _charge_log())
+    assert a["stats_resets"] == []
+    reason = [u for u in a["undetermined"] if "ever reset" in u][0]
+    assert "06/24/2026 21:59:31" in reason

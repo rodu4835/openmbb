@@ -30,7 +30,29 @@ Pure by construction, like report.py: records and captured text in, JSON-ready
 dicts out. No hardware, no serial port, no GUI.
 """
 
+import datetime as _dt
 import re
+
+from . import parsers
+
+# The one capacity measurement on this platform that does NOT go through the SOC
+# display. Charge accepted between two fixed pack voltages is a physical
+# quantity: across the 2026-06-13 firmware update on the reference bike it moved
+# ~3% while the displayed scale moved ~27%, so this survives a firmware change
+# and anything referenced to the gauge does not. That property is what makes it
+# usable on a bike whose firmware you do not know.
+#
+# The window is deliberately narrow and well inside the pack's range: wide enough
+# to be a real measurement, narrow enough that most charge sessions traverse it
+# completely. It covers roughly the top-middle of the pack, NOT the whole of it,
+# so the figure is a comparable index, not the pack's total capacity.
+CAPACITY_WINDOW_V = (103.0, 113.0)
+
+# Charging samples arrive about every 10 minutes; anything longer than this is a
+# gap in the record rather than an interval to integrate across.
+_MAX_STEP_S = 1800.0
+_SESSION_GAP_S = 3600.0
+_TS_FMT = "%m/%d/%Y %H:%M:%S"
 
 # A firmware update is logged as a bootloader entry, and the statistics the bike
 # keeps may not survive it. On the bike this was written against, the entry
@@ -140,4 +162,126 @@ def derate_profile(records):
         "worst_when": worst.get("ts"),
         "buckets": buckets,
         "graded": False,
+    }
+
+
+def _when(rec):
+    try:
+        return _dt.datetime.strptime(rec.get("ts") or "", _TS_FMT)
+    except ValueError:
+        return None
+
+
+def _sessions(records):
+    """Charge records grouped into sessions, split on gaps in the record."""
+    stamped = sorted(((_when(r), r) for r in records if _when(r)), key=lambda p: p[0])
+    out, cur = [], []
+    for i, (t, r) in enumerate(stamped):
+        if cur and (t - stamped[i - 1][0]).total_seconds() > _SESSION_GAP_S:
+            out.append(cur)
+            cur = []
+        cur.append((t, r))
+    if cur:
+        out.append(cur)
+    return out
+
+
+def charge_capacity(charge_records, window=CAPACITY_WINDOW_V):
+    """Amp-hours the pack accepted between two fixed pack voltages.
+
+    Gauge-independent by construction — it reads only pack voltage, pack current
+    and the clock, so a firmware change that relabels the SOC display cannot move
+    it. Returns None when no charge session in the capture traverses the whole
+    window, which is the common case for a short capture and must be reported as
+    "could not determine" rather than as a healthy result.
+
+    Only intervals with BOTH endpoints inside the window are counted, so the
+    figure runs a few percent under the true window charge. That bias is
+    identical for every bike and every firmware measured this way, which is what
+    matters for comparing one against another.
+    """
+    lo, hi = window
+    per_session = []
+    for sess in _sessions(charge_records):
+        volts = [r.get("vpack") for _t, r in sess if r.get("vpack") is not None]
+        if not volts or min(volts) > lo or max(volts) < hi:
+            continue                      # never traversed the window
+        ah = 0.0
+        for (ta, a), (tb, b) in zip(sess, sess[1:]):
+            va, vb = a.get("vpack"), b.get("vpack")
+            ia, ib = a.get("battamps"), b.get("battamps")
+            if None in (va, vb, ia, ib):
+                continue
+            if not (lo <= va <= hi and lo <= vb <= hi):
+                continue
+            secs = (tb - ta).total_seconds()
+            if not 0 < secs <= _MAX_STEP_S:
+                continue
+            ah += abs((ia + ib) / 2.0) * secs / 3600.0
+        if ah > 0:
+            per_session.append((ah, sess[0][0]))
+    if not per_session:
+        return None
+    vals = sorted(a for a, _t in per_session)
+    return {
+        "window_v": [lo, hi],
+        "sessions": len(vals),
+        "median_ah": round(vals[len(vals) // 2], 2),
+        "min_ah": round(vals[0], 2),
+        "max_ah": round(vals[-1], 2),
+        "first_session": min(t for _a, t in per_session).strftime(_TS_FMT),
+        "last_session": max(t for _a, t in per_session).strftime(_TS_FMT),
+        "gauge_independent": True,
+    }
+
+
+def assess(event_log):
+    """Everything this module can say about a pack, from one event log.
+
+    Every check that could not be answered is named in `undetermined` with the
+    reason, because the caller is standing next to a bike they do not know: a
+    check that silently returns nothing reads as a pass, and that is the one
+    failure mode this module exists to avoid.
+
+    There is no score and no verdict. Two of the three measurements have no
+    reference to be judged against yet — one healthy bike is not a baseline —
+    and the third is an index, not a capacity. What this returns is what was
+    measured, what it was measured over, and what could not be measured at all.
+    """
+    rides = parsers.parse_ride_log(event_log)
+    charges = parsers.parse_charge_log(event_log)
+    first, last = log_coverage(rides)
+
+    resets = stats_reset_events(event_log)
+    sag = cell_sag(rides)
+    der = derate_profile(rides)
+    cap = charge_capacity(charges)
+
+    undetermined = []
+    if not rides:
+        undetermined.append("no riding samples in this capture — pull the event "
+                            "log (eventlogdump) to answer anything here")
+    if sag is None and rides:
+        undetermined.append("weakest cell under load: no sample carried both a "
+                            "MinCell reading and real current")
+    if der is None and rides:
+        undetermined.append("discharge allowance: this firmware does not print a "
+                            "current limit on its riding lines")
+    if cap is None:
+        undetermined.append("charge capacity: no charge session in this capture "
+                            "crossed the whole %g-%g V window"
+                            % (CAPACITY_WINDOW_V[0], CAPACITY_WINDOW_V[1]))
+    if not resets:
+        undetermined.append("whether the statistics were ever reset: none found, "
+                            "but this log only reaches back to %s, so a reset "
+                            "before that would not appear" % (first or "an unknown date"))
+
+    return {
+        "coverage": {"first": first, "last": last,
+                     "ride_samples": len(rides), "charge_samples": len(charges)},
+        "stats_resets": resets,
+        "cell_sag": sag,
+        "derate": der,
+        "charge_capacity": cap,
+        "undetermined": undetermined,
     }

@@ -11,7 +11,7 @@ None, list, or dict — so `json.dumps` on the result never needs a custom
 encoder.
 """
 
-from . import health, parsers, rides, sessions, transport
+from . import condition, health, parsers, rides, sessions, transport
 
 # Where ride telemetry lives in a capture, best first. `eventlogdump` is the
 # full console event log; `dumplogs` is the older command kept for sessions
@@ -62,6 +62,10 @@ def analyze_session(session, temp_units="C"):
         "rides": ride_summary,
         "ride_source": ride_source,
         "ride_log_truncated": truncated,
+        # what the ride/charge samples say about the PACK, as distinct from the
+        # health block's single-reading metrics. Empty-ish rather than absent
+        # when there is no event log: its `undetermined` list is the answer.
+        "condition": condition.assess(ride_text),
     }
 
 
@@ -113,5 +117,47 @@ def format_report(report):
     else:
         out += ["", "No ride telemetry in this session "
                     "(pull the event log from the bike to add it)."]
+
+    out += _condition_lines(report.get("condition") or {})
     out.append("")
     return "\n".join(out)
+
+
+def _condition_lines(c):
+    """The pack-condition block. Nothing here is graded: two of the three
+    measurements have no reference bike to be judged against, and the third is a
+    comparable index rather than the pack's capacity. What could not be measured
+    is printed, because a silently missing check reads as a pass."""
+    if not c:
+        return []
+    out = ["", "== Condition (pack) =="]
+    cov = c.get("coverage") or {}
+    if cov.get("first"):
+        out.append("  log covers %s -> %s  (%d ride, %d charge samples)"
+                   % (cov["first"], cov["last"], cov["ride_samples"],
+                      cov["charge_samples"]))
+    cap = c.get("charge_capacity")
+    if cap:
+        out.append("  charge accepted %g-%g V: median %g Ah over %d sessions"
+                   % (cap["window_v"][0], cap["window_v"][1], cap["median_ah"],
+                      cap["sessions"]))
+        out.append("    a comparable index, not the pack's capacity - it reads "
+                   "only pack voltage and current, so a firmware change that")
+        out.append("    relabels the SOC display cannot move it")
+    sag = c.get("cell_sag")
+    if sag:
+        out.append("  weakest cell under load: %g mV at %g A, %g%% SOC, %g C"
+                   % (sag["min_cell_mv"], sag["at_amps"], sag["at_soc_pct"],
+                      sag["at_pack_temp_c"]))
+    der = c.get("derate")
+    if der:
+        out.append("  discharge allowance: median %g%%, worst %g%% at %g C / %g%% SOC"
+                   % (der["median_pct"], der["worst_pct"],
+                      der["worst_at_pack_temp_c"], der["worst_at_soc_pct"]))
+    for ev in c.get("stats_resets") or []:
+        out.append("  ! statistics were RESET at %s - every 'lifetime' figure "
+                   "above dates from then, not from" % (ev["when"] or "an unlogged time"))
+        out.append("    the bike's build date")
+    for u in c.get("undetermined") or []:
+        out.append("  could not determine: %s" % u)
+    return out

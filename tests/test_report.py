@@ -37,7 +37,10 @@ def _sim_session(tmp_path, tag="rep"):
 def test_report_shape_from_a_real_capture(tmp_path):
     rep = report.analyze_folder(_sim_session(tmp_path))
     assert set(rep) == {"session", "units", "counts", "health", "rides",
-                        "ride_source", "ride_log_truncated"}
+                        "ride_source", "ride_log_truncated", "condition"}
+    # the condition block is always present, even with nothing to say: its
+    # `undetermined` list is the answer when a capture carries no event log
+    assert "undetermined" in rep["condition"]
     assert rep["session"]["commands"]           # something was captured
     assert rep["health"]
     assert sum(rep["counts"].values()) == len(rep["health"])
