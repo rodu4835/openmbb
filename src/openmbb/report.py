@@ -144,6 +144,11 @@ def _condition_lines(c):
         out.append("    a comparable index, not the pack's capacity - it reads "
                    "only pack voltage and current, so a firmware change that")
         out.append("    relabels the SOC display cannot move it")
+    floor = c.get("cell_floor")
+    if floor and (not c.get("cell_sag")
+                  or floor["source"] != "riding samples"):
+        out.append("  lowest cell under load: %g mV  (from %d %s)"
+                   % (floor["min_cell_mv"], floor["samples"], floor["source"]))
     sag = c.get("cell_sag")
     if sag:
         out.append("  weakest cell under load: %g mV at %g A, %g%% SOC, %g C"

@@ -202,3 +202,51 @@ def test_a_wholly_stale_log_says_so_instead_of_reading_as_healthy():
     assert a["derate"] is None
     reason = [u for u in a["undetermined"] if "weakest cell" in u][0]
     assert "NOT ONE" in reason and "firmware" in reason
+
+
+# --- the legacy weakest-cell channel ----------------------------------------
+
+LIMIT_LOG = """
+ 00124  05/28/2026 02:41:23  Batt Dischg Cur Limited    379 A (72%), MinCell: 3567mV, MaxPackTemp: 49C
+ 00312  05/28/2026 02:43:02  Batt Dischg Cur Limited    383 A (73%), MinCell: 3214mV, MaxPackTemp: 38C
+ 00424  05/28/2026 12:05:59  Batt Dischg Cur Limited    483 A (92%), MinCell: 3492mV, MaxPackTemp: 40C
+"""
+
+
+def test_limit_events_carry_a_cell_voltage_of_their_own():
+    ev = parsers.parse_limit_events(LIMIT_LOG)
+    assert len(ev) == 3
+    assert ev[0]["kind"] == "discharge"
+    assert ev[0]["limit_amps"] == 379 and ev[0]["limit_pct"] == 72
+    assert ev[0]["mincell_mv"] == 3567 and ev[0]["pack_temp_c"] == 49
+
+
+def test_limit_events_get_the_same_plausibility_guard():
+    bad = LIMIT_LOG.replace("MinCell: 3567mV", "MinCell: 8241mV")
+    assert len(parsers.parse_limit_events(bad)) == 2      # the fabricated one drops
+
+
+def test_cell_floor_prefers_the_riding_channel_when_it_has_one():
+    rides = parsers.parse_ride_log(RIDE)
+    floor = condition.cell_floor(rides, parsers.parse_limit_events(LIMIT_LOG))
+    assert floor["source"] == "riding samples"
+    assert floor["min_cell_mv"] == 3300         # from RIDE, not the 3214 above
+
+
+def test_cell_floor_falls_back_when_the_riding_records_are_undecodable():
+    # The reflashed-bike case: every riding record predates the flash and its
+    # trailing fields are stale bytes, so the modern channel is silent. The
+    # current-limit events survive, and they hold the worst reading of all.
+    stale = "\n".join([STALE_RECORD] * 4) + LIMIT_LOG
+    a = condition.assess(stale)
+    assert a["coverage"]["ride_samples_with_cell"] == 0
+    assert a["cell_sag"] is None                 # riding channel correctly dead
+    assert a["cell_floor"]["source"] == "discharge-limit events"
+    assert a["cell_floor"]["min_cell_mv"] == 3214
+    assert a["cell_floor"]["samples"] == 3
+    # and with the floor recovered it must NOT claim the cells are unmeasured
+    assert not any("weakest cell" in u for u in a["undetermined"])
+
+
+def test_cell_floor_is_none_when_neither_channel_has_anything():
+    assert condition.cell_floor([], []) is None

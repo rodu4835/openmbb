@@ -4219,6 +4219,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                      "(an index, not the pack's capacity)"
                      % (cap["median_ah"], cap["window_v"][0], cap["window_v"][1],
                         cap["sessions"]), "measured")
+            floor = a["cell_floor"]
+            if floor and (not a["cell_sag"]
+                          or floor["source"] != "riding samples"):
+                _row("Lowest cell, loaded",
+                     "%g mV · from %d %s"
+                     % (floor["min_cell_mv"], floor["samples"], floor["source"]),
+                     "measured")
             sag = a["cell_sag"]
             if sag:
                 _row("Weakest cell, loaded",

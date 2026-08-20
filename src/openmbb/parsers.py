@@ -325,6 +325,49 @@ def parse_ride_log(text):
     return _mode_samples(text, "riding", ("soc", "odo_km"))
 
 
+_LIMIT_RE = re.compile(
+    r"Batt\s+(Dischg|Chg)\s+Cur\s+Limited\s+(\d+)\s*A\s*\(\s*([\d.]+)\s*%\)", re.I)
+
+
+def parse_limit_events(text):
+    """Current-limit events, which carry a weakest-cell reading of their own.
+
+    A different channel from the riding lines, and the important one on older
+    firmware: the BMS logs a line like
+
+        Batt Dischg Cur Limited    379 A (72%), MinCell: 3567mV, MaxPackTemp: 49C
+
+    every time it holds the discharge current back, and that line carries a
+    cell voltage under genuine load. On this platform the two channels are
+    complementary rather than redundant — the firmware that prints MinCell on
+    its riding lines stops emitting these, and the firmware that emits these
+    prints no MinCell on riding lines at all (366 of them against 0 either side
+    of one bike's update). So a capture from a bike whose riding records carry
+    no usable cell voltage is not necessarily silent about its cells.
+
+    No pack voltage or state of charge on these lines, so they support an
+    ABSOLUTE cell-floor check but not a comparison against the pack average.
+    """
+    out = []
+    for line in (text or "").splitlines():
+        m = _LIMIT_RE.search(line)
+        if not m:
+            continue
+        mv = _ride_field(line, r"mincell|min cell")
+        if mv is None or not (CELL_MV_MIN <= mv <= CELL_MV_MAX):
+            continue
+        ts = _TS_RE.search(line)
+        out.append({
+            "ts": ts.group(0) if ts else None,
+            "kind": "discharge" if m.group(1).lower().startswith("dis") else "charge",
+            "limit_amps": float(m.group(2)),
+            "limit_pct": float(m.group(3)),
+            "mincell_mv": mv,
+            "pack_temp_c": _ride_field(line, r"maxpacktemp|max pack temp"),
+        })
+    return out
+
+
 def parse_charge_log(text):
     """Extract charging records from the same block.
 
