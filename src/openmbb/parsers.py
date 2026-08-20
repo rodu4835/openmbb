@@ -235,6 +235,13 @@ _RIDE_FIELDS = {
     "motrpm": r"motrpm|mot rpm",
     "motamps": r"motamps|mot amps",
     "odo_km": r"odo",
+    # rev 41 prints three more on every riding line that the tool was discarding:
+    # pack-side current (energy accounting, as distinct from MOTOR current), the
+    # weakest cell (sag under load is a far better cell test than spread at rest,
+    # which moves with SOC), and ambient (separates a hot pack from a hot day).
+    "battamps": r"battamps|batt amps",
+    "mincell_mv": r"mincell|min cell",
+    "amb_temp_c": r"ambtemp|amb temp",
 }
 _TS_RE = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}\s+\d{1,2}:\d{2}:\d{2}")
 
@@ -248,6 +255,17 @@ def _pack_temp(line):
     # F3: 'PackTemp: h 27C, l 26C' -> the high reading (27); also plain 'PackTemp: 24C'.
     # Pack temp is safety-relevant (60 C = BMS cutback); motor temp at 60 C is benign.
     m = re.search(r"pack\s*temp\s*:?\s*(?:h\s*)?(-?\d+)", line, re.I)
+    return float(m.group(1)) if m else None
+
+
+def _curr_limit_pct(line):
+    """The BMS discharge allowance as a percentage, from 'Curr limit: 520 A (100%)'.
+
+    100 means no cutback. A pack that derates early — low percentages at moderate
+    temperature and mid SOC — is saying something about itself, so the percentage
+    is the datum worth keeping, not the amps it currently allows.
+    """
+    m = re.search(r"curr\s*limit\s*:?\s*[\d.]+\s*A\s*\(\s*(\d+)\s*%\)", line, re.I)
     return float(m.group(1)) if m else None
 
 
@@ -267,6 +285,7 @@ def parse_ride_log(text):
         if rec["soc"] is None or rec["odo_km"] is None:
             continue
         rec["pack_temp_c"] = _pack_temp(line)
+        rec["curr_limit_pct"] = _curr_limit_pct(line)
         rec["motor_temp_c"] = _ride_field(line, r"mottemp|motor temp")
         ts = _TS_RE.search(line)
         rec["ts"] = ts.group(0) if ts else None

@@ -72,6 +72,42 @@ def test_parse_ride_log_real_format():
     assert recs[0]["ts"] == "05/16/2026 08:12:33"
 
 
+def test_ride_log_keeps_pack_current_weakest_cell_ambient_and_derate():
+    # A real rev-41 riding line carries four fields the parser used to discard.
+    # The condition check needs all four: pack-side current for energy accounting
+    # (distinct from MOTOR current), MinCell for sag under load, AmbTemp to tell a
+    # hot pack from a hot day, and the derate percentage to catch a pack that
+    # cuts back early.
+    line = (" 00019     06/24/2026 21:59:31   Riding   PackTemp: h 27C, l 25C, "
+            "PackSOC:100%, Vpack:115.151V, MotAmps:  32, BattAmps:   9, Mods: 10, "
+            "MotTemp:  29C, CtrlTemp:  21C, AmbTemp:  18C, MotRPM:1109, "
+            "Odo: 6404km, Curr limit: 520 A (100%), MinCell: 4024mV")
+    r = parsers.parse_ride_log(line)[0]
+    assert r["battamps"] == 9 and r["motamps"] == 32      # pack vs motor, not confused
+    assert r["mincell_mv"] == 4024
+    assert r["amb_temp_c"] == 18
+    assert r["curr_limit_pct"] == 100                     # the %, not the 520 A
+    assert r["pack_temp_c"] == 27                         # still the HIGH reading
+
+
+def test_ride_log_reads_a_real_discharge_cutback():
+    # a derated line: the percentage is the datum, not the amps it still allows
+    line = (" 00500  06/24/2026 22:10:31  Riding  PackTemp: h 55C, l 53C, "
+            "PackSOC: 46%, Vpack:104.0V, BattAmps: 143, Odo: 6420km, "
+            "Curr limit: 86 A (16%), MinCell: 3441mV")
+    r = parsers.parse_ride_log(line)[0]
+    assert r["curr_limit_pct"] == 16
+    assert r["mincell_mv"] == 3441
+
+
+def test_ride_log_tolerates_lines_without_the_new_fields():
+    # older/other dialects simply have none of them - None, never an exception
+    r = parsers.parse_ride_log(REAL_RIDE)[0]
+    assert r["battamps"] is None and r["mincell_mv"] is None
+    assert r["curr_limit_pct"] is None and r["amb_temp_c"] is None
+    assert r["soc"] == 61 and r["odo_km"] == 6120        # the old fields still work
+
+
 def test_parse_odometer_ignores_trip_and_speed_lines():
     # regression: trip odometer and km/h lines must not be mistaken for the
     # lifetime odometer (they previously produced ~57000:1 ratios).
