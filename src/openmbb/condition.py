@@ -257,13 +257,20 @@ def assess(event_log):
     der = derate_profile(rides)
     cap = charge_capacity(charges)
 
+    with_cell = sum(1 for r in rides if r.get("mincell_mv") is not None)
+
     undetermined = []
     if not rides:
         undetermined.append("no riding samples in this capture — pull the event "
                             "log (eventlogdump) to answer anything here")
     if sag is None and rides:
-        undetermined.append("weakest cell under load: no sample carried both a "
-                            "MinCell reading and real current")
+        undetermined.append(
+            "weakest cell under load: no sample carried both a decodable cell "
+            "voltage and real current" if with_cell else
+            "weakest cell under load: NOT ONE ride record in this capture carries "
+            "a decodable cell voltage. Records written before a firmware change "
+            "do not survive being re-read by the newer firmware, so a reflashed "
+            "bike can look silent here when it has simply not been measured")
     if der is None and rides:
         undetermined.append("discharge allowance: this firmware does not print a "
                             "current limit on its riding lines")
@@ -278,7 +285,11 @@ def assess(event_log):
 
     return {
         "coverage": {"first": first, "last": last,
-                     "ride_samples": len(rides), "charge_samples": len(charges)},
+                     "ride_samples": len(rides), "charge_samples": len(charges),
+                     # how much of the ride log can answer the cell question at
+                     # all — the rest was written by an older firmware and is
+                     # not decodable, which is a coverage limit, not a pass
+                     "ride_samples_with_cell": with_cell},
         "stats_resets": resets,
         "cell_sag": sag,
         "derate": der,

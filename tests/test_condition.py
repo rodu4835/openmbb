@@ -153,3 +153,52 @@ def test_assess_qualifies_a_missing_reset_with_the_log_window():
     assert a["stats_resets"] == []
     reason = [u for u in a["undetermined"] if "ever reset" in u][0]
     assert "06/24/2026 21:59:31" in reason
+
+
+# --- records written by an older firmware -----------------------------------
+
+# The real shape: rev 41 re-reads a shorter rev-12 record with its own layout
+# and runs off the end, so the two trailing fields are stale bytes. 8241 mV is
+# 0x2031, the ASCII " 1". Measured at 502 of 502 pre-update ride records.
+STALE_RECORD = (" 04101  06/01/2026 02:16:49  Riding  PackTemp: h 26C, "
+                "PackSOC: 74%, Vpack:115.177V, BattAmps: 120, MotRPM:3300, "
+                "Odo: 5399km, Curr limit: 8295 A (31%), MinCell: 8241mV")
+
+
+def test_a_fabricated_cell_voltage_is_refused():
+    r = parsers.parse_ride_log(STALE_RECORD)[0]
+    assert r["mincell_mv"] is None
+    # the real fields on the same line still decode
+    assert r["soc"] == 74 and r["odo_km"] == 5399 and r["battamps"] == 120
+
+
+def test_the_whole_trailing_pair_goes_not_just_the_impossible_one():
+    # the fabricated Curr limit PERCENTAGE lands inside 0-100 (observed: 0, 30,
+    # 31, 90, 91), so it cannot be caught by range-checking itself. Both fields
+    # sit at the end of the record, so one being impossible condemns the pair.
+    r = parsers.parse_ride_log(STALE_RECORD)[0]
+    assert r["curr_limit_pct"] is None
+
+
+def test_the_guard_is_two_sided():
+    # the fabrications seen here run high, but a rev-12 decode of the same era
+    # contains a 66 mV MinCell, so a one-sided guard would let that through
+    low = STALE_RECORD.replace("MinCell: 8241mV", "MinCell: 66mV")
+    assert parsers.parse_ride_log(low)[0]["mincell_mv"] is None
+    good = STALE_RECORD.replace("MinCell: 8241mV", "MinCell: 3411mV")
+    r = parsers.parse_ride_log(good)[0]
+    assert r["mincell_mv"] == 3411 and r["curr_limit_pct"] == 31
+
+
+def test_a_wholly_stale_log_says_so_instead_of_reading_as_healthy():
+    # The used-bike case that makes this matter: the seller reflashed the MBB,
+    # so every retained ride record predates the flash. Unguarded, cell_sag
+    # returned 8241 mV - a pack whose weakest cell never sags - which is the
+    # most expensive wrong answer this tool could give.
+    a = condition.assess("\n".join([STALE_RECORD] * 5))
+    assert a["coverage"]["ride_samples"] == 5
+    assert a["coverage"]["ride_samples_with_cell"] == 0
+    assert a["cell_sag"] is None
+    assert a["derate"] is None
+    reason = [u for u in a["undetermined"] if "weakest cell" in u][0]
+    assert "NOT ONE" in reason and "firmware" in reason

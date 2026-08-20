@@ -258,6 +258,13 @@ def _pack_temp(line):
     return float(m.group(1)) if m else None
 
 
+# A cell in a pack that is on its feet at all sits between these. A reading
+# outside them is a decode artifact, not a cell. Two-sided on purpose: the
+# fabrications seen on this platform run HIGH (8241 mV), but a rev-12 decode of
+# the same era contains a 66 mV MinCell, so a one-sided guard would miss it.
+CELL_MV_MIN, CELL_MV_MAX = 2000.0, 4300.0
+
+
 def _curr_limit_pct(line):
     """The BMS discharge allowance as a percentage, from 'Curr limit: 520 A (100%)'.
 
@@ -288,6 +295,21 @@ def _mode_samples(text, mode_word, required):
         rec["motor_temp_c"] = _ride_field(line, r"mottemp|motor temp")
         ts = _TS_RE.search(line)
         rec["ts"] = ts.group(0) if ts else None
+        # Firmware re-reads records written by an OLDER firmware using its own,
+        # longer layout and runs off the end of them, so the two trailing fields
+        # come back as stale bytes: MinCell 8241 mV is 0x2031, the ASCII " 1".
+        # Both fields sit at the end of the record, so when one is impossible
+        # NEITHER is decodable — and the fabricated Curr limit percentage lands
+        # inside 0-100 (observed: 0, 30, 31, 90, 91), so it cannot be caught by
+        # range-checking itself. This is not an edge case on a used bike: if the
+        # seller reflashed the MBB, every retained ride record predates the
+        # flash, and an unguarded read reports a pack whose weakest cell never
+        # sags at all. Measured: 502 of 502 pre-update ride records fabricated,
+        # 0 of 635 after.
+        mv = rec.get("mincell_mv")
+        if mv is not None and not (CELL_MV_MIN <= mv <= CELL_MV_MAX):
+            rec["mincell_mv"] = None
+            rec["curr_limit_pct"] = None
         records.append(rec)
     return records
 
