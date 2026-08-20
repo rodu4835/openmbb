@@ -155,6 +155,37 @@ def test_login_custom_password_is_redacted(app):
     assert not app._errors
 
 
+def test_condition_tab_reports_a_reset_and_names_what_it_could_not_answer(app):
+    # The Condition tab is what someone reads standing next to a bike they do
+    # not know, so the two things it must never do are stay silent about a
+    # statistics reset and let an unanswerable check look like a pass.
+    from openmbb import sessions
+    log = (" 08027  06/13/2026 06:52:42  Entering Bootloader by request\n"
+           " 08028                    0  Stats Read Failed, Resetting All Stats to Defaults\n"
+           " 08029  06/24/2026 21:59:31  Riding  PackTemp: h 27C, PackSOC:100%, "
+           "Vpack:115.1V, BattAmps: 99, AmbTemp: 18C, MotRPM:1109, Odo: 6404km, "
+           "Curr limit: 520 A (100%), MinCell: 4024mV\n")
+    app._analyze_set(sessions.Session("x", {"eventlogdump": log}, ""))
+    app.update()
+    rows = [app.cond_tree.item(i) for i in app.cond_tree.get_children()]
+    checks = {r["values"][0] for r in rows}
+    assert "Statistics RESET" in checks
+    reset = [r for r in rows if r["values"][0] == "Statistics RESET"][0]
+    assert "06/13/2026 06:52:42" in str(reset["values"][1])
+    assert reset["tags"] == ["attention"] or "attention" in reset["tags"]
+    # no charge session in this log, so capacity must be declared, not omitted
+    undetermined = " ".join(str(r["values"][1]) for r in rows
+                            if r["values"][0] == "Not determined")
+    assert "charge capacity" in undetermined
+
+
+def test_condition_tab_is_empty_until_a_session_is_loaded(app):
+    # opening the app and looking at Condition before loading anything must show
+    # nothing at all, rather than a set of checks that read as passes
+    assert app.analyze_session is None
+    assert app.cond_tree.get_children() == ()
+
+
 def test_analyze_tab(app):
     app._connect()
     assert _pump(app, lambda: app.connected)
@@ -920,6 +951,10 @@ def test_tree_tag_colours_follow_a_live_theme_switch(app):
     assert str(app.health_tree.tag_configure("alert", "foreground")) == light["danger"]
     assert str(app.tree.tag_configure("safe", "foreground")) == light["green"]
     assert str(app.tree.tag_configure("caution", "foreground")) == light["warn"]
+    # the Condition tree is the third one and follows the same way
+    assert str(app.cond_tree.tag_configure("measured", "foreground")) == light["fg"]
+    assert str(app.cond_tree.tag_configure("attention", "foreground")) == light["warn"]
+    assert str(app.cond_tree.tag_configure("unknown", "foreground")) == light["dim"]
     app._set_theme("dark")
     dark = theme.PALETTES["dark"]
     assert str(app.health_tree.tag_configure("info", "foreground")) == dark["fg"]

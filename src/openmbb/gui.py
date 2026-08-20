@@ -24,6 +24,7 @@ def open_in_file_manager(path):
 from . import APP_NAME, __version__
 from . import charts as charts_mod
 from . import compare as compare_mod
+from . import condition as condition_mod
 from . import gearing as gearing_mod
 from . import health as health_mod
 from . import parsers, rides, sessions
@@ -390,6 +391,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             ("alert", "danger"), ("info", "fg")),
             "tree": (("safe", "green"), ("caution", "warn"),
                      ("pending", "green"), ("reset", "accent")),
+            "cond_tree": (("measured", "fg"), ("attention", "warn"),
+                          ("unknown", "dim")),
         }
 
         def _restyle_trees(self):
@@ -1371,6 +1374,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             config.set_temp_units(self.temp_units_var.get())
             if self.analyze_session:      # re-render temps in the new unit
                 self._render_health()
+                self._render_condition()  # carries pack temperatures too
                 self._render_rides()      # the ride table carries temps too
             self._render_charts()
 
@@ -4012,6 +4016,29 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                              justify="left")
             self.lbl_health_note.pack(anchor="w", pady=(6, 0))
 
+            # Condition — what the ride/charge SAMPLES say about the pack, as
+            # distinct from Health, which reads single current values. Nothing
+            # here is graded: two of its three measurements have no reference
+            # bike to be judged against yet.
+            nf = ttk.Frame(sub, padding=8)
+            sub.add(nf, text=" Condition ")
+            ccols = ("check", "finding")
+            self.cond_tree = ttk.Treeview(nf, columns=ccols, show="headings",
+                                          height=12)
+            for c, hd, w in zip(ccols, ("Check", "What the log says"), (210, 660)):
+                self.cond_tree.heading(c, text=hd)
+                self.cond_tree.column(c, width=w, anchor="w")
+            self._restyle_trees()
+            self.cond_tree.pack(fill="both", expand=True)
+            self._attach_tree_copy(self.cond_tree)
+            self.lbl_cond_note = ttk.Label(
+                nf, text="Measured from the event log, not graded — a pass/fail "
+                         "needs a second bike to calibrate against. Rows marked "
+                         "'not determined' are checks this capture could not "
+                         "answer; they are not passes.",
+                wraplength=980, foreground=P["dim"], justify="left")
+            self.lbl_cond_note.pack(anchor="w", pady=(6, 0))
+
             # Rides
             rf = ttk.Frame(sub, padding=8)
             sub.add(rf, text=" Rides ")
@@ -4119,6 +4146,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _analyze_set(self, session):
             self.analyze_session = session
             self._render_health()
+            self._render_condition()
             self._render_rides()
             # C6: a folder with no readable session data would render as all-n/a with
             # no hint — flag it instead of silently "loading" nothing.
@@ -4158,6 +4186,59 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 return False
             self._analyze_set(sessions.load_session(self.logger.dir))
             return True
+
+        def _render_condition(self):
+            """Fill the Condition tab from condition.assess()."""
+            self.cond_tree.delete(*self.cond_tree.get_children())
+            if not self.analyze_session:
+                return
+            text = ""
+            for cmd in ("eventlogdump", "dumplogs"):
+                text = self.analyze_session.cmd(cmd) or ""
+                if text.strip():
+                    break
+            a = condition_mod.assess(text)
+            tu = config.get_temp_units()
+
+            def _t(c):
+                return health_mod.fmt_temp(c, tu) or "n/a"
+
+            def _row(check, finding, tag):
+                self.cond_tree.insert("", "end", tags=(tag,),
+                                      values=(check, finding))
+
+            cov = a["coverage"]
+            if cov["first"]:
+                _row("Log window", "%s \u2192 %s  \u00b7  %d ride / %d charge samples"
+                     % (cov["first"], cov["last"], cov["ride_samples"],
+                        cov["charge_samples"]), "measured")
+            cap = a["charge_capacity"]
+            if cap:
+                _row("Charge capacity",
+                     "median %g Ah across %g\u2013%g V \u00b7 %d sessions "
+                     "(an index, not the pack's capacity)"
+                     % (cap["median_ah"], cap["window_v"][0], cap["window_v"][1],
+                        cap["sessions"]), "measured")
+            sag = a["cell_sag"]
+            if sag:
+                _row("Weakest cell, loaded",
+                     "%g mV at %g A \u00b7 %g%% SOC \u00b7 %s"
+                     % (sag["min_cell_mv"], sag["at_amps"], sag["at_soc_pct"],
+                        _t(sag["at_pack_temp_c"])), "measured")
+            der = a["derate"]
+            if der:
+                _row("Discharge allowance",
+                     "median %g%% \u00b7 worst %g%% at %s / %g%% SOC"
+                     % (der["median_pct"], der["worst_pct"],
+                        _t(der["worst_at_pack_temp_c"]), der["worst_at_soc_pct"]),
+                     "measured")
+            for ev in a["stats_resets"]:
+                _row("Statistics RESET",
+                     "%s \u2014 every 'lifetime' figure on the Health tab dates "
+                     "from here, not from the bike's build date"
+                     % (ev["when"] or "an unlogged time"), "attention")
+            for u in a["undetermined"]:
+                _row("Not determined", u, "unknown")
 
         def _render_health(self):
             self.health_tree.delete(*self.health_tree.get_children())
