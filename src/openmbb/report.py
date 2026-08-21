@@ -11,6 +11,8 @@ None, list, or dict — so `json.dumps` on the result never needs a custom
 encoder.
 """
 
+import datetime
+
 from . import condition, health, parsers, rides, sessions, transport
 
 # Where ride telemetry lives in a capture, best first. `eventlogdump` is the
@@ -72,6 +74,70 @@ def analyze_session(session, temp_units="C"):
     }
 
 
+# --- the page you hand to someone else ---------------------------------------
+
+REPORT_FOOTER = """\
+What this is: everything one console capture can establish about this bike,
+measured rather than estimated, with the questions it could not answer named
+alongside the ones it could.
+
+What it is not: a substitute for a test ride, a look at the tyres and chain, or
+a Zero dealer's diagnosis. The pack figures come from the bike's own event log,
+so they describe the period the log covers - which on a Gen2 is a rolling buffer
+a few weeks deep, not the bike's life. A capture with no hard riding in it
+cannot answer the cell questions at all, and says so rather than passing them.
+
+This report deliberately carries no VIN and no serial numbers."""
+
+
+def condition_report(session, version=None, generated=None, temp_units="C"):
+    """A dated page fit to hand a buyer, a seller, or your future self.
+
+    Built on the same analysis the Analyze tab shows, so there is one set of
+    numbers rather than two. The verdict's headline is repeated at the top
+    because that is what a reader looks for first - headline and not level,
+    because the headline is the form that carries the unanswered count with it,
+    and "OK" on its own would read as a clean bill of health for a capture that
+    could not measure anything.
+
+    Raises RuntimeError if the finished page carries anything shaped like an
+    identifier. This page exists to be handed to a stranger, so it gets the same
+    treatment the share-safe export does: a report that cannot be vouched for is
+    not returned at all.
+    """
+    from . import redact
+
+    rep = analyze_session(session, temp_units)
+    v = rep.get("verdict") or {}
+    stamp = generated or datetime.datetime.now()
+    head = [
+        "OpenMBB condition report",
+        "  bike     : %s" % (_bike_line(session) or "(not identified)"),
+        "  capture  : %s" % session.name,
+        "  generated: %s%s" % (stamp.strftime("%Y-%m-%d %H:%M"),
+                               " by OpenMBB v%s" % version if version else ""),
+        "",
+    ]
+    if v.get("headline"):
+        head += ["  %s" % v["headline"], ""]
+    text = ("\n".join(head) + format_report(rep, with_path=False)
+            + "\n" + REPORT_FOOTER + "\n")
+
+    leaks = redact.find_pii_shapes(text)
+    if leaks:
+        raise RuntimeError(
+            "condition report withheld: it still carries %s"
+            % ", ".join(sorted({label for label, _tok in leaks})))
+    return text
+
+
+def _bike_line(session):
+    """Model and year, and nothing that identifies the individual bike."""
+    st, _order = transport.parse_settings_dump(session.settings_text or "")
+    bits = [st.get(k, {}).get("value") for k in ("model_year", "model")]
+    return " ".join(str(b) for b in bits if b).strip()
+
+
 def analyze_folder(folder, temp_units="C"):
     """Convenience: load a session folder from disk and analyze it."""
     return analyze_session(sessions.load_session(folder), temp_units)
@@ -84,11 +150,19 @@ def _count_by_status(metrics):
     return counts
 
 
-def format_report(report):
-    """Human-readable rendering. Mirrors what the Analyze tab shows."""
+def format_report(report, with_path=True):
+    """Human-readable rendering. Mirrors what the Analyze tab shows.
+
+    `with_path=False` drops the session name and folder, for a caller that has
+    already named the capture in its own header - and, more to the point, for one
+    whose output leaves this machine. A saved-session path on Windows contains
+    the account name, which is not something to print on a page handed to a
+    stranger just because it happens not to be a VIN.
+    """
     s, out = report["session"], []
-    out.append("Session: %s" % s["name"])
-    out.append("Path:    %s" % s["path"])
+    if with_path:
+        out.append("Session: %s" % s["name"])
+        out.append("Path:    %s" % s["path"])
     c = report["counts"]
     out.append("Health:  %d ok / %d watch / %d alert  (%d informational)"
                % (c["ok"], c["watch"], c["alert"], c["info"]))

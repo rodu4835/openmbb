@@ -849,17 +849,26 @@ def test_watch_requires_connection_then_runs(app):
     assert "WATCH stopped" in app.txt_out.get("1.0", "end")
 
 
-def test_health_report_has_metrics_and_no_ids(app):
-    # E2: the shareable health report carries interpreted metrics but leaks no VIN/serial.
+def test_the_saved_report_is_the_whole_analysis_and_leaks_nothing(app):
+    # E2: the page File -> Save condition report writes. It used to be the health
+    # rows re-derived by hand, carrying no pack condition, no charging, no clocks
+    # and no verdict - most of what makes it worth handing to anyone.
     from openmbb import sessions
     app._connect()
     assert _pump(app, lambda: app.connected)
     app._baseline()
     assert _pump(app, lambda: app.baseline_done, timeout=120)
-    report = app._build_health_report(sessions.load_session(app.logger.dir))
-    assert "OpenMBB health report" in report and "== Health" in report
+    s = sessions.load_session(app.logger.dir)
+    report = app._build_health_report(s)
+    assert "OpenMBB condition report" in report
+    for section in ("== Health", "== Verdict =="):
+        assert section in report, section
     assert any(tag in report for tag in ("[OK", "[WATCH", "[ALERT", "[INFO"))
-    assert "ZEROSIMVIN" not in report and "SIM-MBB" not in report   # no identifiers
+    assert "What this is:" in report and "What it is not:" in report
+    # no identifiers, and no path either: a saved-session path on Windows carries
+    # the account name, which is not a VIN and would otherwise survive every check
+    assert "ZEROSIMVIN" not in report and "SIM-MBB" not in report
+    assert s.dir not in report and "Path:" not in report
 
 
 def test_recent_sessions_lists_current(app):
@@ -2781,3 +2790,37 @@ def test_closing_the_library_stops_the_verdict_read(app, monkeypatch):
     for _ in range(8):
         app.update()
     assert len(calls) == before
+
+
+def test_a_report_that_withholds_itself_leaves_no_file_behind(app, tmp_path,
+                                                              monkeypatch):
+    # condition_report refuses to return a page carrying an identifier; the save
+    # path must surface that rather than write a partial file
+    import tkinter.filedialog as _fd
+    from openmbb import gui as _gui, sessions
+    monkeypatch.setattr(app, "_session_has_data", lambda s: True)
+    app.analyze_session = sessions.Session(str(tmp_path), {"eventlogdump": ""}, "")
+
+    seen = {}
+
+    def _capture(s, **kw):
+        seen["kw"] = kw
+        return "REPORT BODY"
+
+    monkeypatch.setattr(_gui.report_mod, "condition_report", _capture)
+    out = tmp_path / "r.txt"
+    monkeypatch.setattr(_fd, "asksaveasfilename", lambda **kw: str(out))
+    app._save_health_report()
+    assert out.read_text(encoding="utf-8") == "REPORT BODY"
+    assert "version" in seen["kw"] and "temp_units" in seen["kw"]
+
+    out2 = tmp_path / "r2.txt"
+    monkeypatch.setattr(_fd, "asksaveasfilename", lambda **kw: str(out2))
+
+    def _withhold(s, **kw):
+        raise RuntimeError("condition report withheld: it still carries VIN")
+
+    monkeypatch.setattr(_gui.report_mod, "condition_report", _withhold)
+    app._save_health_report()
+    assert not out2.exists()
+    assert any("withheld" in str(a) for a in app._errors)

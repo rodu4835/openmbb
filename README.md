@@ -194,6 +194,15 @@ whole tool with no bike or cable. The staged flow below unlocks one step at a ti
    verify → journal the result. A changed row shows **↺ Reset** to restore the
    last-read value; a read-back mismatch points you to it.
 
+**File → Save condition report…** writes a dated page fit to hand a buyer, a
+seller, or your future self: the verdict's headline up top, then the health rows,
+the pack condition, the charging habits, the clocks and everything the capture
+could not answer, ending with a plain statement of what the page is and is not.
+It carries no VIN, no serial numbers, and no save path — a Windows session path
+holds the account name, which is not a VIN and would otherwise survive every
+check here. If anything shaped like an identifier does survive into the finished
+page, the report is **withheld entirely** rather than saved with a warning.
+
 **File → Session library…** lists every capture in your save folder as a row you
 can actually read: when it was taken, the odometer, the SOC, and the pack
 verdict. Verdicts are read in the background after the list is on screen (each

@@ -78,7 +78,11 @@ that ceiling is worth more than anything that polishes what sits behind it.
   your recent consumption, a full charge is about X km", with its own error bars and the
   temperature caveat. *Why:* unlike the dash's guess, this one can say what it rests on.
 
-- [ ] **Export a condition report.** A dated page fit to hand a seller, or keep. *Why:* a
+- [x] **Export a condition report.** *(shipped: File -> Save condition report..., built on
+  report.condition_report so the saved page and the Analyze tab cannot drift. It withholds
+  itself rather than hand over a page carrying an identifier, and it keeps the save path -
+  which carries the Windows account name - off the page)* A dated page fit to hand a
+  seller, or keep. *Why:* a
   verdict you cannot show anyone is half a verdict.
 
 - [ ] **Update check.** A quiet "0.22.1 is available". *Why:* this project shipped four

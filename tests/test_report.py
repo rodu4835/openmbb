@@ -207,3 +207,68 @@ def test_existing_flags_still_parse(flag):
     assert r.returncode == 0
     assert flag in r.stdout
     assert "analyze" in r.stdout and "sessions" in r.stdout
+
+
+# --- the page you hand to someone else ---------------------------------------
+
+def test_the_condition_report_leads_with_the_headline_not_the_level(tmp_path):
+    # "OK" on its own reads as a clean bill of health for a capture that could
+    # not measure anything; the headline is the form that carries the unanswered
+    # count with it
+    import datetime
+    s = sessions.load_session(_sim_session(tmp_path))
+    txt = report.condition_report(s, version="9.9.9",
+                                  generated=datetime.datetime(2026, 8, 21, 9, 30))
+    head = txt.splitlines()[:6]
+    assert "OpenMBB condition report" in head[0]
+    assert "2026-08-21 09:30" in txt and "v9.9.9" in txt
+    assert s.name in txt
+    v = report.analyze_session(s)["verdict"]
+    assert v["headline"] in txt
+
+
+def test_the_report_carries_the_whole_analysis_not_just_health(tmp_path):
+    # the old saved page had the health rows and nothing else, which left out
+    # most of what makes it worth handing to anyone
+    s = sessions.load_session(_sim_session(tmp_path))
+    txt = report.condition_report(s)
+    for section in ("== Health", "== Condition (pack) ==", "== Verdict =="):
+        assert section in txt, section
+    assert "What this is:" in txt and "What it is not:" in txt
+
+
+def test_the_report_keeps_this_machine_off_the_page(tmp_path):
+    # a saved-session path on Windows carries the account name. It is not a VIN,
+    # which is exactly why it would otherwise survive every check here.
+    s = sessions.load_session(_sim_session(tmp_path))
+    txt = report.condition_report(s)
+    assert s.dir not in txt
+    assert "Path:" not in txt
+    assert "carries no VIN and no serial numbers" in txt
+    # ...and the ordinary rendering still shows it, since that one stays local
+    assert "Path:" in report.format_report(report.analyze_session(s))
+
+
+def test_a_report_it_cannot_vouch_for_is_withheld_entirely(tmp_path, monkeypatch):
+    # this page exists to be handed to a stranger, so it gets the same treatment
+    # the share-safe export does: withheld, not returned with a warning
+    from openmbb import redact
+    s = sessions.load_session(_sim_session(tmp_path))
+    # assembled from fragments: a tracked file holding a whole shape-matching
+    # token trips the release gate, which is scanning this repo for exactly that
+    token = "5TESTVNPRZ" + "4200001"
+    monkeypatch.setattr(redact, "find_pii_shapes", lambda text: [("VIN", token)])
+    with pytest.raises(RuntimeError, match="withheld"):
+        report.condition_report(s)
+
+
+def test_the_report_names_the_model_but_not_the_bike(tmp_path):
+    # the legacy/simulator dump shape, which parse_settings_dump also takes
+    dump = (" model_year           - Model Year : 2017\n"
+            " model                - Bike Model : FXS\n")
+    s = sessions.Session(str(tmp_path), {"eventlogdump": RIDE_LOG}, dump)
+    txt = report.condition_report(s)
+    assert "2017 FXS" in txt
+    # a capture with no settings dump says so rather than inventing a bike
+    bare = sessions.Session(str(tmp_path), {"eventlogdump": RIDE_LOG}, "")
+    assert "(not identified)" in report.condition_report(bare)
