@@ -214,7 +214,21 @@ def health_snapshot(session, temp_units="C"):
     # lifetime stat or it reports nothing, same as the controller row below.
     batt_t = stats.get("max_batt_temp_c")
     if batt_t is not None:
+        # The bands stay where they are. `Max Charge Temp` below is the bike's
+        # own figure, but it is a CHARGE limit and this row is a lifetime
+        # maximum that may have been set while riding - so it is quoted, never
+        # compared against. Grading a riding peak by a charging limit would be
+        # measuring one thing with another thing's ruler.
         st = "ok" if batt_t < 50 else ("watch" if batt_t < 60 else "alert")
+        chg_max = bms.get("max_charge_temp_c")
+        chg_min = bms.get("min_charge_temp_c")
+        if chg_max is not None:
+            limits = ("this bike states a charge range of %s to %s"
+                      % (_t(chg_min) if chg_min is not None else "?",
+                         _t(chg_max)))
+        else:
+            limits = ("charge tapers ~%s (documented default, not read from "
+                      "this bike)" % _rng(43, 50))
         out.append(_metric("Max battery temp (lifetime)", batt_t, "C",
                            status=st, display=_t(batt_t),
                            note="highest EVER recorded, not the current "
@@ -222,10 +236,10 @@ def health_snapshot(session, temp_units="C"):
                                 "reading from the event log, so it need not match "
                                 "the log's own maximum (on this project's "
                                 "reference bike the two disagree in both "
-                                "directions). Bands %s / %s are documented "
-                                "defaults, not read from this bike; charge tapers "
-                                "~%s, operation stop ~%s"
-                                % (_t(50), _t(60), _rng(43, 50), _rng(50, 60))))
+                                "directions). The %s / %s bands graded here are "
+                                "documented defaults, not read from this bike; "
+                                "%s. Operation stops ~%s"
+                                % (_t(50), _t(60), limits, _rng(50, 60))))
     ctrl_t = stats.get("max_ctrl_temp_c")
     if ctrl_t is not None:
         st = "ok" if ctrl_t < 70 else ("watch" if ctrl_t < 90 else "alert")

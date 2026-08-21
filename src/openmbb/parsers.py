@@ -67,10 +67,23 @@ def parse_kv(text):
     return out
 
 
+# A needle matches where it STARTS a word. Plain substring matching made
+# "charge" match inside "dis-charge", so find(kv, "min", "charge", "temp")
+# returned the value from `Min Discharge Temp` - which on the reference bike is
+# -25 C, against a real Min Charge Temp of 0 C. It only ever gave the right
+# answer for `Max Charge Temp` by the accident that no `Max Discharge Temp` line
+# happened to precede it.
+#
+# Anchoring at a word start rather than requiring a whole word is deliberate:
+# the parsers lean on prefix matches throughout ("rev" -> "revision", "batt" ->
+# "battery"), and those are intended. A SUFFIX match never is.
+_WORD_START = "(?<![a-z0-9])"
+
+
 def find(kv, *needles):
-    """Value of the first key that contains ALL needle words (all lowercase)."""
+    """Value of the first key in which every needle starts a word (lowercase)."""
     for k, v in kv.items():
-        if all(n in k for n in needles):
+        if all(re.search(_WORD_START + re.escape(n), k) for n in needles):
             return v
     return None
 
@@ -162,6 +175,11 @@ def parse_bms(text):
     # rev 41 gives the remaining charge its OWN label ("Pack Capacity Remaining
     # : 19 AH"); the simulator packs both onto one line ("52 Ah (32 Ah
     # remaining)"). Read the separate label first, then fall back to that form.
+    # The pack's own declared operating limits, printed at permission level 0
+    # and discarded until now. These are the bike's numbers rather than this
+    # tool's documented defaults - but note they are CHARGE limits, so they
+    # cannot legitimately grade a lifetime maximum that may have been set while
+    # riding. They are reported, never used as a threshold.
     remaining = num(g("capacity", "remaining"))
     if remaining is None and len(caps) > 1 and "remain" in (cap_raw or "").lower():
         remaining = caps[1]
@@ -169,6 +187,9 @@ def parse_bms(text):
         "soc_pct": first_val(num(g("pack", "soc")), num(g("soc"))),
         "fuel_pct": num(g("fuel")),
         "pack_v": first_val(num(g("pack", "voltage")), num(g("voltage"))),
+        "max_charge_temp_c": num(g("max", "charge", "temp")),
+        "min_charge_temp_c": num(g("min", "charge", "temp")),
+        "min_discharge_temp_c": num(g("min", "discharge", "temp")),
         "low_cell_mv": first_val(num(g("lowest", "cell")), num(g("low", "cell"))),
         # the console names the cell, not just the voltage:
         #   - Lowest Cell Voltage : 4078 mV ( Cell 25 )

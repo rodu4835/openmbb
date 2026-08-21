@@ -901,3 +901,100 @@ def test_the_report_prints_both_with_the_caveat_attached(tmp_path):
     assert "deepest discharge logged" in text
     # the caveat has to travel with the number, or the range reads as a promise
     assert "UPPER BOUND" in text and "0% is reachable" in text
+
+
+# --- find() anchors its needles at word starts -------------------------------
+
+REAL_BMS_LIMITS = """
+*               BMS Data               *
+  - Pack SOC                  :  61%
+  - Min Discharge Temp        :  -25 C
+  - Max Charge Temp           :  50 C
+  - Min Charge Temp           :  0 C
+  - Pack Capacity             :  52 AH
+"""
+
+
+def test_a_needle_may_not_match_the_tail_of_a_longer_word():
+    # "charge" matched inside "dis-charge", so find(min, charge, temp) returned
+    # the Min DISCHARGE Temp value: -25 C, where the real Min Charge Temp is 0 C.
+    # It gave the right answer for Max Charge Temp only by the accident that no
+    # Max Discharge line happened to come first.
+    kv = parsers.parse_kv(REAL_BMS_LIMITS)
+    assert parsers.find(kv, "min", "charge", "temp") == "0 C"
+    assert parsers.find(kv, "min", "discharge", "temp") == "-25 C"
+    assert parsers.find(kv, "max", "charge", "temp") == "50 C"
+
+
+def test_prefix_matches_the_parsers_rely_on_still_work():
+    # anchoring at a word START, not requiring a whole word: the parsers lean on
+    # prefixes throughout, and those are intended
+    kv = parsers.parse_kv(
+        "  - Firmware Revision : 41\n"
+        "  - Battery Serial Number : X\n"
+        "  - Num Charge Cycles : 512\n")
+    assert parsers.find(kv, "firmware", "rev") == "41"      # rev -> revision
+    assert parsers.find(kv, "batt", "serial") == "X"        # batt -> battery
+    assert parsers.find(kv, "charge", "cycles") == "512"
+
+
+def test_the_ordering_that_made_the_collision_bite_is_the_real_one():
+    # Min Discharge precedes Min Charge in the real bms block, which is why the
+    # substring version returned the wrong one rather than the right one
+    keys = list(parsers.parse_kv(REAL_BMS_LIMITS))
+    assert keys.index("min discharge temp") < keys.index("min charge temp")
+
+
+def test_the_bike_states_its_own_thermal_limits():
+    # captured at permission level 0 on every pull and discarded until now
+    b = parsers.parse_bms(REAL_BMS_LIMITS)
+    assert b["max_charge_temp_c"] == 50
+    assert b["min_charge_temp_c"] == 0
+    assert b["min_discharge_temp_c"] == -25
+    # a BMS that states none of them reports absence, not zero
+    bare = parsers.parse_bms("  - Pack SOC : 61%\n")
+    assert bare["max_charge_temp_c"] is None
+    assert bare["min_charge_temp_c"] is None
+
+
+def test_the_bikes_charge_range_reaches_the_note_but_never_the_grade(tmp_path):
+    # Max Charge Temp is a CHARGE limit; this row is a lifetime maximum that may
+    # have been set while riding. Quoting it is right; grading by it would be
+    # measuring one thing with another thing's ruler.
+    stats = "  - Max Battery Temp : 60 C\n"
+    with_limits = sessions.Session(str(tmp_path),
+                                   {"bms": REAL_BMS_LIMITS, "stats": stats}, "")
+    m = {x["label"]: x for x in health.health_snapshot(with_limits)}
+    row = m["Max battery temp (lifetime)"]
+    assert "this bike states a charge range of 0 C to 50 C" in row["note"]
+
+    without = sessions.Session(str(tmp_path), {"stats": stats}, "")
+    row2 = {x["label"]: x for x in health.health_snapshot(without)}[
+        "Max battery temp (lifetime)"]
+    assert "documented default, not read from this bike" in row2["note"]
+
+    # the GRADE is identical either way, and still keyed to 50/60
+    assert row["status"] == row2["status"] == "alert"
+    for t, want in ((48, "ok"), (55, "watch"), (60, "alert"), (62, "alert")):
+        s = sessions.Session(str(tmp_path),
+                             {"bms": REAL_BMS_LIMITS,
+                              "stats": "  - Max Battery Temp : %d C\n" % t}, "")
+        got = {x["label"]: x for x in health.health_snapshot(s)}[
+            "Max battery temp (lifetime)"]
+        assert got["status"] == want, (t, got["status"])
+
+    # A bike stating 50 C cannot prove the grade ignores the bike's figure,
+    # because 50 is also the hardcoded band. This one states 45, so a grade
+    # keyed to the bike's number would call 48 C a "watch" instead of "ok" -
+    # which is the whole failure being guarded against.
+    odd = REAL_BMS_LIMITS.replace("Max Charge Temp           :  50 C",
+                                  "Max Charge Temp           :  45 C")
+    assert parsers.parse_bms(odd)["max_charge_temp_c"] == 45
+    for t, want in ((48, "ok"), (44, "ok"), (56, "watch")):
+        s = sessions.Session(str(tmp_path),
+                             {"bms": odd,
+                              "stats": "  - Max Battery Temp : %d C\n" % t}, "")
+        got = {x["label"]: x for x in health.health_snapshot(s)}[
+            "Max battery temp (lifetime)"]
+        assert got["status"] == want, (t, got["status"])
+        assert "charge range of 0 C to 45 C" in got["note"]

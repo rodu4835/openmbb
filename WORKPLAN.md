@@ -145,12 +145,14 @@ that ceiling is worth more than anything that polishes what sits behind it.
   `health_snapshot` see the event log, which breaks the documented invariant that it only
   re-parses short command output (`library.py`). Wants an optional `log_peak_c` kwarg.
 
-- [ ] **`parsers.find` is substring-based, and "discharge" contains "charge".** Confirmed
-  live: `find(kv, "min", "charge", "temp")` returns **-25 C**, the `Min Discharge Temp`
-  line, because it appears first. `find(kv, "max", "charge", "temp")` returns the right
-  answer only by the accident that no `Max Discharge Temp` line precedes it. Nothing reads
-  those keys today, so this is latent rather than live — but it is a trap sitting directly
-  under the next Tier 3 item.
+- [x] **`parsers.find` is substring-based, and "discharge" contains "charge".** *(fixed:
+  a needle now has to START a word)* `find(kv, "min", "charge", "temp")` returned **-25 C**
+  off the `Min Discharge Temp` line, which really does precede `Min Charge Temp` on the
+  bike. A word-START anchor rather than a whole-word one is deliberate: the parsers lean on
+  prefix matches throughout (`rev` → `revision`, `batt` → `battery`) and those are
+  intended, while a SUFFIX match never is. Proved behaviour-preserving by diffing every
+  parsed field of every parser across all three real captures plus the simulator before
+  changing it: zero fields moved.
 
 - [ ] **A `-100 C` sentinel is live in the BMS pack-temperature output** —
   `Pack Temps : 27C 27C 27C 28C -100C -100C -100C -100C`. Any future consumer of that
@@ -170,13 +172,16 @@ that ceiling is worth more than anything that polishes what sits behind it.
 - [ ] **`openmbb analyze` renders distance in km only** — the CLI has `--units` for
   temperature and no distance flag, while the GUI honours a miles preference.
 
-- [ ] **Read `Max Charge Temp` from the bike** instead of hardcoding the same 50 C in
-  `health.py`'s note. It is captured at permission level 0 and discarded (verified present
-  in `007_bms.txt`: `Max Charge Temp: 50 C`, `Min Charge Temp: 0 C`,
-  `Min Discharge Temp: -25 C`), and the file already reads motor thresholds from the bike
-  this way. **Fix the `parsers.find` collision above first** — reading these keys naively
-  today returns the wrong value. Note also that this is a *charge* limit, so it cannot
-  legitimately grade a lifetime maximum that may have been set while riding.
+- [x] **Read `Max Charge Temp` from the bike** instead of hardcoding the same 50 C in
+  `health.py`'s note. *(shipped: `parse_bms` now yields `max_charge_temp_c`,
+  `min_charge_temp_c` and `min_discharge_temp_c`; the Health note quotes the bike's own
+  range where it states one and says "documented default, not read from this bike" where
+  it does not — the REG-2 treatment the motor row already had.)* The **grading bands are
+  deliberately untouched**: `Max Charge Temp` is a CHARGE limit and the row it annotates is
+  a lifetime maximum that may have been set while riding, so grading by it would be
+  measuring one thing with another thing's ruler. There is a test with a bike stating 45 C
+  that pins this, because a bike stating 50 C cannot distinguish the bike's figure from the
+  hardcoded band.
 
 ## Tier 4 — structural
 
