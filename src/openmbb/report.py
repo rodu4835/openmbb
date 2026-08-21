@@ -23,14 +23,19 @@ RIDE_LOG_COMMANDS = ("eventlogdump", "dumplogs")
 
 def analyze_session(session, temp_units="C"):
     """Everything derivable from a saved session, as one JSON-ready dict."""
-    metrics = health.health_snapshot(session, temp_units)
-
     ride_text, ride_source = "", None
     for cmd in RIDE_LOG_COMMANDS:
         text = session.cmd(cmd) or ""
         if text.strip():
             ride_text, ride_source = text, cmd
             break
+
+    # the log's own hottest sample, so the graded battery row cannot report
+    # cooler than the capture it came from
+    _peak = condition.pack_peak(parsers.parse_ride_log(ride_text)) if ride_text else None
+    metrics = health.health_snapshot(
+        session, temp_units,
+        log_peak_c=_peak["pack_temp_c"] if _peak else None)
 
     ride_summary = None
     consumption = range_est = None
@@ -167,7 +172,34 @@ def _count_by_status(metrics):
     return counts
 
 
-def format_report(report, with_path=True):
+MI_PER_KM = 0.621371
+
+
+def fmt_km(km, units="km", places=1):
+    """A kilometre figure in the requested unit, with its unit word attached.
+
+    Distances stay in KILOMETRES everywhere in the report dict - that is what the
+    bike reports and what every threshold is written against - exactly as
+    temperatures stay in Celsius. Only the rendering converts.
+    """
+    if km is None:
+        return "n/a"
+    if units == "mi":
+        return "%.*f mi" % (places, km * MI_PER_KM)
+    return "%.*f km" % (places, km)
+
+
+def fmt_per_km(per_km, units="km", places=1):
+    """A per-kilometre RATE, which converts the other way: Wh/km -> Wh/mi is
+    larger, not smaller, because a mile is further than a kilometre."""
+    if per_km is None:
+        return "n/a"
+    if units == "mi":
+        return "%.*f" % (places, per_km / MI_PER_KM)
+    return "%.*f" % (places, per_km)
+
+
+def format_report(report, with_path=True, dist_units="km"):
     """Human-readable rendering. Mirrors what the Analyze tab shows.
 
     `with_path=False` drops the session name and folder, for a caller that has
@@ -197,10 +229,13 @@ def format_report(report, with_path=True):
         if report.get("ride_log_truncated"):
             out.append("  ! the event-log capture ended early — totals are a floor,")
             out.append("    not a complete measurement. Re-pull for the full log.")
-        out.append("  %d ride(s) over %s km from %d samples"
-                   % (t["ride_count"], t["total_km"], t["samples"]))
+        out.append("  %d ride(s) over %s from %d samples"
+                   % (t["ride_count"], fmt_km(t["total_km"], dist_units),
+                      t["samples"]))
         if t["mean_soc_per_km"] is not None:
-            out.append("  mean SOC use: %s %%/km" % t["mean_soc_per_km"])
+            out.append("  mean SOC use: %s %%/%s"
+                       % (fmt_per_km(t["mean_soc_per_km"], dist_units, 2),
+                          dist_units))
         for key, label in (("max_pack_temp_c", "max pack temp"),
                            ("max_motor_temp_c", "max motor temp")):
             if t[key] is not None:
@@ -209,7 +244,8 @@ def format_report(report, with_path=True):
                 out.append("  %s: %s"
                            % (label, health.fmt_temp(t[key], report["units"])))
         out += _consumption_lines(report.get("consumption") or {},
-                                  report.get("range") or {}, report["units"])
+                                  report.get("range") or {}, report["units"],
+                                  dist_units)
     else:
         out += ["", "No ride telemetry in this session "
                     "(pull the event log from the bike to add it)."]
@@ -236,7 +272,7 @@ def _verdict_lines(v):
     return out
 
 
-def _consumption_lines(c, r, units="C"):
+def _consumption_lines(c, r, units="C", dist_units="km"):
     """What it costs to ride, and how far a charge goes.
 
     Both are measured. Neither is graded: there is no reference bike to say
@@ -249,24 +285,28 @@ def _consumption_lines(c, r, units="C"):
             # too few rides for a band. A "middle 80%" of one ride is that ride's
             # own number printed twice, which claims a precision that was not
             # measured but invented.
-            out.append("  measured consumption: %g Wh/km at the pack "
+            out.append("  measured consumption: %s Wh/%s at the pack "
                        "(from %d ride(s) - too few for a spread)"
-                       % (c["wh_per_km"], c["rides"]))
+                       % (fmt_per_km(c["wh_per_km"], dist_units), dist_units,
+                          c["rides"]))
         else:
-            out.append("  measured consumption: %g Wh/km at the pack "
-                       "(middle 80%% of rides: %g-%g)"
-                       % (c["wh_per_km"], c["wh_per_km_low"], c["wh_per_km_high"]))
+            out.append("  measured consumption: %s Wh/%s at the pack "
+                       "(middle 80%% of rides: %s-%s)"
+                       % (fmt_per_km(c["wh_per_km"], dist_units), dist_units,
+                          fmt_per_km(c["wh_per_km_low"], dist_units),
+                          fmt_per_km(c["wh_per_km_high"], dist_units)))
         if c.get("amb_low_c") is not None:
-            out.append("    over %d rides / %g km, at %s to %s ambient - "
+            out.append("    over %d rides / %s, at %s to %s ambient - "
                        "consumption climbs in the cold"
-                       % (c["rides"], c["km"],
+                       % (c["rides"], fmt_km(c["km"], dist_units),
                           health.fmt_temp(c["amb_low_c"], units),
                           health.fmt_temp(c["amb_high_c"], units)))
     if r:
-        out.append("  deepest discharge logged: %g km from %g%% to %g%% SOC"
-                   % (r["km"], r["from_soc_pct"], r["to_soc_pct"]))
-        out.append("    scaled to a full charge that is about %g km"
-                   % r["full_charge_km"])
+        out.append("  deepest discharge logged: %s from %g%% to %g%% SOC"
+                   % (fmt_km(r["km"], dist_units), r["from_soc_pct"],
+                      r["to_soc_pct"]))
+        out.append("    scaled to a full charge that is about %s"
+                   % fmt_km(r["full_charge_km"], dist_units))
         if r.get("is_extrapolation"):
             out.append("    an UPPER BOUND on what the gauge implies, not a "
                        "distance anyone has ridden: it assumes the SOC scale is")

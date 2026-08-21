@@ -212,7 +212,7 @@ def cmd_analyze(args):
         import json
         print(json.dumps(rep, indent=2, sort_keys=False))
     else:
-        print(report_mod.format_report(rep))
+        print(report_mod.format_report(rep, dist_units=args.distance))
     # A non-zero exit on `alert` lets this drive a script or a health check.
     return 1 if args.fail_on_alert and rep["counts"]["alert"] else 0
 
@@ -300,6 +300,9 @@ def main():
     p_an.add_argument("--json", action="store_true", help="emit the structured report")
     p_an.add_argument("--units", choices=("C", "F"), default="C",
                       help="temperature units for display (default C)")
+    p_an.add_argument("--distance", choices=("km", "mi"), default="km",
+                      help="distance units for display (default km, the unit "
+                           "the bike itself reports)")
     p_an.add_argument("--fail-on-alert", action="store_true",
                       help="exit 1 if any metric is at alert, for scripts")
     p_an.set_defaults(func=cmd_analyze)

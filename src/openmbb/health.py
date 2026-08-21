@@ -114,7 +114,20 @@ def _setting_num_live(settings, name, default):
     return float(default), False
 
 
-def health_snapshot(session, temp_units="C"):
+def health_snapshot(session, temp_units="C", log_peak_c=None):
+    """Every reading in a capture, graded where a grade needs no reference bike.
+
+    `log_peak_c` is the hottest pack sample in the capture's event log, if the
+    caller has already read it. It exists because the BMS's lifetime counter and
+    the event log are separate channels that disagree in both directions on the
+    reference bike, and the row below graded the counter alone - so a capture
+    whose log held 60 C could be graded `watch` off a counter reporting 59 C.
+
+    It stays OPTIONAL because the session library calls this for every capture in
+    the save folder and must not be made to re-read a megabyte of event log per
+    row. A caller that has the log passes it; one that has not gets the counter
+    alone, which is the old behaviour and is still honest as far as it goes.
+    """
     bms = parse_bms(session.cmd("bms"))
     stats = parse_stats(session.cmd("stats"))
     status = parse_status(session.cmd("status"))
@@ -219,7 +232,18 @@ def health_snapshot(session, temp_units="C"):
         # maximum that may have been set while riding - so it is quoted, never
         # compared against. Grading a riding peak by a charging limit would be
         # measuring one thing with another thing's ruler.
-        st = "ok" if batt_t < 50 else ("watch" if batt_t < 60 else "alert")
+        #
+        # Grade the HIGHER of the counter and the log. Both describe the same
+        # quantity - the log line prints `PackTemp: h 60C`, the highest module,
+        # which is what the counter maxima too - and both were genuinely
+        # observed, so the honest maximum is whichever is larger. The direction
+        # matters: taking the higher can only ever make a bike look WORSE, never
+        # better, which is the safe way for a check to be wrong when a buyer is
+        # relying on it.
+        graded_t = batt_t
+        if log_peak_c is not None and log_peak_c > batt_t:
+            graded_t = log_peak_c
+        st = "ok" if graded_t < 50 else ("watch" if graded_t < 60 else "alert")
         chg_max = bms.get("max_charge_temp_c")
         chg_min = bms.get("min_charge_temp_c")
         if chg_max is not None:
@@ -229,8 +253,20 @@ def health_snapshot(session, temp_units="C"):
         else:
             limits = ("charge tapers ~%s (documented default, not read from "
                       "this bike)" % _rng(43, 50))
+        if graded_t != batt_t:
+            limits = ("this capture's own event log holds %s, hotter than the "
+                      "counter, so the grade follows the log; %s"
+                      % (_t(graded_t), limits))
+        # Show BOTH when they differ. The value stays the lifetime counter,
+        # because that is what this row is labelled as and attributing the log's
+        # figure to it would be wrong - but "[ALERT] 59 C" against a 60 C band
+        # reads as a contradiction to anyone who does not open the note, and
+        # most people never open the note.
+        disp = _t(batt_t)
+        if graded_t != batt_t:
+            disp = "%s (log: %s)" % (_t(batt_t), _t(graded_t))
         out.append(_metric("Max battery temp (lifetime)", batt_t, "C",
-                           status=st, display=_t(batt_t),
+                           status=st, display=disp,
                            note="highest EVER recorded, not the current "
                                 "temperature — a counter the BMS keeps, NOT a "
                                 "reading from the event log, so it need not match "

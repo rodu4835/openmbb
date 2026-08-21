@@ -2281,6 +2281,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # it ticks the inspection flow's "Read the verdict" step for a bike
             # that has not been connected to yet.
             self._cond_verdict = None
+            self._log_peak_c = None
             if getattr(self, "cond_tree", None) is not None:
                 try:
                     self.cond_tree.delete(*self.cond_tree.get_children())
@@ -4647,8 +4648,25 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             return any((s.cmd(c) or "").strip()
                        for c in ("bms", "stats", "status", "version"))
 
+        def _session_log_peak(self, session):
+            """The hottest pack sample in a session's event log, or None.
+
+            Read once per session rather than per render: the Health tab redraws
+            on a tab switch and on every unit change, and the event log is about
+            a megabyte.
+            """
+            if session is None:
+                return None
+            for cmd in ("eventlogdump", "dumplogs"):
+                text = session.cmd(cmd) or ""
+                if text.strip():
+                    pk = condition_mod.pack_peak(parsers.parse_ride_log(text))
+                    return pk["pack_temp_c"] if pk else None
+            return None
+
         def _analyze_set(self, session):
             self.analyze_session = session
+            self._log_peak_c = self._session_log_peak(session)
             self._render_health()
             self._render_condition()
             self._render_rides()
@@ -4704,7 +4722,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             tu = config.get_temp_units()
             # hoisted: assess now wants the lifetime temperature counter, and the
             # snapshot was being built a line later anyway
-            metrics = health_mod.health_snapshot(self.analyze_session, tu)
+            metrics = health_mod.health_snapshot(
+                self.analyze_session, tu,
+                log_peak_c=getattr(self, "_log_peak_c", None))
             a = condition_mod.assess(
                 text,
                 max_batt_temp_c=parsers.parse_stats(
@@ -4891,7 +4911,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 return
             help_map = self._analyze_help_map()
             for i, m in enumerate(health_mod.health_snapshot(
-                    self.analyze_session, config.get_temp_units())):
+                    self.analyze_session, config.get_temp_units(),
+                    log_peak_c=getattr(self, "_log_peak_c", None))):
                 iid = str(i)
                 self.health_tree.insert("", "end", iid=iid, tags=(m["status"],),
                                         values=(m["label"], m["display"],

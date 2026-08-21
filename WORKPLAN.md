@@ -137,7 +137,13 @@ that ceiling is worth more than anything that polishes what sits behind it.
   conservative, because sensor soak inflates ambient, which only ever *weakens* a
   disconfirmation.
 
-- [ ] **The graded battery row can under-report against the same capture's log.** On
+- [x] **The graded battery row can under-report against the same capture's log.** *(fixed:
+  `health_snapshot` takes an optional `log_peak_c` and grades the HIGHER of the counter and
+  the log; the display shows both when they differ, since "[ALERT] 59 C" against a 60 C
+  band reads as a contradiction. Taking the higher can only make a bike look worse, never
+  better, which is the safe direction when a buyer is relying on it. The kwarg is optional
+  so the session library is not made to re-read a megabyte per row - there is a test
+  pinning that.)* On
   2026-07-10 `stats` says 59 C and `health.py` grades that `watch` (`59 < 60`), while that
   capture's own event log holds a genuine 60 C sample — the `alert` band of the same
   function. The prose above now names the higher number on the same page, but the *grade*
@@ -169,8 +175,11 @@ that ceiling is worth more than anything that polishes what sits behind it.
 - [ ] **`parse_ride_log` ignores the `BattTemp:` dialect**, so pack temperature silently
   drops out of logs in that format. Needs ground truth on which firmware emits it.
 
-- [ ] **`openmbb analyze` renders distance in km only** — the CLI has `--units` for
-  temperature and no distance flag, while the GUI honours a miles preference.
+- [x] **`openmbb analyze` renders distance in km only** *(fixed: `--distance km|mi`, and
+  `format_report(dist_units=...)`. Distances stay canonical in kilometres in the report
+  dict exactly as temperatures stay Celsius, so JSON consumers and every threshold in the
+  codebase are untouched; only the rendering converts. Note per-km RATES convert the other
+  way - Wh/mi is a larger number than Wh/km - which has its own test.)*
 
 - [x] **Read `Max Charge Temp` from the bike** instead of hardcoding the same 50 C in
   `health.py`'s note. *(shipped: `parse_bms` now yields `max_charge_temp_c`,

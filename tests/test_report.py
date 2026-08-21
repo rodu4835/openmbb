@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from openmbb import report, sessions
+from openmbb import health, library, report, sessions
 from openmbb.sim import SimPort
 from openmbb.transport import (DUMP_COMMANDS, READ_COMMANDS, SessionLogger,
                                Transport)
@@ -273,3 +273,99 @@ def test_the_report_names_the_model_but_not_the_bike(tmp_path):
     # a capture with no settings dump says so rather than inventing a bike
     bare = sessions.Session(str(tmp_path), {"eventlogdump": RIDE_LOG}, "")
     assert "(not identified)" in report.condition_report(bare)
+
+
+# --- the graded battery row may not report cooler than its own capture -------
+
+def test_the_battery_grade_follows_the_hotter_of_the_two_channels(tmp_path):
+    # On 2026-07-10 `stats` says 59 C and this graded "watch" (59 < 60), while
+    # that same capture's log holds a genuine 60 C sample - the "alert" band of
+    # the same function. Both describe the highest module ("PackTemp: h 60C" is
+    # what the counter maxima too), so the honest maximum is whichever is larger.
+    stats = "  - Max Battery Temp : 59 C\n"
+    s = sessions.Session(str(tmp_path), {"stats": stats}, "")
+
+    counter_only = {x["label"]: x for x in health.health_snapshot(s)}[
+        "Max battery temp (lifetime)"]
+    assert counter_only["status"] == "watch"          # the old, cooler answer
+
+    with_log = {x["label"]: x for x in health.health_snapshot(s, log_peak_c=60.0)}[
+        "Max battery temp (lifetime)"]
+    assert with_log["status"] == "alert"
+    # the value stays the counter - this row is labelled a lifetime figure and
+    # attributing the log's number to it would be wrong - but both are shown,
+    # because "[ALERT] 59 C" against a 60 C band reads as a contradiction
+    assert with_log["value"] == 59
+    assert with_log["display"] == "59 C (log: 60 C)"
+    assert "grade follows the log" in with_log["note"]
+
+
+def test_a_cooler_log_never_softens_the_counters_grade(tmp_path):
+    # the direction matters: taking the higher can only ever make a bike look
+    # WORSE, which is the safe way for a check to be wrong when a buyer relies
+    # on it. A cooler log must not walk an alert back to a watch.
+    s = sessions.Session(str(tmp_path), {"stats": "  - Max Battery Temp : 60 C\n"}, "")
+    m = {x["label"]: x for x in health.health_snapshot(s, log_peak_c=20.0)}[
+        "Max battery temp (lifetime)"]
+    assert m["status"] == "alert" and m["display"] == "60 C"
+    assert "grade follows the log" not in m["note"]
+
+
+def test_the_library_is_not_made_to_read_a_megabyte_per_row():
+    # health_snapshot is called for every capture in the save folder; the log
+    # peak is optional precisely so that stays cheap
+    import inspect
+    sig = inspect.signature(health.health_snapshot)
+    assert sig.parameters["log_peak_c"].default is None
+    src = inspect.getsource(library.deep_verdict)
+    assert "log_peak_c" not in src
+
+
+def test_the_report_grades_from_the_log_it_already_read(tmp_path):
+    # analyze_session reads the ride log anyway, so it has no excuse
+    log = "\n".join(
+        " 00001     06/24/2026 08:%02d:00   Riding   PackTemp: h 60C, l 58C, "
+        "PackSOC: %d%%, Vpack:110.000V, BattAmps:  30, MotAmps: 30, "
+        "MotRPM:3000, Odo: %dkm, MinCell: 3700mV" % (i, 90 - i, 6000 + i)
+        for i in range(20))
+    s = sessions.Session(str(tmp_path),
+                         {"stats": "  - Max Battery Temp : 59 C\n",
+                          "eventlogdump": log}, "")
+    m = {x["label"]: x for x in report.analyze_session(s)["health"]}[
+        "Max battery temp (lifetime)"]
+    assert m["status"] == "alert"
+
+
+# --- distances render in the unit that was asked for -------------------------
+
+def test_distance_units_convert_and_rates_convert_the_other_way():
+    # a mile is further than a kilometre, so Wh/mi is a LARGER number than
+    # Wh/km for the same bike - the classic direction error
+    assert report.fmt_km(100.0, "km") == "100.0 km"
+    assert report.fmt_km(100.0, "mi") == "62.1 mi"
+    assert report.fmt_per_km(90.6, "km") == "90.6"
+    assert float(report.fmt_per_km(90.6, "mi")) > 90.6
+    assert float(report.fmt_per_km(90.6, "mi")) == pytest.approx(145.8, abs=0.2)
+    # missing reads as missing
+    assert report.fmt_km(None, "mi") == "n/a"
+    assert report.fmt_per_km(None, "mi") == "n/a"
+
+
+def test_the_headless_report_honours_a_miles_request(tmp_path):
+    log = "\n".join(
+        " 00001     06/24/2026 08:%02d:00   Riding   PackTemp: h 30C, l 28C, "
+        "AmbTemp: 20C, PackSOC: %d%%, Vpack:110.000V, BattAmps:  30, "
+        "MotAmps: 30, MotRPM:3000, Odo: %dkm, MinCell: 3700mV"
+        % (i, 100 - 2 * i, 6000 + 2 * i) for i in range(41))
+    s = sessions.Session(str(tmp_path), {"eventlogdump": log}, "")
+    rep = report.analyze_session(s)
+    mi = report.format_report(rep, dist_units="mi")
+    km = report.format_report(rep, dist_units="km")
+    assert "mi from" in mi and "Wh/mi" in mi
+    assert " km from" in km and "Wh/km" in km
+    assert "Wh/km" not in mi and " km " not in mi.split("== Rides")[1][:400]
+    # the DATA stays canonical whichever way it was rendered, so JSON consumers
+    # and every threshold in the codebase keep reading kilometres
+    assert rep["consumption"]["wh_per_km"] == pytest.approx(
+        report.analyze_session(s)["consumption"]["wh_per_km"])
+    assert "km" in str(rep["rides"]["totals"].keys())
