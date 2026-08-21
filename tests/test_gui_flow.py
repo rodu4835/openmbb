@@ -2824,3 +2824,87 @@ def test_a_report_that_withholds_itself_leaves_no_file_behind(app, tmp_path,
     app._save_health_report()
     assert not out2.exists()
     assert any("withheld" in str(a) for a in app._errors)
+
+
+# --- inspecting a bike you do not know ---------------------------------------
+
+def test_the_inspection_flow_gates_on_parking_and_ticks_from_real_state(app,
+                                                                        monkeypatch):
+    # The whole point is that a tick means something happened, not that a button
+    # was clicked. A flow that believes its own checklist will report a pull that
+    # failed halfway as complete.
+    win = app._open_inspection()
+    app.update()
+    rows = app._inspect_rows
+    assert len(rows) == len(app._INSPECT_STEPS) == 6
+
+    # nothing is offered until the bike is confirmed parked - the one thing here
+    # the app cannot check for itself
+    app._inspect_refresh(rows)
+    assert not any(app._inspect_done(i) for i in range(6))
+    assert app._inspect_ready(0) and not app._inspect_ready(1)
+    assert not app._inspect_ready(2)
+
+    app._inspect_parked()
+    app._inspect_refresh(rows)
+    assert app._inspect_done(0)
+    # the cable test is optional, so it must NOT stand between parking and
+    # Connect - a flow that insisted on it would be wrong rather than careful
+    assert app._inspect_ready(1) and app._inspect_ready(2)
+    assert not app._inspect_ready(3)          # not connected yet
+
+    # ...and connecting ticks step 3 without anyone telling the flow it did
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._inspect_refresh(rows)
+    assert app._inspect_done(2) and app._inspect_ready(3)
+    assert not app._inspect_done(3)           # nothing pulled yet
+    win.destroy()
+
+
+def test_the_inspection_window_survives_the_connect_it_starts(app):
+    # every _connect tears the helper windows down, and this window drives
+    # Connect from one of its own buttons - so without an exemption the window a
+    # user is working through vanishes the instant they use it
+    import tkinter as tk
+    win = app._open_inspection()
+    app.update()
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    assert win.winfo_exists()
+    # ...while the ordinary helper windows still go
+    app._show_gearing_calc()
+    app.update()
+    app._close_transient_toplevels()
+    assert win.winfo_exists()
+    assert not [w for w in app.winfo_children()
+                if isinstance(w, tk.Toplevel) and w is not win]
+    win.destroy()
+
+
+def test_the_event_log_step_hands_off_to_the_gated_read(app, monkeypatch):
+    # this is the step that leaves a permanent entry on someone else's bike, so
+    # it must go through the existing confirm rather than around it
+    called = {}
+    monkeypatch.setattr(app, "_read_heavy",
+                        lambda cmd, **kw: called.setdefault("cmd", cmd))
+    app._inspect_heavy()
+    assert called["cmd"] == "eventlogdump"
+
+
+def test_the_verdict_step_is_reachable_without_the_event_log(app, monkeypatch):
+    # a verdict from a capture with no event log is mostly "Not determined", and
+    # being shown that is the point - it is not a pass and it is not nothing
+    app._inspect_parked()
+    app.baseline_done = True
+    assert app._inspect_ready(5)
+    assert not app._inspect_done(4)
+    app._inspect_verdict()
+    app.update()
+    assert "Analyze" in str(app.nb.tab(app.nb.select(), "text"))
+    assert "Condition" in str(app.analyze_nb.tab(app.analyze_nb.select(), "text"))
+
+
+def test_the_flow_is_offered_in_the_tools_menu(app):
+    labels = [e[1] for e in app._tools_menu() if e[0] == "cmd"]
+    assert any("Inspect a bike" in str(l) for l in labels)

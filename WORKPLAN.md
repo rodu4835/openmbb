@@ -55,7 +55,10 @@ that ceiling is worth more than anything that polishes what sits behind it.
 
 ## Tier 2 — what an operator actually reaches for
 
-- [ ] **Used-bike inspection mode.** A guided flow: connect, run these reads in this
+- [x] **Used-bike inspection mode.** *(shipped: Tools -> Inspect a bike..., six steps that
+  hand off to the app's own controls. Every tick is read back from app state rather than
+  from having been clicked, and the event-log step goes through the existing contactor
+  confirm rather than around it)* A guided flow: connect, run these reads in this
   order, do not start the heavy event-log read without the owner's consent, here is the
   verdict. *Why:* this is the scenario the condition check was built for, and it currently
   requires knowing which buttons to press in which order.

@@ -1030,6 +1030,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _tools_menu(self):
             return [
+                ("cmd", "Inspect a bike…", self._open_inspection),
                 ("cmd", "Bike info…", self._show_bike_info),
                 ("cmd", "Gearing calculator…", self._show_gearing_calc),
                 ("submenu", "COM port:  %s" % self._current_port_label(),
@@ -1350,6 +1351,195 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             dirs.sort(key=lambda d: os.path.getmtime(os.path.join(root, d)),
                       reverse=True)
             return root, dirs[:limit]
+
+        # -- inspecting a bike you do not know --------------------------------
+        # The scenario the condition check was built for, and until now the one
+        # that needed the most prior knowledge: which buttons, in which order,
+        # and which of them you must not press without the owner's say-so. Every
+        # step below hands off to the app's own controls - nothing here reads or
+        # writes anything the buttons do not.
+
+        # (title, body, button label, action attribute)
+        _INSPECT_STEPS = (
+            ("Park it, and keep it parked",
+             "Kickstand down, key OFF, and not somewhere it can roll. Everything "
+             "below wakes a live console on a bike that can move under its own "
+             "power, and step 5 can make the bike CLICK ITS CONTACTOR OPEN.",
+             "I have parked it", "_inspect_parked"),
+            ("Test your cable  (optional)",
+             "Listen-only — it never transmits, so it cannot disturb a bike you "
+             "are not responsible for. Proves the wiring and the baud rate "
+             "before you touch anything. Skip straight to Connect if you have "
+             "used this cable before.",
+             VERIFY_LABEL, "_inspect_cable"),
+            ("Connect",
+             "Wakes the console and reads the version banner. Still read-only.",
+             "Connect", "_landing_connect"),
+            ("Pull full database",
+             "The settings backup and the command reads — about two minutes, and "
+             "no contactor risk. This is the part you always want: the Health "
+             "tab, the clocks and the bike-state block are all read from it.",
+             "Pull full database", "_inspect_pull"),
+            ("Ask the owner before you read the event log",
+             "The step that needs permission, and the only one here that leaves "
+             "a mark on someone else's bike. The pack questions — the weakest "
+             "cell, the charge index, how it has been charged — cannot be "
+             "answered without it. Read the warning on the confirm in full "
+             "before you agree to it on an owner's behalf.",
+             "Read the event log", "_inspect_heavy"),
+            ("Read the verdict",
+             "Worst-wins across only what one capture can judge with no second "
+             "bike to compare against. Read the Not determined rows too: a "
+             "question this capture could not answer is not a pass, and a "
+             "seller who charges the bike and lets it sit produces exactly that "
+             "capture.",
+             "Show the verdict", "_inspect_verdict"),
+        )
+
+        def _inspect_parked(self):
+            self._inspect_confirmed_parked = True
+
+        def _inspect_cable(self):
+            # records that the test was RUN, not that it passed - the wizard
+            # reports its own result, and this flow does not second-guess it
+            self._inspect_cable_tested = True
+            self._show_cable_wizard()
+
+        def _inspect_pull(self):
+            self._select_tab("Read")
+            self._baseline()
+
+        def _inspect_heavy(self):
+            """Hand off to the existing gated read, warning and all."""
+            self._read_heavy("eventlogdump")
+
+        def _inspect_verdict(self):
+            if self.analyze_session is None and self.logger:
+                try:
+                    self._analyze_set(sessions.load_session(self.logger.dir))
+                except Exception:
+                    pass
+            self._select_tab("Analyze")
+            self._select_analyze_sub("Condition")
+
+        def _select_analyze_sub(self, needle):
+            nb = getattr(self, "analyze_nb", None)
+            if nb is None:
+                return
+            for tid in nb.tabs():
+                if needle.lower() in str(nb.tab(tid, "text")).lower():
+                    nb.select(tid)
+                    return
+
+        def _inspect_session(self):
+            s = self.analyze_session
+            if s is None and self.logger:
+                try:
+                    s = sessions.load_session(self.logger.dir)
+                except Exception:
+                    s = None
+            return s
+
+        def _inspect_done(self, i):
+            """Whether step `i` has actually happened.
+
+            Read back from app state on every refresh rather than ticked off as
+            the user clicks: a flow that believes its own checklist will happily
+            report a pull that failed halfway as complete.
+            """
+            if i == 0:
+                return bool(getattr(self, "_inspect_confirmed_parked", False))
+            if i == 1:
+                return bool(getattr(self, "_inspect_cable_tested", False))
+            if i == 2:
+                return bool(self.connected)
+            if i == 3:
+                return bool(self.baseline_done)
+            if i == 4:
+                s = self._inspect_session()
+                return bool(s and (s.cmd("eventlogdump") or "").strip())
+            if i == 5:
+                return bool(getattr(self, "_cond_verdict", None))
+            return False
+
+        def _inspect_ready(self, i):
+            """Whether step `i` can be attempted yet.
+
+            Only the parking confirmation gates everything, because it is the one
+            thing here the app cannot check for itself. The cable test does not
+            gate Connect - it is optional, and a flow that insisted on it would
+            be wrong rather than careful. Step 6 is reachable without step 5 on
+            purpose: a verdict from a capture with no event log is mostly Not
+            determined, and being shown that is the point.
+            """
+            if i in (0, 1, 2):
+                return self._inspect_done(0) or i == 0
+            if i == 3:
+                return bool(self.connected)
+            if i in (4, 5):
+                return bool(self.baseline_done)
+            return False
+
+        def _open_inspection(self):
+            from . import dialogs
+            surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
+            win = tk.Toplevel(self)
+            win.title("%s — Inspect a bike" % APP_NAME)
+            win.geometry("640x700")
+            win.configure(bg=surface)
+            win.transient(self)
+            # this window drives Connect from one of its own buttons, and every
+            # _connect tears the helper windows down - so it opts out
+            win._openmbb_keep_open = True
+            outer = ttk.Frame(win, padding=(18, 16))
+            outer.pack(fill="both", expand=True)
+            ttk.Label(outer, text="Inspecting a bike you don't know",
+                      style="Heading.TLabel").pack(anchor="w")
+            ttk.Label(outer, text="Work down the list. Each step hands off to the "
+                                  "app's own controls, and each tick is read back "
+                                  "from what actually happened rather than from "
+                                  "your having clicked it.",
+                      style="Muted.TLabel", wraplength=580).pack(anchor="w",
+                                                                 pady=(2, 12))
+            rows = []
+            for i, (title, body, label, action) in enumerate(self._INSPECT_STEPS):
+                fr = ttk.Frame(outer)
+                fr.pack(fill="x", pady=(0, 10))
+                head = ttk.Frame(fr)
+                head.pack(fill="x")
+                mark = ttk.Label(head, text="○", width=3)
+                mark.pack(side="left")
+                ttk.Label(head, text="%d. %s" % (i + 1, title),
+                          style="Heading.TLabel").pack(side="left")
+                btn = ttk.Button(head, text=label, command=getattr(self, action))
+                btn.pack(side="right")
+                ttk.Label(fr, text=body, style="Muted.TLabel",
+                          wraplength=580).pack(anchor="w", padx=(28, 0))
+                rows.append((mark, btn))
+            self._inspect_rows = rows
+
+            def refresh():
+                try:
+                    if not win.winfo_exists():
+                        return
+                except tk.TclError:
+                    return
+                self._inspect_refresh(rows)
+                win.after(400, refresh)
+
+            refresh()
+            ttk.Button(outer, text="Close", command=win.destroy).pack(
+                side="right", pady=(8, 0))
+            dialogs._dark_titlebar(win)
+            dialogs._center(win, self)
+            return win
+
+        def _inspect_refresh(self, rows):
+            for i, (mark, btn) in enumerate(rows):
+                done = self._inspect_done(i)
+                mark.config(text="✓" if done else "○",
+                            foreground=P["green"] if done else P["dim"])
+                btn.state(["!disabled"] if self._inspect_ready(i) else ["disabled"])
 
         # -- the session library ---------------------------------------------
         # Three captures already make a folder list a memory test: they are named
@@ -2043,14 +2233,23 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 pass
 
         def _close_transient_toplevels(self):
-            """Destroy any open helper windows (gearing calculator, recent-sessions
-            picker, settings, info popups) so a disconnect leaves nothing behind."""
+            """Destroy any open helper windows (gearing calculator, session
+            library, settings, info popups) so a disconnect leaves nothing behind.
+
+            A window carrying `_openmbb_keep_open` survives. That exists for the
+            inspection flow, which is a workflow rather than a popup: it drives
+            Connect from one of its own buttons, and this runs at the top of every
+            _connect - so without the exemption the window a user is working
+            through would vanish the instant they used it.
+            """
             # tear down an open top-menu FIRST so its refs (_open_menu/_open_submenu/
             # _menu_dismiss_id) are nulled — destroying its Toplevel below would else
             # leave dangling references (review v0.18.1).
             self._dismiss_open_menu()
             for w in list(self.winfo_children()):
                 if isinstance(w, tk.Toplevel):
+                    if getattr(w, "_openmbb_keep_open", False):
+                        continue
                     try:
                         w.destroy()
                     except Exception:
@@ -4179,7 +4378,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                         foreground=P["dim"])
             self.lbl_loaded.pack(side="left", padx=12)
 
-            sub = ttk.Notebook(f)
+            sub = self.analyze_nb = ttk.Notebook(f)
             sub.pack(fill="both", expand=True, pady=(8, 0))
 
             # Health

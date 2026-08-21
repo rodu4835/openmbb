@@ -194,6 +194,17 @@ whole tool with no bike or cable. The staged flow below unlocks one step at a ti
    verify → journal the result. A changed row shows **↺ Reset** to restore the
    last-read value; a read-back mismatch points you to it.
 
+**Tools → Inspect a bike…** is the guided version of all of the above, for the
+case it was built for: a bike you have never seen, with its owner standing next
+to you. Six steps — park it, test the cable, connect, pull the database, *ask
+before the event log*, read the verdict — each handing off to the app's own
+controls. Two things about it are deliberate. Every tick is read back from what
+actually happened rather than from your having clicked the button, because a flow
+that trusts its own checklist will report a pull that failed halfway as complete.
+And the event-log step goes **through** the existing contactor warning, not around
+it: it is the only step that leaves a permanent mark on someone else's bike, and
+it is the one you need permission for.
+
 **File → Save condition report…** writes a dated page fit to hand a buyer, a
 seller, or your future self: the verdict's headline up top, then the health rows,
 the pack condition, the charging habits, the clocks and everything the capture
