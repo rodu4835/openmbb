@@ -237,9 +237,17 @@ def _consumption_lines(c, r, units="C"):
     """
     out = []
     if c:
-        out.append("  measured consumption: %g Wh/km at the pack "
-                   "(middle 80%% of rides: %g-%g)"
-                   % (c["wh_per_km"], c["wh_per_km_low"], c["wh_per_km_high"]))
+        if c.get("wh_per_km_low") is None:
+            # too few rides for a band. A "middle 80%" of one ride is that ride's
+            # own number printed twice, which claims a precision that was not
+            # measured but invented.
+            out.append("  measured consumption: %g Wh/km at the pack "
+                       "(from %d ride(s) - too few for a spread)"
+                       % (c["wh_per_km"], c["rides"]))
+        else:
+            out.append("  measured consumption: %g Wh/km at the pack "
+                       "(middle 80%% of rides: %g-%g)"
+                       % (c["wh_per_km"], c["wh_per_km_low"], c["wh_per_km_high"]))
         if c.get("amb_low_c") is not None:
             out.append("    over %d rides / %g km, at %s to %s ambient - "
                        "consumption climbs in the cold"
@@ -256,6 +264,9 @@ def _consumption_lines(c, r, units="C"):
                        "distance anyone has ridden: it assumes the SOC scale is")
             out.append("    linear and that 0%% is reachable, and the lowest "
                        "this log has ever seen is %g%%" % r["soc_floor_pct"])
+            if r.get("extrapolation_x"):
+                out.append("    scaled up %gx from what was actually ridden"
+                           % r["extrapolation_x"])
         if r.get("implied_pack_wh"):
             out.append("    that ride implies a pack of about %d Wh, which is "
                        "worth holding against what the BMS reports"
@@ -296,8 +307,23 @@ def _bike_state_lines(s):
         out.append("  key %s \u00b7 kill switch %s \u00b7 kickstand %s \u00b7 brake %s"
                    % (i.get("key_on", "?"), i.get("kill_switch", "?"),
                       i.get("kickstand", "?"), i.get("brake_switch", "?")))
-        out.append("  " + ("would not move as captured: " + ", ".join(holds)
-                           if holds else "no interlock was holding it"))
+        # "no interlock was holding it" is a claim about three specific switches,
+        # so it may only be made when all three were actually read. The console
+        # prints Key On and the supply rails BEFORE the interlocks, so a `inputs`
+        # read that ended early leaves a populated dict with every interlock
+        # missing - and the old test (`if holds`) could not fire, which rendered
+        # a truncated read as a clean bill of mechanical health.
+        unread = [lab for key, lab in (("kickstand", "kickstand"),
+                                       ("kill_switch", "kill switch"),
+                                       ("throttle_enabled", "throttle"))
+                  if i.get(key) in (None, "")]
+        if holds:
+            out.append("  would not move as captured: " + ", ".join(holds))
+        elif unread:
+            out.append("  cannot say whether an interlock was holding it: this "
+                       "capture never read %s" % ", ".join(unread))
+        else:
+            out.append("  no interlock was holding it")
     o = s.get("outputs") or {}
     if str(o.get("warning_light", "")).lower() == "on":
         out.append("  ! the dash warning light was ON at capture")

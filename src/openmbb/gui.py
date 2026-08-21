@@ -415,6 +415,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     continue
                 for tag, key in tags:
                     tree.tag_configure(tag, foreground=P[key])
+            # the session library is a transient window rather than a tab, so it
+            # is not in _TREE_TAGS; repaint it when it happens to be open
+            lib = getattr(self, "_lib_tree", None)
+            if lib is not None:
+                try:
+                    for tag, colour in self._LIB_TAGS:
+                        lib.tag_configure(tag, foreground=P[colour])
+                except tk.TclError:
+                    self._lib_tree = None      # window has since closed
 
         def _repaint_raw_tk(self, widget, old, new):
             """Repaint the non-ttk widgets under `widget` for the active palette.
@@ -1267,6 +1276,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if not chosen:
                 return
             self.log_dir = os.path.normpath(chosen)
+            # the trend caches hold captures from the OLD root; keeping them
+            # would plot another folder's history against the new location
+            self._trend_cache = None
+            self._log_trend_cache = None
             saved = config.set_log_dir(self.log_dir)
             self._refresh_save_label()
             msg = "Session logs will be saved under:\n%s" % self._session_root()
@@ -1348,8 +1361,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         if os.path.isdir(os.path.join(root, d))]
             except OSError:
                 return root, []
-            dirs.sort(key=lambda d: os.path.getmtime(os.path.join(root, d)),
-                      reverse=True)
+            # NOT mtime: writing the verdict cache into a capture folder, or
+            # copying a capture between machines, rewrites it. The folder name
+            # carries the capturing machine's clock, which is what "when" means.
+            dirs.sort(key=lambda d: library_mod._captured_at(
+                os.path.join(root, d), None), reverse=True)
             return root, dirs[:limit]
 
         # -- inspecting a bike you do not know --------------------------------
@@ -1414,7 +1430,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._read_heavy("eventlogdump")
 
         def _inspect_verdict(self):
-            if self.analyze_session is None and self.logger:
+            # UNCONDITIONALLY re-read the live capture. Reloading only when
+            # analyze_session was None meant a saved capture opened mid-inspection
+            # kept the Analyze tab - and step 6 - showing another bike's verdict;
+            # and it meant completing the real event-log read AFTER pressing this
+            # once did not refresh what the step was showing.
+            if self.logger:
                 try:
                     self._analyze_set(sessions.load_session(self.logger.dir))
                 except Exception:
@@ -1432,13 +1453,43 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     return
 
         def _inspect_session(self):
-            s = self.analyze_session
-            if s is None and self.logger:
+            """The capture being taken from the bike in front of you.
+
+            The LIVE logger directory wins over whatever is loaded in Analyze.
+            Preferring analyze_session let a saved capture - opened from the
+            session library, which is reachable mid-inspection - tick step 5
+            "Read the event log" with nothing read from this bike, and then
+            present that other bike's verdict as this one's. Steps 4-6 are about
+            what came off the machine in front of you or they are worthless.
+            """
+            if self.logger:
                 try:
-                    s = sessions.load_session(self.logger.dir)
+                    return sessions.load_session(self.logger.dir)
                 except Exception:
-                    s = None
-            return s
+                    return None
+            return None
+
+        def _inspect_has_event_log(self, min_bytes=4096):
+            """Whether the LIVE capture holds a real event log, by stat alone.
+
+            `min_bytes` guards against an empty or single-line file left by a read
+            that never got going; a genuine dump is ~1 MB.
+            """
+            if not self.logger:
+                return False
+            try:
+                names = os.listdir(self.logger.dir)
+            except OSError:
+                return False
+            for name in names:
+                if "eventlogdump" not in name.lower():
+                    continue
+                try:
+                    if os.path.getsize(os.path.join(self.logger.dir, name)) >= min_bytes:
+                        return True
+                except OSError:
+                    continue
+            return False
 
         def _inspect_done(self, i):
             """Whether step `i` has actually happened.
@@ -1456,9 +1507,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if i == 3:
                 return bool(self.baseline_done)
             if i == 4:
-                s = self._inspect_session()
-                return bool(s and (s.cmd("eventlogdump") or "").strip())
+                # Cheap on purpose: this runs on the Tk main thread every 400 ms,
+                # and sessions.load_session() reads the whole folder including the
+                # ~1 MB event log. Whether a non-trivial eventlogdump file exists
+                # is the actual question, and stat answers it.
+                return self._inspect_has_event_log()
             if i == 5:
+                # the verdict must be THIS capture's: _cond_verdict is set by
+                # _render_condition for whatever session Analyze holds, which is
+                # not necessarily the bike on the bench
+                live = self._inspect_session()
+                loaded = self.analyze_session
+                if not live or not loaded:
+                    return False
+                if os.path.normcase(os.path.abspath(loaded.dir)) != \
+                        os.path.normcase(os.path.abspath(live.dir)):
+                    return False
                 return bool(getattr(self, "_cond_verdict", None))
             return False
 
@@ -1482,6 +1546,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _open_inspection(self):
             from . import dialogs
+            # one window, not one per menu click - each carries its own 400 ms
+            # poll, and they stack
+            existing = getattr(self, "_inspect_win", None)
+            if existing is not None:
+                try:
+                    if existing.winfo_exists():
+                        existing.deiconify()
+                        existing.lift()
+                        return existing
+                except tk.TclError:
+                    pass
+                self._inspect_win = None
             surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
             win = tk.Toplevel(self)
             win.title("%s — Inspect a bike" % APP_NAME)
@@ -1491,6 +1567,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # this window drives Connect from one of its own buttons, and every
             # _connect tears the helper windows down - so it opts out
             win._openmbb_keep_open = True
+            self._inspect_win = win
             outer = ttk.Frame(win, padding=(18, 16))
             outer.pack(fill="both", expand=True)
             ttk.Label(outer, text="Inspecting a bike you don't know",
@@ -1528,7 +1605,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 win.after(400, refresh)
 
             refresh()
-            ttk.Button(outer, text="Close", command=win.destroy).pack(
+            def _close():
+                self._inspect_win = None
+                win.destroy()
+
+            win.protocol("WM_DELETE_WINDOW", _close)
+            ttk.Button(outer, text="Close", command=_close).pack(
                 side="right", pady=(8, 0))
             dialogs._dark_titlebar(win)
             dialogs._center(win, self)
@@ -1617,8 +1699,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # this dialog is built fresh each time, so it reads the live palette
             # here rather than registering with _restyle_trees (which exists for
             # the long-lived tab trees that outlive a theme switch)
+            # tag_configure COPIES the colour, so these do not follow a live
+            # theme switch on their own - the same trap _restyle_trees exists
+            # for. The dialog is non-modal, so Tools -> Appearance is reachable
+            # while it is open; register it for as long as it lives.
             for tag, colour in self._LIB_TAGS:
                 tree.tag_configure(tag, foreground=P[colour])
+            self._lib_tree = tree
             tree.pack(side="left", fill="both", expand=True)
             sb.config(command=tree.yview)
 
@@ -1738,6 +1825,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             config.set_units(self.units_var.get())
             if self.analyze_session:      # re-render distances in the new unit
                 self._render_rides()
+                # Condition carries Consumption and Range in the distance unit
+                # too, and was the one tab left showing km after a switch to mi
+                self._render_condition()
             self._render_charts()         # charts read the unit too
 
         def _apply_temp_units(self):
@@ -2186,6 +2276,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.analyze_session = None
             self._trend_cache = None
             self._log_trend_cache = None
+            # A verdict outliving its session is the worst kind of stale state
+            # here: it keeps a bold green "OK" over an empty Condition tab, and
+            # it ticks the inspection flow's "Read the verdict" step for a bike
+            # that has not been connected to yet.
+            self._cond_verdict = None
+            if getattr(self, "cond_tree", None) is not None:
+                try:
+                    self.cond_tree.delete(*self.cond_tree.get_children())
+                except Exception:
+                    pass
+            self._paint_verdict()
+            # the inspection flow's two on-trust ticks belong to one session too
+            self._inspect_confirmed_parked = False
+            self._inspect_cable_tested = False
             if hasattr(self, "unlock_var"):
                 self.unlock_var.set(False)
             if hasattr(self, "baseline_heavy_var"):
@@ -4649,12 +4753,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             unit = "mi" if config.get_units() == "mi" else "km"
             dfac = 0.621371 if unit == "mi" else 1.0
             if cons:
+                if cons.get("wh_per_km_low") is None:
+                    # a "middle 80%" of one ride is that ride's number twice
+                    band = "from %d ride(s) · too few for a spread" % cons["rides"]
+                else:
+                    band = ("middle 80%% of rides %g–%g · measured over %d rides"
+                            % (round(cons["wh_per_km_low"] / dfac, 1),
+                               round(cons["wh_per_km_high"] / dfac, 1),
+                               cons["rides"]))
                 _row("Consumption",
-                     "%g Wh/%s at the pack · middle 80%% of rides %g–%g · "
-                     "measured over %d rides at %s to %s ambient"
-                     % (round(cons["wh_per_km"] / dfac, 1), unit,
-                        round(cons["wh_per_km_low"] / dfac, 1),
-                        round(cons["wh_per_km_high"] / dfac, 1), cons["rides"],
+                     "%g Wh/%s at the pack · %s · at %s to %s ambient"
+                     % (round(cons["wh_per_km"] / dfac, 1), unit, band,
                         _t(cons["amb_low_c"]), _t(cons["amb_high_c"])), "measured")
             if rng:
                 _row("Range on a full charge",
@@ -4666,10 +4775,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                      "attention" if rng.get("is_extrapolation") else "measured")
                 if rng.get("is_extrapolation"):
                     _row("└ what that rests on",
-                         "an upper bound on what the GAUGE implies, not a distance "
-                         "anyone has ridden: it assumes the SOC scale is linear and "
-                         "that 0%% is reachable, and the lowest this log has seen is "
-                         "%g%%" % rng["soc_floor_pct"], "unknown")
+                         "scaled up %gx from what was ridden · an upper bound on "
+                         "what the GAUGE implies, not a distance anyone has ridden: "
+                         "it assumes the SOC scale is linear and that 0%% is "
+                         "reachable, and the lowest this log has seen is %g%%"
+                         % (rng.get("extrapolation_x") or 1, rng["soc_floor_pct"]),
+                         "unknown")
                 if rng.get("implied_pack_wh"):
                     _row("└ pack size that implies",
                          "about %d Wh, reached from energy and SOC together — "
@@ -5098,7 +5209,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     try:
                         folder = os.path.join(root, name)
                         s = sessions.load_session(folder)
-                        out.append((os.path.getmtime(folder), name,
+                        out.append((library_mod._captured_at(folder, s), name,
                                     parsers.parse_bms(s.cmd("bms")),
                                     parsers.parse_stats(s.cmd("stats"))))
                     except Exception:
@@ -5189,7 +5300,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             continue
                         cap = condition_mod.charge_capacity(parsers.parse_charge_log(log))
                         dev = condition_mod.cell_deviation(parsers.parse_ride_log(log))
-                        out.append((os.path.getmtime(folder), name, {
+                        out.append((library_mod._captured_at(folder, sess), name, {
                             "charge_index_ah": cap["median_ah"] if cap else None,
                             "cell_deviation_mv": dev["median_mv"] if dev else None,
                         }))
@@ -5526,12 +5637,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_compare.config(state="disabled")
             # order oldest->newest by folder mtime (works for any folder name);
             # stable sort keeps insertion order when mtimes tie/are unavailable.
-            def _mtime(s):
-                try:
-                    return os.path.getmtime(s.dir)
-                except OSError:
-                    return 0
-            ordered = sorted(self.compare_list, key=_mtime)
+            # the capture's own date, not the folder's mtime - see _recent_sessions
+            ordered = sorted(self.compare_list,
+                             key=lambda s: library_mod._captured_at(s.dir, s))
             self._compare_out("Comparing %d session(s), oldest -> newest:"
                               % len(ordered))
             for s in ordered:

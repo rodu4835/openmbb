@@ -181,7 +181,12 @@ def _ensure_console():
             pass
 
 
-HEADLESS_COMMANDS = ("analyze", "sessions")
+# `redact` prints its result - and, more to the point, its refusals - to
+# stdout. In the frozen windowed build sys.stdout is None until
+# _ensure_console() runs, so without this every line it emits, including
+# "export discarded", is silently dropped and the command looks like it
+# did nothing.
+HEADLESS_COMMANDS = ("analyze", "sessions", "redact")
 
 
 def cmd_analyze(args):

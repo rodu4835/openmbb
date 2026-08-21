@@ -2908,3 +2908,135 @@ def test_the_verdict_step_is_reachable_without_the_event_log(app, monkeypatch):
 def test_the_flow_is_offered_in_the_tools_menu(app):
     labels = [e[1] for e in app._tools_menu() if e[0] == "cmd"]
     assert any("Inspect a bike" in str(l) for l in labels)
+
+
+# --- regressions from the pre-push review ------------------------------------
+
+def test_a_verdict_does_not_outlive_its_session(app):
+    # _reset_session_state cleared analyze_session but not _cond_verdict, so
+    # after a disconnect the Condition tab kept a bold green "OK" over an empty
+    # table - and the inspection flow ticked "Read the verdict" for a bike nobody
+    # had connected to yet
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._cond_verdict = {"level": "ok", "headline": "bike A looked fine"}
+    app._paint_verdict()
+    app.cond_tree.insert("", "end", values=("Charge capacity", "17.8 Ah"))
+    app._inspect_confirmed_parked = True
+    app._inspect_cable_tested = True
+
+    app._reset_session_state()
+    app.update()
+    assert app._cond_verdict is None
+    assert not app.cond_tree.get_children()
+    assert "bike A" not in app.lbl_cond_verdict.cget("text")
+    assert app._inspect_done(5) is False
+    # the on-trust ticks belong to one session too
+    assert app._inspect_done(0) is False and app._inspect_done(1) is False
+
+
+def test_the_inspection_flow_follows_the_bike_not_the_analyze_tab(app, tmp_path):
+    # _inspect_session preferred analyze_session, so a saved capture opened from
+    # the session library mid-inspection ticked step 5 with nothing read from the
+    # seller's bike and presented THAT bike's verdict as this one's
+    from openmbb import sessions
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    live = app.logger.dir
+
+    other = tmp_path / "someone-elses-bike"
+    other.mkdir()
+    (other / "001_eventlogdump.txt").write_text(
+        "# command: eventlogdump\n# time: 12:00:00.000\n\n" + ("x" * 20000),
+        encoding="utf-8")
+    app._analyze_set(sessions.load_session(str(other)))
+    app.update()
+
+    # the flow reads the live capture, not whatever Analyze happens to hold
+    s = app._inspect_session()
+    assert s is not None
+    assert os.path.normcase(s.dir) == os.path.normcase(live)
+    # ...so the other bike's big event log does not tick step 5
+    assert app._inspect_done(4) is False
+    # ...and its verdict is not this bike's
+    app._cond_verdict = {"level": "ok", "headline": "the other bike"}
+    assert app._inspect_done(5) is False
+
+
+def test_the_charts_timeline_is_the_capture_date_not_the_folder_mtime(app, tmp_path,
+                                                                     monkeypatch):
+    # writing the library's verdict cache into a capture folder bumps its mtime,
+    # and the trend metrics plotted each capture AT that mtime - so opening the
+    # library once flattened a year of history into one second, newest-first,
+    # i.e. plotted in reverse
+    import os as _os
+    root = tmp_path / "sessions"
+    root.mkdir()
+    names = ["2026-01-05_120000_111111_COM4", "2026-05-05_120000_222222_COM4",
+             "2026-08-05_120000_333333_COM4"]
+    for i, n in enumerate(names):
+        d = root / n
+        d.mkdir()
+        (d / "001_bms.txt").write_text(
+            "# command: bms\n# time: 12:00:00.000\n\n  - Pack Capacity : %d AH\n"
+            % (52 - i), encoding="utf-8")
+    # every folder restamped to the same instant, newest-first, exactly as the
+    # library's cache write did
+    now = 1_800_000_000
+    for i, n in enumerate(reversed(names)):
+        _os.utime(str(root / n), (now + i, now + i))
+
+    monkeypatch.setattr(app, "_session_root", lambda: str(root))
+    app._trend_cache = None
+    trend = app._load_trend_sessions()
+    stamps = [t for t, _n, _b, _s in trend]
+    assert len(stamps) == 3
+    assert stamps == sorted(stamps)                       # oldest -> newest
+    # and they are months apart, not seconds
+    assert stamps[-1] - stamps[0] > 180 * 86400
+    assert [n for _t, n, _b, _s in trend] == names        # in capture order
+
+
+def test_switching_to_miles_reaches_the_condition_tab(app, tmp_path, monkeypatch):
+    # Condition carries Consumption and Range in the distance unit, and was the
+    # one tab still reading km after a switch to miles
+    from openmbb import config, sessions
+    calls = []
+    monkeypatch.setattr(app, "_render_condition", lambda: calls.append(1))
+    app.analyze_session = sessions.Session(str(tmp_path), {"bms": ""}, "")
+    app.units_var.set("mi")
+    app._apply_units()
+    assert calls, "_apply_units never re-rendered Condition"
+    config.set_units("km")
+
+
+def test_the_inspection_window_is_a_singleton(app):
+    # each window carries its own 400 ms poll, and they stacked
+    a = app._open_inspection()
+    app.update()
+    b = app._open_inspection()
+    app.update()
+    assert a is b
+    a.destroy()
+
+
+def test_the_event_log_tick_does_not_reread_a_megabyte_every_poll(app, monkeypatch):
+    # the poll ran sessions.load_session() - a whole-folder read including the
+    # ~1 MB event log - on the Tk main thread, four times immediately and then
+    # every 400 ms
+    from openmbb import sessions as _sessions
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    loads = []
+    real = _sessions.load_session
+    monkeypatch.setattr(_sessions, "load_session",
+                        lambda d: (loads.append(d), real(d))[1])
+    for i in range(6):
+        app._inspect_done(4)
+    assert loads == [], "the event-log tick still loads the whole session"
+    # and it answers correctly off the filesystem
+    assert app._inspect_done(4) is False
+    with open(os.path.join(app.logger.dir, "099_eventlogdump.txt"), "w",
+              encoding="utf-8") as fh:
+        fh.write("# command: eventlogdump\n\n" + "x" * 20000)
+    assert app._inspect_done(4) is True

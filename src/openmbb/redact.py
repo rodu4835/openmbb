@@ -121,6 +121,34 @@ class Redactor:
         return text
 
 
+# A capture is not always written by this program. A file dropped into the
+# folder by PowerShell redirection is UTF-16LE, and decoding that as UTF-8 with
+# errors="replace" yields mojibake in which no identifier SHAPE can match - so
+# the substitution finds nothing, the verification pass finds nothing, and the
+# bundle is declared clean with the VIN still in it. tests/test_release_gate.py
+# already treats this exact encoding as the realistic hazard on this machine.
+_TEXT_ENCODINGS = ("utf-8-sig", "utf-16")
+
+
+def _decode_text(raw):
+    """Decode `raw` (BOM-aware, UTF-8 then UTF-16), or None if neither works."""
+    for enc in _TEXT_ENCODINGS:
+        try:
+            return raw.decode(enc), enc
+        except (UnicodeDecodeError, ValueError):
+            continue
+    return None, None
+
+
+def _same_or_inside(a, b):
+    """True if path `a` is `b` or sits inside it (either direction is fatal here)."""
+    a, b = os.path.abspath(a), os.path.abspath(b)
+    try:
+        return a == b or os.path.commonpath([a, b]) in (a, b)
+    except ValueError:          # different drives on Windows
+        return False
+
+
 def redact_session(src_dir, dst_dir, overwrite=False):
     """Write a share-safe copy of a session folder. Returns a report.
 
@@ -130,6 +158,22 @@ def redact_session(src_dir, dst_dir, overwrite=False):
     """
     if not os.path.isdir(src_dir):
         raise NotADirectoryError(src_dir)
+    # With --overwrite, the rmtree below runs BEFORE the source is listed. Aimed
+    # at the source itself that destroyed the capture and then reported a
+    # verified-clean export of zero files; aimed at the parent it took the
+    # sibling captures with it. A capture costs a contactor-risk event-log read
+    # to make and the bike's buffer is only weeks deep, so this is unrecoverable.
+    if _same_or_inside(dst_dir, src_dir):
+        raise ValueError(
+            "refusing to export into the capture itself (or its parent): "
+            "%s would destroy %s" % (dst_dir, src_dir))
+    # A folder named after the bike - a decoder export often is - would otherwise
+    # produce a bundle whose NAME carries the VIN while the report says clean.
+    leaks_in_name = find_pii_shapes(os.path.basename(os.path.normpath(dst_dir)))
+    if leaks_in_name:
+        raise ValueError(
+            "refusing to name the export after an identifier (%s): choose "
+            "another destination" % ", ".join(sorted({l for l, _t in leaks_in_name})))
     if os.path.exists(dst_dir):
         if not overwrite:
             raise FileExistsError(dst_dir)
@@ -137,24 +181,45 @@ def redact_session(src_dir, dst_dir, overwrite=False):
     os.makedirs(dst_dir)
 
     red = Redactor()
-    written, skipped = [], []
+    written, skipped, unscanned = [], [], []
     for name in sorted(os.listdir(src_dir)):
         src = os.path.join(src_dir, name)
         if not os.path.isfile(src):
             continue
         try:
-            with open(src, encoding="utf-8", errors="replace") as f:
-                body = f.read()
+            with open(src, "rb") as f:
+                raw = f.read()
         except OSError:
             skipped.append(name)
             continue
+        body, enc = _decode_text(raw)
         # a file NAME can carry an identifier too (a decoder export is often
         # named after the VIN), so it goes through the same mapping
         out_name = red.text(name)
+        if body is None:
+            # Not text under any encoding we can scan. Copying it verbatim would
+            # put an unexamined file in a bundle the report calls clean, so it is
+            # named and left out - and it costs the bundle its clean bill below.
+            unscanned.append(name)
+            continue
         with open(os.path.join(dst_dir, out_name), "w",
                   encoding="utf-8", newline="") as f:
             f.write(red.text(body))
         written.append(out_name)
+    if unscanned:
+        shutil.rmtree(dst_dir, ignore_errors=True)
+        raise RuntimeError(
+            "export discarded: %d file(s) could not be read as text and so could "
+            "not be checked for identifiers: %s"
+            % (len(unscanned), ", ".join(sorted(unscanned)[:5])))
+    if not written:
+        # zero files re-scanned clean is vacuously true, and printing the usual
+        # assurance over an empty set is exactly the false pass this module exists
+        # to refuse
+        shutil.rmtree(dst_dir, ignore_errors=True)
+        raise RuntimeError(
+            "export discarded: no readable files in %s - there is nothing here "
+            "to vouch for" % src_dir)
 
     # verify our own output rather than trusting the substitution
     leaks = []
@@ -176,6 +241,7 @@ def redact_session(src_dir, dst_dir, overwrite=False):
         "output": dst_dir,
         "files": len(written),
         "skipped": skipped,
+        "unscanned": [],          # anything unscannable aborted the export above
         "identifiers_replaced": len(red.mapping),
         "by_kind": {lab: sum(1 for k in red.kinds.values() if k == lab)
                     for lab, _rx in SHAPES

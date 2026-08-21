@@ -18,18 +18,23 @@ a note is worth most exactly then: `2026-06-13 reflash` on the capture either si
 of it would have saved this project a week.
 """
 
+import hashlib
 import json
 import os
 import time
 
-from . import condition, parsers, sessions
+from . import condition, health, parsers, sessions
 
 NOTE_FILE = "session_note.txt"
 SUMMARY_FILE = "session_summary.json"
 
-# bumped when a cached verdict would be computed differently, so an old cache is
-# recomputed rather than believed
-SUMMARY_VERSION = 1
+# Bumped when a cached verdict would be computed differently, so an old cache is
+# recomputed rather than believed.
+#   2: verdicts were being computed WITHOUT the health metrics, which forced the
+#      resting cell-spread check to "unknown" and dropped the isolation and
+#      warning-light checks entirely - a bike the Condition tab grades "concern"
+#      showed a green "ok" here, in the one column a buyer triages on.
+SUMMARY_VERSION = 2
 
 
 # --- notes -------------------------------------------------------------------
@@ -151,12 +156,40 @@ def scan(root, limit=60):
 
 # --- the expensive half, cached beside the capture ---------------------------
 
-def cached_verdict(folder):
+def _log_fingerprint(log_text):
+    """What the verdict was computed FROM, as a digest of the log itself.
+
+    The module used to assume a verdict does not change once a capture is
+    written. That is false: the app appends to live session folders, and a
+    truncated first `eventlogdump` followed by a complete re-read leaves a
+    higher-numbered file that `load_session` prefers - so a cache keyed only on
+    the code version keeps serving the verdict of the partial log.
+
+    Digesting the TEXT rather than stat-ing a filename matters, because which
+    file `_event_log_text` ends up reading depends on the command headers and on
+    `eventlogdump` winning over `dumplogs` - not on how the names sort. Hashing a
+    megabyte costs a couple of milliseconds against the ~100 ms parse it guards.
+    """
+    if not log_text:
+        return None
+    return {"sha256": hashlib.sha256(log_text.encode("utf-8", "replace")).hexdigest(),
+            "chars": len(log_text)}
+
+
+_UNREAD = object()
+
+
+def cached_verdict(folder, log_text=_UNREAD):
     """A verdict computed on an earlier visit, or None.
 
-    Returns None for a cache written by an older version of the checks rather
-    than trusting it — the point of caching is to skip re-reading a megabyte,
-    not to freeze a judgement the code has since changed its mind about.
+    Returns None for a cache written by an older version of the checks, or from a
+    different event log, rather than trusting it — the point of caching is to
+    skip re-reading a megabyte, not to freeze a judgement that the code, or the
+    evidence, has since moved on from.
+
+    The evidence check is done HERE rather than left to the caller, because a
+    caller that forgets it is precisely the defect this closes. Pass `log_text`
+    when you have already read the log; otherwise it is read to check.
     """
     try:
         with open(os.path.join(folder, SUMMARY_FILE), encoding="utf-8") as f:
@@ -164,6 +197,13 @@ def cached_verdict(folder):
     except (OSError, ValueError):
         return None
     if data.get("version") != SUMMARY_VERSION:
+        return None
+    if log_text is _UNREAD:
+        try:
+            log_text = _event_log_text(sessions.load_session(folder))
+        except Exception:
+            return None
+    if data.get("evidence") != _log_fingerprint(log_text):
         return None
     return data
 
@@ -175,21 +215,43 @@ def deep_verdict(folder, use_cache=True):
     to read. The cache is written into the capture folder, so it travels with a
     copied capture and costs nothing to regenerate if it is lost.
     """
-    if use_cache:
-        hit = cached_verdict(folder)
-        if hit is not None:
-            return hit
     s = sessions.load_session(folder)
     log = _event_log_text(s)
     if not log:
         return None
-    v = condition.verdict(condition.assess(log))
+    if use_cache:
+        hit = cached_verdict(folder, log)
+        if hit is not None:
+            return hit
+    # The health metrics are not optional. Without them condition.verdict forces
+    # the resting cell-spread check to "unknown" and never appends the isolation
+    # or warning-light checks, so a bike graded "concern - walk away" on the
+    # Condition tab renders as a green "ok" in this list. health_snapshot only
+    # re-parses the short command outputs already loaded above.
+    metrics = health.health_snapshot(s)
+    v = condition.verdict(condition.assess(log), metrics)
     data = {"version": SUMMARY_VERSION, "level": v["level"],
-            "headline": v["headline"]}
+            "headline": v["headline"], "evidence": _log_fingerprint(log)}
+    # Writing into the capture folder bumps the folder's mtime, and the Charts
+    # trend metrics plot each capture AT its folder mtime - so simply opening
+    # this list would restamp every capture to "now" and flatten a year of
+    # history into one second. Put the clock back.
+    before = None
+    try:
+        st = os.stat(folder)
+        before = (st.st_atime, st.st_mtime)
+    except OSError:
+        pass
     try:
         with open(os.path.join(folder, SUMMARY_FILE), "w", encoding="utf-8",
                   newline="\n") as f:
             json.dump(data, f, indent=1)
     except OSError:
         pass          # a read-only capture folder is not a reason to fail
+    else:
+        if before is not None:
+            try:
+                os.utime(folder, before)
+            except OSError:
+                pass
     return data

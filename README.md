@@ -253,17 +253,26 @@ session folder — or the current one:
   change left undecodable rather than believing them.
 
   It reports **measured consumption and range**: Wh/km integrated from pack
-  voltage and current ride by ride (a median with the middle-80% band, because
-  the spread between a gentle ride and a hard one is real and large), and how far
-  a full charge goes — taken from the *deepest discharge actually logged*, scaled
-  to 0–100%, **not** from the BMS's nominal capacity. On the reference bike the
-  BMS reports 52 Ah while the gauge behaves like a pack barely two thirds that,
-  so a range built on the larger figure would be a third too long. The scaling is
-  the weak step and is labelled as such: an upper bound on what the gauge
-  implies, assuming a linear SOC scale and a reachable 0% — and the lowest SOC
-  the log has ever seen travels with it so you can see how far past the evidence
-  it reaches. That same ride, measured a second and unrelated way (energy against
-  SOC drop), implies a pack size worth holding against what the BMS claims.
+  voltage and current ride by ride — *signed*, so regenerative braking counts as
+  energy returned rather than drawn — reported as a median with the middle-80%
+  band, because the spread between a gentle ride and a hard one is real and
+  large. Under five rides the band is withheld rather than printed as one ride's
+  number twice.
+
+  How far a full charge goes is taken from the *deepest discharge actually
+  logged*, scaled to 0–100%, **not** from the BMS's nominal capacity. On the
+  reference bike the BMS reports 52 Ah (~5,720 Wh at pack voltage) while the
+  measured behaviour implies about 3,435 Wh — 60% of it — so a range built on the
+  BMS figure would come out near 57 km against a measured 34 km, two thirds too
+  long. The scaling is the weak step and is labelled as such: an upper bound on
+  what the gauge implies, assuming a linear SOC scale and a reachable 0%. Three
+  things travel with it so you can see how far past the evidence it reaches — the
+  lowest SOC the log has ever seen, the multiplier the measurement was scaled up
+  by, and the pack size the same ride implies when measured the other way (energy
+  against SOC drop). If the deepest discharge in a capture is shallower than 30
+  SOC points the estimate is **withheld entirely**: a capture of nothing but
+  short errands extrapolates to figures that look perfectly plausible and are
+  wrong by multiples.
 
   It also reports **charging habits** — a separate thing from the pack's health,
   and the only part of the whole report an owner can act on this afternoon. How

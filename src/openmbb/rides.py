@@ -87,6 +87,20 @@ _MAX_RIDE_STEP_S = 300.0
 # error in its distance and none of it averages out.
 MIN_RIDE_KM = 5.0
 
+# The deepest discharge has to actually be deep before scaling it to a full
+# charge means anything. Without this, a capture holding only light riding
+# extrapolated a 7 km / 5-point trip into "about 140 km" and "about 10.3 kWh" -
+# both entirely believable Gen2 figures, and both roughly four times the truth.
+# Worse, `split_rides` has no time-gap rule, so a commuter's nightly top-ups of
+# <= 8 SOC points merge weeks of short trips into one segment whose distance
+# spans many charge cycles while its SOC span covers one: 21 days of 16 km hops
+# extrapolated to 3,500 km and 567 kWh.
+MIN_SOC_USED_PCT = 30.0
+
+# Above this multiplier the extrapolation is doing more of the work than the
+# measurement is, and the figure stops being worth printing at all.
+MAX_EXTRAPOLATION = 3.0
+
 _RIDE_TS_FMT = "%m/%d/%Y %H:%M:%S"
 
 
@@ -116,7 +130,14 @@ def _segment_energy(seg):
         v, i = a.get("vpack"), a.get("battamps")
         if v is None or i is None:
             continue
-        wh += abs(v * i) * secs / 3600.0
+        # SIGNED, not abs(). BattAmps runs negative under regenerative braking,
+        # and abs() counted that as energy drawn - so a braking-heavy ride was
+        # charged twice for the same energy. Measured on the reference bike:
+        # 130 of 1231 riding samples carry genuine regen (to -22 A, each with a
+        # matching negative MotAmps at non-zero rpm), and the abs() overstated
+        # consumption by ~12%, worst at the gentle end of the band where regen
+        # is proportionally largest.
+        wh += (v * i) * secs / 3600.0
         oa, ob = a.get("odo_km"), b.get("odo_km")
         if oa is not None and ob is not None and 0 <= ob - oa < 50:
             km += ob - oa
@@ -145,12 +166,18 @@ def consumption(records):
     n = len(per_ride)
     ambs = sorted(r["amb_temp_c"] for r in records
                   if r.get("amb_temp_c") is not None)
+    # A "middle 80%" drawn from one or two rides is the same number twice, and
+    # printing "(middle 80% of rides: 75.3-75.3)" claims a precision that is not
+    # merely absent but invented. Below this the band is withheld and the median
+    # stands alone.
+    banded = n >= 5
     return {
         "rides": n,
         "km": round(total_km, 1),
         "wh_per_km": round(per_ride[n // 2], 1),
-        "wh_per_km_low": round(per_ride[n // 10], 1),
-        "wh_per_km_high": round(per_ride[min(n - 1, int(n * 0.9))], 1),
+        "wh_per_km_low": round(per_ride[n // 10], 1) if banded else None,
+        "wh_per_km_high": (round(per_ride[min(n - 1, int(n * 0.9))], 1)
+                           if banded else None),
         # consumption climbs in the cold, so the temperatures this was measured
         # across are part of the measurement rather than a footnote to it
         "amb_low_c": ambs[0] if ambs else None,
@@ -172,7 +199,15 @@ def range_estimate(records):
     scaling is the weak step and is reported as such - it assumes the SOC scale
     is linear and that 0% is reachable, and on this platform neither is
     established. `soc_floor_pct` carries the lowest SOC the log has ever seen so
-    a reader can judge how far the extrapolation reaches past the evidence.
+    a reader can judge how far the extrapolation reaches past the evidence, and
+    `extrapolation_x` says how much of the answer is scaling rather than
+    measurement.
+
+    Returns None when the deepest discharge in the capture is too shallow to
+    scale (MIN_SOC_USED_PCT). A capture of nothing but short errands genuinely
+    cannot answer this question, and saying so is the only honest option: the
+    numbers it would otherwise produce look perfectly plausible and are wrong by
+    multiples.
     """
     best = None
     for seg in split_rides(records):
@@ -181,7 +216,7 @@ def range_estimate(records):
         if len(socs) < 2 or km < MIN_RIDE_KM:
             continue
         used = max(socs) - min(socs)
-        if used <= 0:
+        if used < MIN_SOC_USED_PCT:
             continue
         if best is None or used > best["soc_used_pct"]:
             best = {"km": round(km, 1), "soc_used_pct": round(used, 1),
@@ -192,7 +227,9 @@ def range_estimate(records):
     all_socs = [r["soc"] for r in records if r.get("soc") is not None]
     out = dict(best)
     wh = out.pop("_wh")
-    out["full_charge_km"] = round(best["km"] * 100.0 / best["soc_used_pct"], 1)
+    factor = 100.0 / best["soc_used_pct"]
+    out["extrapolation_x"] = round(factor, 2)
+    out["full_charge_km"] = round(best["km"] * factor, 1)
     # A cross-check with teeth, and free: the same ride measured two unrelated
     # ways. Energy integrated from pack voltage and current, scaled by the SOC
     # drop, gives the pack size the gauge is behaving like - and it can be held
@@ -200,7 +237,7 @@ def range_estimate(records):
     # 3.2 kWh against a reported 52 Ah (~5.7 kWh) nominal, which is the same
     # discrepancy the SOC-rescale note on the Health tab describes, reached from
     # a completely different direction.
-    out["implied_pack_wh"] = round(wh * 100.0 / best["soc_used_pct"])
+    out["implied_pack_wh"] = round(wh * factor)
     out["soc_floor_pct"] = min(all_socs) if all_socs else None
     # the honest framing: an upper bound on what the gauge implies, not a
     # distance anyone has ridden
