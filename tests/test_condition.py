@@ -726,3 +726,82 @@ def test_the_condition_block_follows_the_requested_units():
         report.analyze_folder(folder, temp_units="C")).split(
         "== Condition (pack) ==")[1]
     assert not re.search(r"\d+\s*F\b", cbody)
+
+
+# --- unpopulated sensor slots, and an older temperature dialect --------------
+
+def test_the_unused_sensor_sentinel_never_reaches_an_average():
+    # a real bms prints four live sensors and four empty slots:
+    #   Pack Temps : 27C 27C 27C 28C -100C -100C -100C -100C
+    # averaged unguarded that is -36 C for a pack sitting at 27
+    raw = [27.0, 27.0, 27.0, 28.0, -100.0, -100.0, -100.0, -100.0]
+    live = parsers.real_temps(raw)
+    assert live == [27.0, 27.0, 27.0, 28.0]
+    assert sum(live) / len(live) == pytest.approx(27.25)
+
+
+def test_the_floor_keeps_temperatures_a_bike_really_reaches():
+    # NOT "drop the negatives": this platform states a Min Discharge Temp of
+    # -25 C, and a bike left outside in winter genuinely reads below zero
+    assert parsers.real_temps([-25.0]) == [-25.0]
+    assert parsers.real_temps([-12.0, -11.0, -100.0]) == [-12.0, -11.0]
+    assert parsers.real_temps([None, 20.0]) == [20.0]
+
+
+def test_the_real_bms_block_reads_only_its_live_sensors():
+    """The sentinel is filtered before anything consumes the list.
+
+    Worth being precise about what this protects. The only consumer today
+    is `max(temps)`, and a -100 C sentinel cannot drag a maximum down - so
+    removing the filter would not change this assertion, and a test that
+    implied otherwise would be claiming a bug that is not reachable.
+
+    The filter is there for the consumer that has not been written yet: a
+    mean, a minimum, or a spread across modules, any of which the sentinel
+    would wreck. `real_temps` exists so that consumer has something to
+    reach for instead of an inline magic number it would have to notice.
+    """
+    block = ("*               BMS Data               *\n"
+             "  - Pack Temps                :    27C   27C   27C   28C "
+             "-100C -100C -100C -100C\n")
+    assert parsers.parse_bms(block)["pack_max_temp_c"] == 28
+    # what the filter is really for, at the level it acts
+    live = parsers.real_temps([27.0, 27.0, 27.0, 28.0] + [-100.0] * 4)
+    assert len(live) == 4
+    assert min(live) == 27 and sum(live) / len(live) == pytest.approx(27.25)
+
+
+OLD_TEMP_DIALECT = """
+ 00001     05/12/2023 09:14:02   Riding      SOC: 88%, Vpack:114.900V, MotAmps:  12, BattAmps:  10, MotTemp:  38C, BattTemp:  24C, PackSOC: 88%, MotRPM:1200, Odo: 6100km
+ 00002     05/12/2023 09:15:02   Riding      SOC: 86%, Vpack:114.100V, MotAmps:  20, BattAmps:  18, MotTemp:  41C, BattTemp:  25C, PackSOC: 86%, MotRPM:2400, Odo: 6104km
+"""
+
+
+def test_the_older_battemp_dialect_is_kept_but_not_read_as_a_peak():
+    # pack_temp_c is the HIGHEST module ("PackTemp: h 60C"), which is what makes
+    # it comparable with the BMS lifetime counter. This dialect prints one number
+    # and nothing establishes whether it is the max, a mean, or one sensor - and
+    # if it is a mean, using it as a peak reports the pack COOLER than it got,
+    # which is the unsafe direction for a tool that grades a hot pack.
+    recs = parsers.parse_ride_log(OLD_TEMP_DIALECT)
+    assert recs[0]["batt_temp_c"] == 24        # the reading is not thrown away
+    assert recs[0]["pack_temp_c"] is None      # but it is not a peak
+    assert condition.pack_peak(recs) is None
+
+
+def test_the_modern_dialect_is_untouched_by_that():
+    recs = parsers.parse_ride_log(
+        " 00001  06/24/2026 08:00:00  Riding  PackTemp: h 59C, l 57C, "
+        "PackSOC: 60%, Vpack:110.0V, BattAmps: 30, Odo: 6000km")
+    assert recs[0]["pack_temp_c"] == 59
+    assert recs[0]["batt_temp_c"] is None
+
+
+def test_the_report_names_the_dialect_rather_than_going_quiet(tmp_path):
+    s = sessions.Session(str(tmp_path),
+                         {"eventlogdump": OLD_TEMP_DIALECT,
+                          "stats": "  - Max Battery Temp : 60 C\n"}, "")
+    text = report.format_report(report.analyze_session(s))
+    assert "not one riding record in this capture carries a pack temperature" in text
+    assert "prints a single `BattTemp`" in text
+    assert "report the pack cooler than it got" in text

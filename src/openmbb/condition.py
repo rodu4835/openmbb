@@ -447,7 +447,7 @@ def pack_peak(ride_records):
     }
 
 
-def lifetime_peak(peak, stat_c, n_ride_records):
+def lifetime_peak(peak, stat_c, n_ride_records, batt_temp_dialect=False):
     """How the bike's lifetime temperature counter stands against this log.
 
     `case` is one of:
@@ -463,7 +463,8 @@ def lifetime_peak(peak, stat_c, n_ride_records):
     if peak is None:
         return {"stat_c": stat_c, "log_peak_c": None, "ts": None, "ties": 0,
                 "amb_low_c": None, "amb_high_c": None, "amb_samples": 0,
-                "case": "no_pack_temp", "graded": False}
+                "case": "no_pack_temp", "graded": False,
+                "batt_temp_dialect": batt_temp_dialect}
     log_peak = peak["pack_temp_c"]
     if log_peak > stat_c:
         case = "log_is_hotter"
@@ -510,10 +511,18 @@ def lifetime_peak_note(lp, temp_units="C"):
     stat = health.fmt_temp(lp["stat_c"], temp_units)
 
     if lp["case"] == "no_pack_temp":
-        return ("the pack's peak temperature: not one riding record in this "
+        base = ("the pack's peak temperature: not one riding record in this "
                 "capture carries a pack temperature this tool can read, so the "
                 "bike's lifetime counter (%s) is the only thermal figure here "
                 "and it cannot be placed in time." % stat)
+        if lp.get("batt_temp_dialect"):
+            # the reading exists; what it MEANS is what is missing
+            base += (" This firmware prints a single `BattTemp` rather than the "
+                     "high/low pair, and whether that is the hottest module, an "
+                     "average across them, or one sensor is not established - "
+                     "so it is not read as a peak. If it is an average, treating "
+                     "it as one would report the pack cooler than it got.")
+        return base
 
     log_peak = health.fmt_temp(lp["log_peak_c"], temp_units)
     amb = _amb_phrase(lp, temp_units)
@@ -579,7 +588,9 @@ def assess(event_log, max_batt_temp_c=None, temp_units="C"):
     # is the whole point of saying anything about it. Passing None simply omits
     # the sentence; nothing here is graded and no threshold sees any of it.
     peak = pack_peak(rides)
-    lifetime = lifetime_peak(peak, max_batt_temp_c, len(rides))
+    lifetime = lifetime_peak(
+        peak, max_batt_temp_c, len(rides),
+        batt_temp_dialect=any(r.get("batt_temp_c") is not None for r in rides))
     resets = stats_reset_events(event_log)
     faults = fault_history(event_log)
     sag = cell_sag(rides)

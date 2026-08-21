@@ -160,7 +160,13 @@ that ceiling is worth more than anything that polishes what sits behind it.
   parsed field of every parser across all three real captures plus the simulator before
   changing it: zero fields moved.
 
-- [ ] **A `-100 C` sentinel is live in the BMS pack-temperature output** —
+- [x] **A `-100 C` sentinel is live in the BMS pack-temperature output** *(named:
+  `parsers.real_temps` + `UNUSED_SENSOR_C`/`TEMP_FLOOR_C`, replacing an inline `> -50`.
+  Worth being precise - today's only consumer is `max(temps)`, which a low sentinel cannot
+  drag down, so the guard is currently INERT. It exists for the consumer that has not been
+  written yet - a mean, a minimum, a spread - and now that consumer has something to reach
+  for. The floor is -50, not 0: this platform states a Min Discharge Temp of -25 C and a
+  bike left outside genuinely reads below zero.)* —
   `Pack Temps : 27C 27C 27C 28C -100C -100C -100C -100C`. Any future consumer of that
   field has to exclude it.
 
@@ -172,8 +178,17 @@ that ceiling is worth more than anything that polishes what sits behind it.
   Zero's own decoder renders as `0x.. ???`. Worth one investigation to see whether any
   carry a known shape.
 
-- [ ] **`parse_ride_log` ignores the `BattTemp:` dialect**, so pack temperature silently
-  drops out of logs in that format. Needs ground truth on which firmware emits it.
+- [x] **`parse_ride_log` ignores the `BattTemp:` dialect** *(handled, and deliberately
+  NOT by merging it into `pack_temp_c`.)* It is parsed into its own `batt_temp_c`, so the
+  reading is not thrown away, and kept out of the peak. `pack_temp_c` means the HIGHEST
+  module - `PackTemp: h 60C, l 58C` gives 60 - which is what makes it comparable with the
+  BMS lifetime counter. This dialect prints a single number and no capture available
+  establishes whether that is the max, a mean across modules, or one sensor. If it is a
+  mean, reading it as a peak reports the pack COOLER than it got, and this tool grades a
+  hot pack - so the error would run in the unsafe direction. It is no longer silent: the
+  peak sentence names the dialect and says exactly what is unknown about it.
+  **Still wants ground truth** on which firmware emits it and what the number means; that
+  is a question for a second bike, not for more code.
 
 - [x] **`openmbb analyze` renders distance in km only** *(fixed: `--distance km|mi`, and
   `format_report(dist_units=...)`. Distances stay canonical in kilometres in the report

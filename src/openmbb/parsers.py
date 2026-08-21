@@ -169,7 +169,7 @@ def parse_bms(text):
     def g(*n):
         return find(kv, *n)
     # only the real-sensor pack temps, not the -100C unused-sensor placeholders
-    temps = [t for t in all_nums(g("pack", "temp")) if t > -50]
+    temps = real_temps(all_nums(g("pack", "temp")))
     cap_raw = first_val(g("capacity"), g("pack", "capacity"))
     caps = all_nums(cap_raw)
     # rev 41 gives the remaining charge its OWN label ("Pack Capacity Remaining
@@ -290,10 +290,52 @@ def _ride_field(line, pattern):
     return float(m.group(1)) if m else None
 
 
+# An unpopulated pack-temperature slot reads -100 C, and a real bike prints
+# several: `Pack Temps : 27C 27C 27C 28C -100C -100C -100C -100C` is four live
+# sensors and four empty slots. Averaging that list unguarded gives -36 C for a
+# pack sitting at 27 C.
+#
+# The floor is NOT simply "drop the negatives". This platform legitimately
+# reports temperatures below zero - the same bms block states a Min Discharge
+# Temp of -25 C - and a bike left outside in winter genuinely reads below zero.
+# -50 C sits below anything a Gen2 will survive being ridden at and well above
+# the sentinel.
+UNUSED_SENSOR_C = -100.0
+TEMP_FLOOR_C = -50.0
+
+
+def real_temps(values):
+    """Drop unpopulated sensor slots from a list of temperatures.
+
+    Reach for this rather than filtering by hand: the sentinel is not obviously
+    a sentinel when you meet it, and an unguarded mean reads as a pack that is
+    much colder than it is.
+    """
+    return [t for t in values if t is not None and t > TEMP_FLOOR_C]
+
+
 def _pack_temp(line):
     # F3: 'PackTemp: h 27C, l 26C' -> the high reading (27); also plain 'PackTemp: 24C'.
     # Pack temp is safety-relevant (60 C = BMS cutback); motor temp at 60 C is benign.
     m = re.search(r"pack\s*temp\s*:?\s*(?:h\s*)?(-?\d+)", line, re.I)
+    return float(m.group(1)) if m else None
+
+
+def _batt_temp(line):
+    """The older dialect's single `BattTemp: 24C`, or None.
+
+    Deliberately NOT merged into pack_temp_c. That field is read as the pack's
+    HIGHEST module - `PackTemp: h 60C, l 58C` gives 60 - which is what makes it
+    comparable with the BMS lifetime counter. This dialect prints one number and
+    no capture available establishes whether it is the hottest module, a mean
+    across them, or a single sensor.
+
+    If it is a mean, every peak derived from it reads COOLER than the pack
+    actually got. This project grades a hot pack, so that error runs in the
+    unsafe direction, and a reading that might be a mean must not be presented
+    as a maximum. Keeping it in its own field loses nothing and claims nothing.
+    """
+    m = re.search(r"batt\s*temp\s*:?\s*(-?\d+)", line, re.I)
     return float(m.group(1)) if m else None
 
 
@@ -330,6 +372,7 @@ def _mode_samples(text, mode_word, required):
         if any(rec.get(k) is None for k in required):
             continue
         rec["pack_temp_c"] = _pack_temp(line)
+        rec["batt_temp_c"] = _batt_temp(line)
         rec["curr_limit_pct"] = _curr_limit_pct(line)
         rec["motor_temp_c"] = _ride_field(line, r"mottemp|motor temp")
         ts = _TS_RE.search(line)
