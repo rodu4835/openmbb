@@ -164,6 +164,36 @@ that ceiling is worth more than anything that polishes what sits behind it.
 
 ## Shipped
 
+- [x] **Share-safe capture export** — `openmbb redact`, File → Export share-safe copy.
+  Verifies its own output and discards a bundle it cannot vouch for. *v0.23.0*
+- [x] **Cross-capture history** — a PACK OVER TIME table on Compare, and `Trend: charge
+  index` / `Trend: weakest cell deviation` on Charts. The two metrics here a firmware
+  reflash cannot move. *v0.23.0*
+- [x] **Weakest cell by identity** — `bms` names the cell and the tool was throwing the
+  attribution away; a cell that keeps returning is reported with the SOC each reading was
+  taken at. *v0.23.0*
+- [x] **The four commands captured on every pull and never read** — `inputs`, `outputs`,
+  `runtime`, `obd` → fault codes on Health and a Bike state block. *v0.23.0*
+- [x] **Session library and notes** — File → Session library…, ordered by when each
+  capture was *taken*. Notes live in the capture folder, so they travel with a copy.
+  *v0.23.0*
+- [x] **Charging habits** — time spent sitting at full with the charger attached, read
+  from the charger events because the samples stop when the charge does (13 h of 430 on
+  the reference bike). The taper is not reported, because at 10-minute whole-amp sampling
+  it is not there to report. *v0.23.0*
+- [x] **Condition report export** — File → Save condition report…, which withholds itself
+  rather than hand over a page carrying an identifier. *v0.23.0*
+- [x] **Measured consumption and range** — signed Wh/km, and a range from the deepest
+  discharge actually logged rather than the BMS capacity, with the extrapolation named.
+  *v0.23.0*
+- [x] **Used-bike inspection mode** — Tools → Inspect a bike…, six steps whose ticks are
+  read back from app state rather than from having been clicked. *v0.23.0*
+- [x] **Adversarial pre-push review, and its 15 fixes** — 7 lenses, 2 skeptics per
+  finding, 18 mutation-checked regression tests. Caught a library verdict that showed
+  "ok" for a pack graded "concern", a cache write that reversed every Charts timeline, an
+  inspection flow that read another bike's capture, and a `redact` that could delete the
+  capture it was pointed at. *v0.23.0*
+
 - [x] **Pack condition check and verdict** — Analyze → Condition, plus Condition and
   Verdict blocks in `openmbb analyze`. Grades only what needs no reference bike. *v0.22.0*
 - [x] **Clock offset measured, not configured** — the bike keeps three independently-set

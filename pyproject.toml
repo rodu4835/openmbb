@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openmbb"
-version = "0.22.2"
+version = "0.23.0"
 description = "Phase-gated serial console & diagnostics for Gen2 MBB-based Zero electric motorcycles (2013-2019: S/SR/DS/DSR/FX/FXS/FXE)"
 readme = "README.md"
 license = "MIT"
