@@ -2633,3 +2633,151 @@ def test_the_expensive_log_history_is_read_once_and_only_when_asked(app, monkeyp
     app.update()
     assert len(calls) == 2                            # asked twice...
     assert app._log_trend_cache is not None            # ...parsed once
+
+
+# --- the session library -----------------------------------------------------
+
+def _lib_walk(w, out=None):
+    out = [] if out is None else out
+    out.append(w)
+    for c in w.winfo_children():
+        _lib_walk(c, out)
+    return out
+
+
+def _lib_when(y, mo, d, h, mi):
+    """A local-clock epoch, computed rather than hardcoded — a literal would
+    read as a different date in another timezone."""
+    return time.mktime((y, mo, d, h, mi, 0, 0, 0, -1))
+
+
+def _lib_row(**over):
+    row = {"folder": "/x/2026-08-19_160449_675068_COM4",
+           "name": "2026-08-19_160449_675068_COM4",
+           "when": _lib_when(2026, 8, 19, 16, 4), "odo_km": 7924.0, "soc_pct": 96.0,
+           "cycles": 512, "note": "", "has_event_log": True, "is_sim": False,
+           "commands": 12, "verdict": None, "verdict_headline": None}
+    row.update(over)
+    return row
+
+
+def _open_library(app, monkeypatch, rows, verdict=None):
+    """Open the library over `rows` and return (window, treeview)."""
+    import tkinter as tk
+    from openmbb import gui as _gui
+    monkeypatch.setattr(_gui.library_mod, "scan", lambda root, **kw: rows)
+    monkeypatch.setattr(_gui.library_mod, "deep_verdict",
+                        (lambda folder, **kw: verdict) if not callable(verdict)
+                        else verdict)
+    before = set(app.winfo_children())
+    app._open_session_library()
+    app.update()
+    win = [w for w in app.winfo_children()
+           if isinstance(w, tk.Toplevel) and w not in before][-1]
+    tree = [w for w in _lib_walk(win) if w.winfo_class() == "Treeview"][0]
+    return win, tree
+
+
+def test_a_library_row_says_what_the_folder_name_never_could(app):
+    # `2026-08-19_160449_675068_COM4` tells an owner nothing about which capture
+    # it is; making that folder legible is the point of the whole screen.
+    # One test, one app: each `app` builds a fresh Tk root, and this file has
+    # enough of them already.
+    from openmbb import config
+    config.set_units("km")
+    when, odo, soc, verdict, note = app._lib_row_values(_lib_row(), None)
+    assert "2026-08-19" in when and odo == "7924 km" and soc == "96%" and note == ""
+
+    # the failure mode this column exists to avoid: a blank cell beside a bike
+    # you do not know, read as "fine"
+    assert verdict == "reading..."
+    # a capture taken without '+event log' can never reach a verdict, and says so
+    # rather than spinning forever
+    assert app._lib_row_values(_lib_row(has_event_log=False), None)[3] == "no log"
+    assert app._lib_row_values(_lib_row(), {"level": "watch",
+                                            "headline": "x"})[3] == "watch"
+
+    # a note is one row tall whatever was typed into it
+    multi = _lib_row(note="before the re-gear\nand after the reflash")
+    assert app._lib_row_values(multi, None)[4] == \
+        "before the re-gear and after the reflash"
+
+    # missing readings read as missing, not as zero
+    blank = app._lib_row_values(_lib_row(odo_km=None, soc_pct=None), None)
+    assert blank[1] == "-" and blank[2] == "-"
+
+    config.set_units("mi")
+    assert app._lib_row_values(_lib_row(), None)[1] == "4924 mi"
+    config.set_units("km")
+
+
+def test_the_library_lists_captures_and_fills_verdicts_in_afterwards(app,
+                                                                     monkeypatch):
+    rows = [_lib_row(), _lib_row(name="2026-07-10_124738_435640_COM4",
+                                 folder="/x/2026-07-10_124738_435640_COM4",
+                                 when=_lib_when(2026, 7, 10, 12, 47), odo_km=6809.0, soc_pct=45.0,
+                                 note="before the re-gear")]
+    win, tree = _open_library(app, monkeypatch, rows,
+                              {"level": "ok", "headline": "fine"})
+    vals = [tree.item(i, "values") for i in tree.get_children()]
+    assert len(vals) == 2
+    assert "2026-08-19" in vals[0][0] and "before the re-gear" in vals[1][4]
+    # verdicts arrive on idle ticks after the list is already built - the dialog
+    # itself opens without reading a single event log
+    for _ in range(8):
+        app.update()
+    assert [v[3] for v in
+            (tree.item(i, "values") for i in tree.get_children())] == ["ok", "ok"]
+    win.destroy()
+
+
+def test_a_verdict_that_will_not_read_says_so_rather_than_passing(app, monkeypatch):
+    # the whole column exists to avoid one thing: a cell beside a bike you do
+    # not know that reads as "fine" when nothing was actually measured
+    def _boom(folder, **_kw):
+        raise OSError("event log unreadable")
+
+    rows = [_lib_row(), _lib_row(name="b", folder="/x/b")]
+    win, tree = _open_library(app, monkeypatch, rows, _boom)
+    assert len(tree.get_children()) == 2          # the dialog opened regardless
+    for _ in range(8):
+        app.update()
+    levels = [tree.item(i, "values")[3] for i in tree.get_children()]
+    assert levels == ["unreadable", "unreadable"]
+    assert "ok" not in levels
+    win.destroy()
+
+
+def test_a_note_is_written_into_the_capture_folder(app, tmp_path, monkeypatch):
+    from openmbb import library
+    folder = tmp_path / "2026-08-19_160449_675068_COM4"
+    folder.mkdir()
+    win, tree = _open_library(app, monkeypatch, [_lib_row(folder=str(folder))])
+    ent = [w for w in _lib_walk(win) if w.winfo_class() == "TEntry"][0]
+    ent.delete(0, "end")
+    ent.insert(0, "after the 2026-06-13 reflash")
+    btn = [w for w in _lib_walk(win) if w.winfo_class() == "TButton"
+           and str(w.cget("text")) == "Save note"][0]
+    btn.invoke()
+    app.update()
+    # written where the capture is, not into a central file that a copied folder
+    # would leave behind
+    assert library.read_note(str(folder)) == "after the 2026-06-13 reflash"
+    assert tree.item(tree.get_children()[0], "values")[4] == \
+        "after the 2026-06-13 reflash"
+    win.destroy()
+
+
+def test_closing_the_library_stops_the_verdict_read(app, monkeypatch):
+    # reading verdicts costs a megabyte of event log each; a closed window must
+    # not keep chewing through them
+    calls = []
+    rows = [_lib_row(folder="/x/%d" % i, name="cap%d" % i) for i in range(5)]
+    win, _tree = _open_library(app, monkeypatch, rows,
+                               lambda folder, **kw: calls.append(folder) or None)
+    win.destroy()
+    app.update()
+    before = len(calls)
+    for _ in range(8):
+        app.update()
+    assert len(calls) == before

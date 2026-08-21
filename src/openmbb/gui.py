@@ -27,6 +27,7 @@ from . import compare as compare_mod
 from . import condition as condition_mod
 from . import redact as redact_mod
 from . import gearing as gearing_mod
+from . import library as library_mod
 from . import health as health_mod
 from . import parsers, rides, sessions
 from .safety import (READONLY_GUARDS, REV41_FXS_SETTINGS, WRITE_PANEL_CONTEXT,
@@ -473,7 +474,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             brow = ttk.Frame(inner)
             brow.pack()
             ttk.Button(brow, text="Analyze", width=20,
-                       command=self._open_recent_session
+                       command=self._open_session_library
                        ).pack(side="left", padx=10, ipady=8)
             ttk.Button(brow, text="Connect", width=20,
                        style=self.sty["accent"],
@@ -1019,7 +1020,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 ("cmd", "Home screen", self._show_landing),
                 ("sep",),
                 ("cmd", "Save health report…", self._save_health_report),
-                ("cmd", "Open recent session…", self._open_recent_session),
+                ("cmd", "Session library…", self._open_session_library),
                 ("cmd", "Open session folder", self._open_session_folder),
                 ("cmd", "Export share-safe copy…", self._export_share_safe),
                 ("sep",),
@@ -1337,7 +1338,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.clipboard_append(path)
             messagebox.showinfo(APP_NAME, "Copied to clipboard:\n%s" % path)
 
-        # -- E3: recent sessions ---------------------------------------------
+        # -- E3: the saved captures on disk -----------------------------------
         def _recent_sessions(self, limit=25):
             root = self._session_root()
             try:
@@ -1349,48 +1350,139 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       reverse=True)
             return root, dirs[:limit]
 
-        def _open_recent_session(self):
+        # -- the session library ---------------------------------------------
+        # Three captures already make a folder list a memory test: they are named
+        # `2026-07-10_124738_435640_COM4` and the only way to tell one from the
+        # next is to open it. This shows what is actually in each one.
+        _LIB_COLS = (("when", "When", 132, "w"),
+                     ("odo", "Odometer", 92, "e"),
+                     ("soc", "SOC", 56, "e"),
+                     ("verdict", "Verdict", 96, "w"),
+                     ("note", "Note", 220, "w"))
+
+        _LIB_TAGS = (("ok", "green"), ("watch", "warn"), ("concern", "danger"),
+                     ("unknown", "dim"), ("none", "dim"))
+
+        def _lib_row_values(self, row, verdict):
+            """One library row. `verdict` is None until it has been read."""
+            when = "?"
+            if row["when"]:
+                try:
+                    when = _dt.datetime.fromtimestamp(row["when"]).strftime(
+                        "%Y-%m-%d %H:%M")
+                except (ValueError, OSError):
+                    pass
+            unit = config.get_units()
+            odo = row.get("odo_km")
+            if odo is None:
+                odo = "-"
+            else:
+                odo = ("%.0f mi" % (odo * 0.621371)) if unit == "mi" else "%.0f km" % odo
+            soc = "-" if row.get("soc_pct") is None else "%.0f%%" % row["soc_pct"]
+            if verdict:
+                v = verdict["level"]
+            elif not row["has_event_log"]:
+                # a capture taken without '+event log' can never reach a verdict,
+                # and saying so beats a spinner that resolves to nothing
+                v = "no log"
+            elif row.get("read_failed"):
+                v = "unreadable"          # tried, failed - never a quiet pass
+            else:
+                v = "reading..."
+            note = row.get("note") or ""
+            return (when, odo, soc, v, note.replace("\n", " ")[:120])
+
+        def _open_session_library(self):
             from . import dialogs
-            root, recent = self._recent_sessions()
-            if not recent:
+            root = self._session_root()
+            rows = library_mod.scan(root)
+            if not rows:
                 messagebox.showinfo(APP_NAME, "No saved sessions yet in:\n%s" % root)
                 return
             surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
             win = tk.Toplevel(self)
-            win.title("%s — Recent sessions" % APP_NAME)
-            win.geometry("640x420")
+            win.title("%s \u2014 Session library" % APP_NAME)
+            win.geometry("860x480")
             win.configure(bg=surface)
             win.transient(self)
             outer = ttk.Frame(win, padding=(18, 16))
             outer.pack(fill="both", expand=True)
-            ttk.Label(outer, text="Recent sessions",
+            ttk.Label(outer, text="Session library",
                       style="Heading.TLabel").pack(anchor="w", pady=(0, 2))
             ttk.Label(outer, text=root, style="Muted.TLabel",
-                      wraplength=600).pack(anchor="w", pady=(0, 10))
+                      wraplength=800).pack(anchor="w", pady=(0, 10))
+
             body = ttk.Frame(outer)
             body.pack(fill="both", expand=True)
             sb = ttk.Scrollbar(body)
             sb.pack(side="right", fill="y")
-            lb = tk.Listbox(body, font=(self.sty["mono"], 10),
-                            bg=P["console"], fg=P["termfg"], relief="flat",
-                            selectbackground=P["sel"], selectforeground=P["fg"],
-                            highlightthickness=1, highlightbackground=P["panel"],
-                            highlightcolor=P["panel"], activestyle="none",
-                            yscrollcommand=sb.set)
-            for d in recent:
-                lb.insert("end", d)
-            lb.pack(side="left", fill="both", expand=True)
-            sb.config(command=lb.yview)
-            lb.selection_set(0)
+            tree = ttk.Treeview(body, show="headings", selectmode="browse",
+                                columns=[c[0] for c in self._LIB_COLS],
+                                yscrollcommand=sb.set)
+            for key, title, width, anchor in self._LIB_COLS:
+                tree.heading(key, text=title)
+                tree.column(key, width=width, anchor=anchor,
+                            stretch=(key == "note"))
+            # this dialog is built fresh each time, so it reads the live palette
+            # here rather than registering with _restyle_trees (which exists for
+            # the long-lived tab trees that outlive a theme switch)
+            for tag, colour in self._LIB_TAGS:
+                tree.tag_configure(tag, foreground=P[colour])
+            tree.pack(side="left", fill="both", expand=True)
+            sb.config(command=tree.yview)
+
+            for i, row in enumerate(rows):
+                tree.insert("", "end", iid=str(i),
+                            values=self._lib_row_values(row, None),
+                            tags=("none" if not row["has_event_log"] else "unknown",))
+            tree.selection_set("0")
+            tree.focus("0")
+
+            # -- the note for whatever is selected ---------------------------
+            nrow = ttk.Frame(outer)
+            nrow.pack(fill="x", pady=(12, 0))
+            ttk.Label(nrow, text="Note:").pack(side="left")
+            # bound to THIS window's interpreter rather than tkinter's default
+            # root: the app only ever has one root in normal use, but a variable
+            # that resolves against a different one reads back empty, and the
+            # symptom is a note the user typed and pressed save on going nowhere
+            note_var = tk.StringVar(master=win)
+            ent = ttk.Entry(nrow, textvariable=note_var)
+            ent.pack(side="left", fill="x", expand=True, padx=(8, 8))
+
+            def _sel_row():
+                sel = tree.selection()
+                return rows[int(sel[0])] if sel else None
+
+            def save_note(_e=None):
+                row = _sel_row()
+                if row is None:
+                    return
+                # the note is written into the capture folder, so a capture that
+                # is copied or handed to a maintainer takes its note with it
+                row["note"] = library_mod.write_note(row["folder"], note_var.get())
+                tree.set(tree.selection()[0], "note", row["note"][:120])
+
+            def on_select(_e=None):
+                row = _sel_row()
+                note_var.set(row["note"] if row else "")
+
+            tree.bind("<<TreeviewSelect>>", on_select)
+            ent.bind("<Return>", save_note)
+            ttk.Button(nrow, text="Save note", command=save_note).pack(side="left")
+            ttk.Label(outer, text="A note travels with the capture folder \u2014 "
+                                  "\"before the re-gear\", \"after the firmware "
+                                  "update\".",
+                      style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
+            on_select()
 
             def open_sel(_e=None):
-                sel = lb.curselection()
-                if not sel:
+                row = _sel_row()
+                if row is None:
                     return
-                folder = os.path.join(root, recent[sel[0]])
                 win.destroy()
                 try:
-                    self._analyze_set(sessions.load_session(folder))
+                    self._analyze_set(sessions.load_session(row["folder"]))
                     # _select_tab leaves the Home screen first if it's showing —
                     # a bare nb.select() would switch the HIDDEN notebook (owner:
                     # opening a recent session from Home did nothing visible).
@@ -1398,16 +1490,47 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 except Exception as e:
                     messagebox.showerror(APP_NAME, "Couldn't load session:\n%s" % e)
 
-            lb.bind("<Double-Button-1>", open_sel)
-            row = ttk.Frame(outer)
-            row.pack(fill="x", pady=(12, 0))
-            ttk.Button(row, text="Open in Analyze", style=self.sty["accent"],
+            tree.bind("<Double-Button-1>", open_sel)
+            brow = ttk.Frame(outer)
+            brow.pack(fill="x", pady=(12, 0))
+            ttk.Button(brow, text="Open in Analyze", style=self.sty["accent"],
                        command=open_sel).pack(side="right")
-            ttk.Button(row, text="Cancel", command=win.destroy).pack(
+            ttk.Button(brow, text="Close", command=win.destroy).pack(
                 side="right", padx=(0, 8))
             dialogs._dark_titlebar(win)
             dialogs._center(win, self)
-            lb.focus_set()
+            tree.focus_set()
+
+            # Verdicts cost a megabyte of event log each, so they are read one
+            # capture per idle tick AFTER the list is already on screen. The
+            # window is usable throughout, and a verdict already computed on an
+            # earlier visit comes back from the cache beside the capture.
+            self._lib_fill_verdicts(win, tree, rows, 0)
+
+        def _lib_fill_verdicts(self, win, tree, rows, i):
+            if i >= len(rows):
+                return
+            try:
+                if not win.winfo_exists():
+                    return                      # closed mid-read; nothing to fill
+            except tk.TclError:
+                return
+            row = rows[i]
+            if row["has_event_log"]:
+                try:
+                    v = library_mod.deep_verdict(row["folder"])
+                except Exception:
+                    v = None
+                # A capture whose event log will not read must not sit on
+                # "reading..." for ever, and must certainly not settle into a
+                # level: row["read_failed"] makes the cell say so out loud.
+                row["read_failed"] = v is None
+                try:
+                    tree.item(str(i), values=self._lib_row_values(row, v),
+                              tags=((v["level"],) if v else ("unknown",)))
+                except tk.TclError:
+                    return
+            win.after(1, lambda: self._lib_fill_verdicts(win, tree, rows, i + 1))
 
         # -- E5: forget saved passwords --------------------------------------
         def _forget_passwords(self):

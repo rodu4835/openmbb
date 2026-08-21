@@ -141,7 +141,8 @@ read falsely low), so OpenMBB flags any isolation reading taken while charging.
 ## Phase flow
 
 OpenMBB opens on a **Home screen**: a short blurb and two buttons — **Analyze**
-(open a saved session, no bike needed) and **Connect**. A **Simulator mode** toggle
+(opens the **Session library**: every saved capture with its date, odometer,
+SOC and pack verdict, no bike needed) and **Connect**. A **Simulator mode** toggle
 lives there too (its state shows in the status bar), so you can click through the
 whole tool with no bike or cable. The staged flow below unlocks one step at a time
 — you can stop after any stage, and closing the window never loses data.
@@ -192,6 +193,17 @@ whole tool with no bike or cable. The staged flow below unlocks one step at a ti
    settings → journal the intent *before it hits the wire* → send → read-back
    verify → journal the result. A changed row shows **↺ Reset** to restore the
    last-read value; a read-back mismatch points you to it.
+
+**File → Session library…** lists every capture in your save folder as a row you
+can actually read: when it was taken, the odometer, the SOC, and the pack
+verdict. Verdicts are read in the background after the list is on screen (each
+one re-reads about a megabyte of event log) and cached beside the capture, so a
+folder you have opened before comes back instantly. A capture pulled without
+`+event log` says **no log** rather than pretending to a verdict, and one whose
+log won't read says **unreadable** — neither ever renders as a pass. You can
+attach a **note** to any capture (`before the re-gear`, `after the firmware
+update`); it is written into the capture folder, so it travels with the capture
+when you copy or share it.
 
 The **Analyze** tab is always available (no bike needed) and interprets a saved
 session folder — or the current one:
@@ -308,7 +320,8 @@ src/openmbb/
   condition.py   pack condition from the ride/charge SAMPLES + the verdict + clocks
   rides.py       ride-log summaries + effective gearing from the odometer
   gearing.py     gearing math (teeth -> ratio -> speedo settings)
-  compare.py     settings diff + capacity / gearing trends across sessions
+  compare.py     settings diff + the pack's own figures across sessions
+  library.py     the saved captures on disk: rows, notes, cached verdicts
   charts.py      series extraction for the dependency-free plots
   config.py      saved preferences (units, theme, save location, logins)
   dialogs.py     themed message boxes, centred on the parent window

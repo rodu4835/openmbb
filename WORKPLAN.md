@@ -60,7 +60,9 @@ that ceiling is worth more than anything that polishes what sits behind it.
   verdict. *Why:* this is the scenario the condition check was built for, and it currently
   requires knowing which buttons to press in which order.
 
-- [ ] **Session library.** Replace "Load session folder…" with a browsable list: date,
+- [x] **Session library.** *(shipped: File -> Session library..., replacing the
+  recent-folders listbox. Verdicts are read in the background and cached beside the
+  capture)* Replace "Load session folder…" with a browsable list: date,
   odometer, verdict at a glance. *Why:* three captures already require remembering which
   timestamped folder is which.
 
@@ -79,7 +81,8 @@ that ceiling is worth more than anything that polishes what sits behind it.
 - [ ] **Update check.** A quiet "0.22.1 is available". *Why:* this project shipped four
   releases in three days and its own author ran five commits behind for weeks.
 
-- [ ] **Session notes.** Annotate a capture — "before the re-gear", "after the firmware
+- [x] **Session notes.** *(shipped: a note per capture, written into the capture folder so
+  it travels with a copy)* Annotate a capture — "before the re-gear", "after the firmware
   update". *Why:* the 2026-06-13 reflash would have been obvious immediately if the
   capture had carried a note saying so.
 
