@@ -241,6 +241,19 @@ session folder — or the current one:
   the Rides timestamps are shifted to match — and drops cell readings a firmware
   change left undecodable rather than believing them.
 
+  It reports **measured consumption and range**: Wh/km integrated from pack
+  voltage and current ride by ride (a median with the middle-80% band, because
+  the spread between a gentle ride and a hard one is real and large), and how far
+  a full charge goes — taken from the *deepest discharge actually logged*, scaled
+  to 0–100%, **not** from the BMS's nominal capacity. On the reference bike the
+  BMS reports 52 Ah while the gauge behaves like a pack barely two thirds that,
+  so a range built on the larger figure would be a third too long. The scaling is
+  the weak step and is labelled as such: an upper bound on what the gauge
+  implies, assuming a linear SOC scale and a reachable 0% — and the lowest SOC
+  the log has ever seen travels with it so you can see how far past the evidence
+  it reaches. That same ride, measured a second and unrelated way (energy against
+  SOC drop), implies a pack size worth holding against what the BMS claims.
+
   It also reports **charging habits** — a separate thing from the pack's health,
   and the only part of the whole report an owner can act on this afternoon. How
   often the bike is charged and at what SOC it is plugged in; how many charges
@@ -345,7 +358,7 @@ src/openmbb/
   health.py      health snapshot (typed metrics + ok/watch/alert status)
   condition.py   pack condition from the ride/charge SAMPLES + the verdict + clocks
                  + charging habits (time held at full, plugged-in-hot)
-  rides.py       ride-log summaries + effective gearing from the odometer
+  rides.py       ride-log summaries, measured Wh/km + range, effective gearing
   gearing.py     gearing math (teeth -> ratio -> speedo settings)
   compare.py     settings diff + the pack's own figures across sessions
   library.py     the saved captures on disk: rows, notes, cached verdicts

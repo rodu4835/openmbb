@@ -804,3 +804,100 @@ def test_compare_sessions_reports_the_trend_alongside_the_diff(tmp_path):
     # the sim's two identical captures name the same cell, which is exactly the
     # shape the identity check is meant to notice
     assert res["weakest_cell"] is None or res["weakest_cell"]["of_captures"] == 2
+
+
+# --- what it costs to ride, and how far a charge goes ------------------------
+
+def _ride_samples(n, soc_from=100.0, soc_to=20.0, km_total=40.0, amps=30.0,
+                  volts=110.0, start_min=0, odo_start=6000, amb=20):
+    """A ride of `n` samples a minute apart, losing SOC and gaining odometer
+    linearly. One minute is the real bike's riding-sample cadence, and the
+    odometer is whole kilometres exactly as the bike prints it."""
+    out = []
+    for i in range(n):
+        f = i / float(n - 1)
+        mins = start_min + i
+        out.append(
+            " 00001     06/24/2026 %02d:%02d:00   Riding                     "
+            "PackTemp: h 30C, l 28C, AmbTemp: %dC, PackSOC: %d%%, Vpack:%.3fV, "
+            "BattAmps: %3d, MotAmps: %3d, MotRPM:3000, Odo: %dkm, "
+            "MinCell: 3700mV"
+            % (8 + mins // 60, mins % 60, amb,
+               round(soc_from + (soc_to - soc_from) * f), volts, amps, amps,
+               round(odo_start + km_total * f)))
+    return out
+
+
+def test_consumption_is_integrated_from_pack_voltage_and_current():
+    # 110 V x 30 A for 40 minutes = 2200 Wh over 40 km = 55 Wh/km
+    recs = parsers.parse_ride_log("\n".join(
+        _ride_samples(41, km_total=40.0, amps=30.0, volts=110.0)))
+    c = rides.consumption(recs)
+    assert c is not None
+    assert c["wh_per_km"] == pytest.approx(55.0, rel=0.05)
+    assert c["rides"] == 1 and c["at_the_pack"] is True
+    # the temperatures it was measured across travel with it, because
+    # consumption climbs in the cold
+    assert c["amb_low_c"] == 20 and c["amb_high_c"] == 20
+
+
+def test_a_short_ride_is_left_out_rather_than_averaged_in():
+    # the odometer is whole kilometres, so a 2 km ride carries up to 50%
+    # quantisation error in its distance and none of it averages out
+    short = parsers.parse_ride_log("\n".join(_ride_samples(6, km_total=2.0)))
+    assert rides.consumption(short) is None
+    assert rides.range_estimate(short) is None
+
+
+def test_the_range_comes_from_the_deepest_ride_not_the_bms_capacity():
+    # the BMS on the reference bike reports 52 Ah while the gauge behaves like a
+    # pack barely two thirds that; a range built on the larger number is a third
+    # too long
+    recs = parsers.parse_ride_log("\n".join(
+        _ride_samples(41, soc_from=100.0, soc_to=20.0, km_total=40.0)))
+    r = rides.range_estimate(recs)
+    assert r["km"] == pytest.approx(40, abs=1)
+    assert r["soc_used_pct"] == pytest.approx(80, abs=1)
+    # 40 km for 80 SOC points -> 50 km for 100
+    assert r["full_charge_km"] == pytest.approx(50, rel=0.05)
+    # and the same ride measured a second, unrelated way: ~2200 Wh for 80 points
+    # implies a ~2750 Wh pack
+    assert r["implied_pack_wh"] == pytest.approx(2750, rel=0.05)
+
+
+def test_the_range_says_plainly_that_it_is_an_extrapolation():
+    recs = parsers.parse_ride_log("\n".join(
+        _ride_samples(41, soc_from=100.0, soc_to=20.0, km_total=40.0)))
+    r = rides.range_estimate(recs)
+    assert r["is_extrapolation"] is True and r["graded"] is False
+    # how far past the evidence it reaches is carried with it
+    assert r["soc_floor_pct"] == 20
+
+
+def test_the_deepest_ride_wins_not_the_longest():
+    # a long gentle ride says less about the pack's reach than a short deep one,
+    # and the extrapolation is over SOC
+    long_shallow = _ride_samples(41, soc_from=100.0, soc_to=80.0, km_total=60.0)
+    short_deep = _ride_samples(41, soc_from=95.0, soc_to=15.0, km_total=30.0,
+                               start_min=600, odo_start=6100)
+    recs = parsers.parse_ride_log("\n".join(long_shallow + short_deep))
+    r = rides.range_estimate(recs)
+    assert r["soc_used_pct"] == pytest.approx(80, abs=1)
+    assert r["km"] == pytest.approx(30, abs=1)
+
+
+def test_a_capture_with_no_riding_says_nothing_rather_than_zero():
+    assert rides.consumption([]) is None
+    assert rides.range_estimate([]) is None
+
+
+def test_the_report_prints_both_with_the_caveat_attached(tmp_path):
+    log = "\n".join(_ride_samples(41, soc_from=100.0, soc_to=20.0, km_total=40.0))
+    s = sessions.Session(str(tmp_path), {"eventlogdump": log}, "")
+    rep = report.analyze_session(s)
+    assert rep["consumption"]["wh_per_km"] == pytest.approx(55.0, rel=0.05)
+    text = report.format_report(rep)
+    assert "measured consumption" in text and "Wh/km at the pack" in text
+    assert "deepest discharge logged" in text
+    # the caveat has to travel with the number, or the range reads as a promise
+    assert "UPPER BOUND" in text and "0% is reachable" in text

@@ -33,11 +33,18 @@ def analyze_session(session, temp_units="C"):
             break
 
     ride_summary = None
+    consumption = range_est = None
     truncated = False
     if ride_text:
         records = parsers.parse_ride_log(ride_text)
         if records:
             ride_summary = rides.summarize_rides(records)
+            # what it costs to ride this bike, and how far a charge goes -
+            # measured from the samples rather than taken from the BMS's
+            # nominal capacity, which on this platform is not what the gauge
+            # behaves like
+            consumption = rides.consumption(records)
+            range_est = rides.range_estimate(records)
             # A capture that ended early is missing entries, so its totals are a
             # floor, not a measurement. Say so rather than let them read as whole.
             # Re-derive that from the stored entry counts instead of trusting the
@@ -62,6 +69,8 @@ def analyze_session(session, temp_units="C"):
         "counts": _count_by_status(metrics),
         "health": metrics,
         "rides": ride_summary,
+        "consumption": consumption,
+        "range": range_est,
         "ride_source": ride_source,
         "ride_log_truncated": truncated,
         # what the ride/charge samples say about the PACK, as distinct from the
@@ -191,6 +200,8 @@ def format_report(report, with_path=True):
                 # above a hard-coded C here read as one capture in two scales
                 out.append("  %s: %s"
                            % (label, health.fmt_temp(t[key], report["units"])))
+        out += _consumption_lines(report.get("consumption") or {},
+                                  report.get("range") or {}, report["units"])
     else:
         out += ["", "No ride telemetry in this session "
                     "(pull the event log from the bike to add it)."]
@@ -214,6 +225,41 @@ def _verdict_lines(v):
         out.append("    [%-7s] %-24s %s" % (c["level"], c["name"], c["detail"]))
     for c in v["caveats"]:
         out.append("    note: %s" % c)
+    return out
+
+
+def _consumption_lines(c, r, units="C"):
+    """What it costs to ride, and how far a charge goes.
+
+    Both are measured. Neither is graded: there is no reference bike to say
+    whether 93 Wh/km is good for a 2017 FXS, and the range is an extrapolation
+    whose weak step is named rather than smoothed over.
+    """
+    out = []
+    if c:
+        out.append("  measured consumption: %g Wh/km at the pack "
+                   "(middle 80%% of rides: %g-%g)"
+                   % (c["wh_per_km"], c["wh_per_km_low"], c["wh_per_km_high"]))
+        if c.get("amb_low_c") is not None:
+            out.append("    over %d rides / %g km, at %s to %s ambient - "
+                       "consumption climbs in the cold"
+                       % (c["rides"], c["km"],
+                          health.fmt_temp(c["amb_low_c"], units),
+                          health.fmt_temp(c["amb_high_c"], units)))
+    if r:
+        out.append("  deepest discharge logged: %g km from %g%% to %g%% SOC"
+                   % (r["km"], r["from_soc_pct"], r["to_soc_pct"]))
+        out.append("    scaled to a full charge that is about %g km"
+                   % r["full_charge_km"])
+        if r.get("is_extrapolation"):
+            out.append("    an UPPER BOUND on what the gauge implies, not a "
+                       "distance anyone has ridden: it assumes the SOC scale is")
+            out.append("    linear and that 0%% is reachable, and the lowest "
+                       "this log has ever seen is %g%%" % r["soc_floor_pct"])
+        if r.get("implied_pack_wh"):
+            out.append("    that ride implies a pack of about %d Wh, which is "
+                       "worth holding against what the BMS reports"
+                       % r["implied_pack_wh"])
     return out
 
 

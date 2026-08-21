@@ -74,7 +74,10 @@ that ceiling is worth more than anything that polishes what sits behind it.
   calendar aging), charge taper, and charger consistency over time. *Why:* real battery
   longevity advice from data already on disk.
 
-- [ ] **Range estimate, honestly done.** From measured Wh/km and the capacity index: "at
+- [x] **Range estimate, honestly done.** *(shipped: rides.consumption +
+  rides.range_estimate, on the Condition tab and in the report. Built on the deepest ride
+  actually logged rather than the BMS capacity, and it names the extrapolation instead of
+  smoothing it over)* From measured Wh/km and the capacity index: "at
   your recent consumption, a full charge is about X km", with its own error bars and the
   temperature caveat. *Why:* unlike the dash's guess, this one can say what it rests on.
 

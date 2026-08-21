@@ -4440,6 +4440,42 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                      "(an index, not the pack's capacity)"
                      % (cap["median_ah"], cap["window_v"][0], cap["window_v"][1],
                         cap["sessions"]), "measured")
+            # what it costs to ride, and how far a charge goes. Measured from
+            # the samples, NOT from the BMS's nominal capacity - which on this
+            # platform is not what the gauge behaves like, and a range built on
+            # it would be a third too long.
+            recs = parsers.parse_ride_log(text)
+            cons = rides.consumption(recs) if recs else None
+            rng = rides.range_estimate(recs) if recs else None
+            unit = "mi" if config.get_units() == "mi" else "km"
+            dfac = 0.621371 if unit == "mi" else 1.0
+            if cons:
+                _row("Consumption",
+                     "%g Wh/%s at the pack · middle 80%% of rides %g–%g · "
+                     "measured over %d rides at %s to %s ambient"
+                     % (round(cons["wh_per_km"] / dfac, 1), unit,
+                        round(cons["wh_per_km_low"] / dfac, 1),
+                        round(cons["wh_per_km_high"] / dfac, 1), cons["rides"],
+                        _t(cons["amb_low_c"]), _t(cons["amb_high_c"])), "measured")
+            if rng:
+                _row("Range on a full charge",
+                     "about %g %s · scaled from the deepest ride logged "
+                     "(%g %s, %g%% → %g%% SOC)"
+                     % (round(rng["full_charge_km"] * dfac, 1), unit,
+                        round(rng["km"] * dfac, 1), unit, rng["from_soc_pct"],
+                        rng["to_soc_pct"]),
+                     "attention" if rng.get("is_extrapolation") else "measured")
+                if rng.get("is_extrapolation"):
+                    _row("└ what that rests on",
+                         "an upper bound on what the GAUGE implies, not a distance "
+                         "anyone has ridden: it assumes the SOC scale is linear and "
+                         "that 0%% is reachable, and the lowest this log has seen is "
+                         "%g%%" % rng["soc_floor_pct"], "unknown")
+                if rng.get("implied_pack_wh"):
+                    _row("└ pack size that implies",
+                         "about %d Wh, reached from energy and SOC together — "
+                         "worth holding against what the BMS reports"
+                         % rng["implied_pack_wh"], "measured")
             floor = a["cell_floor"]
             if floor and (not a["cell_sag"]
                           or floor["source"] != "riding samples"):
