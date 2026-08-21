@@ -32,6 +32,10 @@ In scope — examples of what's worth reporting:
 - A path that could **brick a component or leave the bike in an unsafe state**
   more easily than the documented, confirmed flow.
 - A **PII leak** (VIN, serials, passwords) into logs, saved reports, or the repo.
+- **Any outbound network request.** OpenMBB is built to make none — no update
+  check, no telemetry, no crash reporting. A build that contacts a host on its
+  own, for any reason however benign, is a finding, and so is any change that
+  links a network client into the binary.
 
 Out of scope:
 

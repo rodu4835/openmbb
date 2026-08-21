@@ -21,7 +21,8 @@ def open_in_file_manager(path):
     else:
         subprocess.Popen(["xdg-open", path])
 
-from . import APP_NAME, __version__
+from . import APP_NAME, __release_date__, __version__
+from . import version as version_mod
 from . import charts as charts_mod
 from . import compare as compare_mod
 from . import condition as condition_mod
@@ -490,6 +491,23 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                        style=self.sty["accent"],
                        command=self._landing_connect
                        ).pack(side="left", padx=10, ipady=8)
+
+            # How old this copy is - a local, checkable fact - shown only once it
+            # is worth mentioning. Never "an update is available": this program
+            # makes no network requests and cannot know that. Silent for every
+            # uncertain case, including a host clock that disagrees with the
+            # build date. See version.py for why each clause is there.
+            notice = version_mod.stale_notice(__version__, __release_date__)
+            if notice:
+                nf = ttk.Frame(inner)
+                nf.pack(pady=(26, 0))
+                ttk.Label(nf, text=notice, style="Muted.TLabel",
+                          justify="center", wraplength=560).pack()
+                link = ttk.Label(nf, text="Open the releases page",
+                                 style="Muted.TLabel", cursor="hand2")
+                link.pack(pady=(4, 0))
+                link.configure(foreground=P["accent"])
+                link.bind("<Button-1>", lambda _e: self._open_releases())
 
             foot = ttk.Frame(lf)
             foot.place(relx=0.5, rely=0.9, anchor="center")
@@ -1101,6 +1119,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 ("cmd", "Wiring diagram", self._show_wiring),
                 ("cmd", "Safety notes", self._show_safety),
                 ("sep",),
+                ("cmd", "Releases & changelog\u2026   (you have v%s)" % __version__,
+                 self._open_releases),
                 ("cmd", "View project on GitHub", self._open_repo),
                 ("cmd", "Report an issue…", self._report_issue),
                 ("cmd", "About", self._show_about),
@@ -1119,6 +1139,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _open_repo(self):
             self._open_url("https://github.com/rodu4835/openmbb")
+
+        def _open_releases(self):
+            """Hand the releases page to the user's browser.
+
+            The browser makes the request, not OpenMBB - the same arrangement
+            "View project on GitHub" has had for the project's whole life. This
+            program has no HTTP client and learns nothing about the result.
+            """
+            self._open_url("https://github.com/rodu4835/openmbb/releases")
 
         def _report_issue(self):
             try:
@@ -2105,12 +2134,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 "Verified on the 2017 FXS (MBB rev 41).\n\n"
                 "  Theme backend : %s\n"
                 "  Python        : %s\n"
+                "  Released      : %s\n"
+                # where a suspicious user looks, and the one line here they can
+                # check for themselves
+                "  Network       : none \u2014 OpenMBB makes no requests\n"
                 "  Repo          : github.com/rodu4835/openmbb\n"
                 "  License       : MIT (no warranty)\n\n"
                 "Personal diagnostic tool for your own vehicle. Not affiliated\n"
                 "with Zero Motorcycles."
                 % (APP_NAME, __version__, self.sty.get("backend"),
-                   sys.version.split()[0]))
+                   sys.version.split()[0],
+                   version_mod.describe_release(__release_date__)))
 
         def _show_about(self):
             self._bike_about_window("About")

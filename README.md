@@ -31,6 +31,30 @@ what's adjustable*
 gated behind login + a master unlock + a per-write confirm. The gearing
 calculator is just one of the optional analysis helpers, not the focus.
 
+## Privacy
+
+OpenMBB makes **no network requests**. There is no update check, no telemetry,
+no analytics, no crash reporting, no account and no licence check — it has no
+HTTP client and does not load Python's networking modules at all. Tests in the
+suite fail the build if that stops being true.
+
+Everything it reads from your motorcycle — VIN, serial numbers, error logs,
+settings, captures, the verdict — is written to your own disk and goes nowhere
+unless you send it yourself. That is what **File → Export share-safe copy…** is
+for, and it re-scans every file it writes before handing it to you.
+
+The only outbound thing OpenMBB can do is **hand a URL to your web browser**,
+and only when you click a Help-menu item that says so (*Releases & changelog…*,
+*View project on GitHub*, *Report an issue…*). Your browser then makes that
+request the way it makes any other — OpenMBB is not involved and never learns
+the result.
+
+**The trade, stated plainly:** nothing will ever tell you that a new version is
+out. Each build knows the date it was released, so once a copy is more than 45
+days old the home screen says how old it is and points at the releases page —
+but *you* have to look. If you would rather be told, GitHub will do it without
+OpenMBB touching the network: on the repo page, **Watch → Custom → Releases**.
+
 ## Compatibility
 
 OpenMBB talks to the **MBB (Main Bike Board) console** at 38400 baud with the
@@ -408,7 +432,7 @@ top status strip and is clickable.
 ## Analyzing a session without the bike
 
 A session folder is self-contained, so the analysis runs anywhere — no
-motorcycle, no serial port, no GUI. Useful for looking at a capture on another
+motorcycle, no serial port, no GUI, no network. Useful for looking at a capture on another
 machine, diffing two of your own, or letting someone else look at yours.
 
 ```bash

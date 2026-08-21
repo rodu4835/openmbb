@@ -91,19 +91,38 @@ that ceiling is worth more than anything that polishes what sits behind it.
   seller, or keep. *Why:* a
   verdict you cannot show anyone is half a verdict.
 
-- [ ] **Update check.** A quiet "0.22.1 is available". *Why:* this project shipped four
-  releases in three days and its own author ran five commits behind for weeks.
-  **Held for a decision, not for effort.** This is the only item in Tiers 1-2 that makes
-  the program talk to the network, and the shape is an owner's call rather than an
-  implementation detail: opt-in or on by default, which endpoint, and what (if anything)
-  the request reveals about who is asking. The tool's users are people plugging a laptop
-  into a bike's diagnostic port, and several of them care about exactly that. Everything
-  else here can be built and judged afterwards; this one should be decided first.
+- [x] **Update check.** *(decided, and DELIBERATELY NOT BUILT AS WRITTEN.)* The item
+  asked for a quiet "0.23.1 is available". A program that opens no socket cannot say that
+  sentence, and the machinery to let it say one was judged to cost more than the sentence
+  is worth. What shipped instead is the answerable half of the question.
 
-- [x] **Session notes.** *(shipped: a note per capture, written into the capture folder so
-  it travels with a copy)* Annotate a capture — "before the re-gear", "after the firmware
-  update". *Why:* the 2026-06-13 reflash would have been obvious immediately if the
-  capture had carried a note saying so.
+  **The finding that decided it:** the application has never made a network request. No
+  HTTP client, no sockets - the only outbound thing is `webbrowser.open()`, at call sites
+  a user clicks. That posture was strong, real, and *nowhere written down*: a grep of
+  README and SECURITY for a network promise returned nothing. (The README's "offline" is
+  about not needing the bike - the section it sits in is headed "Analyzing a session
+  without the bike" - so it was never the promise it looked like.)
+
+  So the choice was not "add a feature" but "spend the strongest sentence this project
+  could write". An opt-in check is default-off, which never reaches the person the item
+  was written about, and it permanently downgrades *"OpenMBB makes no network requests"*
+  to *"...except one you turned on"*. A promise enforced by `grep` and a test outranks one
+  enforced by a toggle, for a tool whose users plug laptops into bikes they may be buying.
+
+  **Shipped:** `version.py` and `__release_date__`, so a build knows its own age. Past 45
+  days the home screen says how old it is, admits outright that OpenMBB cannot tell it
+  what is newer, and offers a link. Every uncertain case - a clock behind the release
+  date, a clock a decade out, a missing stamp - produces silence rather than a guess.
+  `Network: none` in About, `--version` in the CLI, a `## Privacy` section in the README,
+  an outbound request made an in-scope finding in SECURITY.md, and `tests/test_no_network.py`
+  which fails the build if a network module is ever imported or a URL appears that is not
+  on its allow-list.
+
+  **What it does not do, stated honestly:** it catches slow drift - the case the item
+  leads with, an author weeks behind - and it does *not* catch the fast-burst case, where
+  four releases land in three days and a two-day-old copy is not stale. For that, the
+  README points at GitHub's own Watch -> Custom -> Releases, which notifies in minutes and
+  costs OpenMBB nothing.
 
 ## Tier 3 — more from the data we already read
 

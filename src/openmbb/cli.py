@@ -11,6 +11,8 @@ import argparse
 import os
 import sys
 
+from . import __release_date__, __version__
+
 
 def selftest():
     import os
@@ -284,7 +286,13 @@ def main():
            for a in sys.argv[1:]):
         _ensure_console()
     ap = argparse.ArgumentParser(
-        description="OpenMBB — serial console for Gen2 MBB-based Zero motorcycles")
+        description="OpenMBB — serial console for Gen2 MBB-based Zero motorcycles",
+        epilog="OpenMBB makes no network requests of any kind. Releases and "
+               "changelog: https://github.com/rodu4835/openmbb/releases")
+    # one parseable line, ISO date, because scripts read it
+    ap.add_argument("--version", action="version",
+                    version="openmbb %s (released %s)"
+                            % (__version__, __release_date__))
     ap.add_argument("--sim", action="store_true", help="simulator mode (no hardware)")
     ap.add_argument("--port", help="preselect a COM port")
     ap.add_argument("--logdir", help="base dir for session logs (overrides saved config)")
