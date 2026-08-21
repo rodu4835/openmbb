@@ -8,6 +8,7 @@
 """
 
 import argparse
+import os
 import sys
 
 
@@ -231,6 +232,47 @@ def cmd_sessions(args):
     return 0
 
 
+def cmd_redact(args):
+    """Write a copy of a session folder with the identifiers stripped.
+
+    The export verifies its own output: if any identifier survives, it deletes
+    what it wrote and fails, rather than handing over a bundle that only looks
+    redacted.
+    """
+    import json as _json
+    from . import redact
+
+    src = os.path.abspath(args.folder)
+    if not os.path.isdir(src):
+        print("No such session folder: %s" % args.folder, file=sys.stderr)
+        return 2
+    dst = os.path.abspath(args.out) if args.out else src.rstrip("\\/") + "-shared"
+    try:
+        rep = redact.redact_session(src, dst, overwrite=args.overwrite)
+    except FileExistsError:
+        print("%s already exists — pass --overwrite to replace it" % dst,
+              file=sys.stderr)
+        return 2
+    except RuntimeError as e:                      # verification failed
+        print("%s" % e, file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(_json.dumps(rep, indent=2))
+        return 0
+    print("Share-safe copy written to %s" % rep["output"])
+    print("  %d files, %d identifier(s) replaced%s"
+          % (rep["files"], rep["identifiers_replaced"],
+             (" (" + ", ".join("%s x%d" % (k, v)
+                               for k, v in rep["by_kind"].items()) + ")")
+             if rep["by_kind"] else ""))
+    if rep["skipped"]:
+        print("  skipped (unreadable): %s" % ", ".join(rep["skipped"]))
+    print("  every output file was re-scanned and carries no VIN or serial.")
+    print("  Check it yourself before sending it anywhere.")
+    return 0
+
+
 def main():
     # attach a console for anything that prints before argparse needs it
     if any(a in ("--selftest", "--smoketest", "--help", "-h") or a in HEADLESS_COMMANDS
@@ -256,6 +298,15 @@ def main():
     p_an.add_argument("--fail-on-alert", action="store_true",
                       help="exit 1 if any metric is at alert, for scripts")
     p_an.set_defaults(func=cmd_analyze)
+
+    p_rd = sub.add_parser("redact",
+                          help="write a share-safe copy of a session folder")
+    p_rd.add_argument("folder", help="path to a session folder")
+    p_rd.add_argument("--out", help="destination (default: <folder>-shared)")
+    p_rd.add_argument("--overwrite", action="store_true",
+                      help="replace the destination if it exists")
+    p_rd.add_argument("--json", action="store_true", help="emit the report as JSON")
+    p_rd.set_defaults(func=cmd_redact)
 
     p_se = sub.add_parser("sessions", help="list saved session folders")
     p_se.add_argument("--logdir", help="base dir to list (defaults to the saved config)")

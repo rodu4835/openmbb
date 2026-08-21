@@ -25,6 +25,7 @@ from . import APP_NAME, __version__
 from . import charts as charts_mod
 from . import compare as compare_mod
 from . import condition as condition_mod
+from . import redact as redact_mod
 from . import gearing as gearing_mod
 from . import health as health_mod
 from . import parsers, rides, sessions
@@ -1020,6 +1021,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 ("cmd", "Save health report…", self._save_health_report),
                 ("cmd", "Open recent session…", self._open_recent_session),
                 ("cmd", "Open session folder", self._open_session_folder),
+                ("cmd", "Export share-safe copy…", self._export_share_safe),
                 ("sep",),
                 ("cmd", "Exit", self._on_close),
             ]
@@ -1272,6 +1274,51 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 msg += ("\n\nThe current session stays where it started — this "
                         "takes effect on your next Connect.")
             messagebox.showinfo(APP_NAME, msg)
+
+        def _export_share_safe(self):
+            """Write a copy of a session folder with the identifiers stripped.
+
+            A capture is the most useful thing an owner can hand to somebody else
+            and the most dangerous — it carries the VIN, the serials and every
+            byte that crossed the wire. The export re-scans everything it writes
+            and refuses to produce a bundle it cannot vouch for.
+            """
+            from tkinter import filedialog
+            base = config.get_log_dir()
+            src = filedialog.askdirectory(
+                title="Choose the session folder to share",
+                initialdir=os.path.join(base, "openmbb-sessions")
+                if os.path.isdir(os.path.join(base, "openmbb-sessions")) else base)
+            if not src:
+                return
+            dst = os.path.normpath(src.rstrip("\\/")) + "-shared"
+            if os.path.exists(dst) and not messagebox.askokcancel(
+                    APP_NAME, "%s already exists.\n\nReplace it?" % dst):
+                return
+            try:
+                rep = redact_mod.redact_session(src, dst, overwrite=True)
+            except RuntimeError as e:
+                # verification failed: the partial bundle has already been removed
+                messagebox.showerror(
+                    APP_NAME, "Nothing was written.\n\n%s\n\nPlease report this — "
+                    "an identifier the exporter does not recognise means the "
+                    "redaction rules need widening before anything is shared." % e)
+                return
+            except OSError as e:
+                messagebox.showerror(APP_NAME, "Could not write the copy:\n\n%s" % e)
+                return
+            kinds = ", ".join("%s x%d" % (k, v) for k, v in rep["by_kind"].items())
+            messagebox.showinfo(
+                APP_NAME,
+                "Share-safe copy written to:\n%s\n\n%d files, %d identifier(s) "
+                "replaced%s.\n\nEvery file was re-scanned and carries no VIN or "
+                "serial number. Have a look yourself before sending it anywhere."
+                % (dst, rep["files"], rep["identifiers_replaced"],
+                   " (" + kinds + ")" if kinds else ""))
+            try:
+                open_in_file_manager(dst)
+            except Exception:
+                pass                      # the path is in the dialog either way
 
         def _open_session_folder(self):
             target = self.logger.dir if self.logger else self._session_root()
