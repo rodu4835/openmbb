@@ -26,7 +26,9 @@ def analyze_session(session, temp_units="C"):
     ride_text, ride_source = "", None
     for cmd in RIDE_LOG_COMMANDS:
         text = session.cmd(cmd) or ""
-        if text.strip():
+        # a console refusal ("'dumplogs' is an invalid command") is saved like
+        # any other reply and is not empty, so `strip()` alone accepts it
+        if text.strip() and not parsers.is_console_refusal(text):
             ride_text, ride_source = text, cmd
             break
 
@@ -473,6 +475,10 @@ def _condition_lines(c, units="C"):
             # a controller that resets itself is worth seeing, but a reset is not
             # a fault and must not date one
             out.append("    %s - the dates above are the onsets" % detail)
+        if f["name"].lower().startswith("module connect"):
+            assoc = condition.module_failure_note(c.get("module_failures"))
+            if assoc:
+                out.append("    %s" % assoc)
     for ev in c.get("stats_resets") or []:
         out.append("  ! statistics were RESET at %s - every 'lifetime' figure "
                    "above dates from then, not from" % (ev["when"] or "an unlogged time"))

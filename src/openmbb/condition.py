@@ -591,6 +591,9 @@ def assess(event_log, max_batt_temp_c=None, temp_units="C"):
     lifetime = lifetime_peak(
         peak, max_batt_temp_c, len(rides),
         batt_temp_dialect=any(r.get("batt_temp_c") is not None for r in rides))
+    # what else was in the log around the module-connect failures. An
+    # association, never a cause - the firmware does not name one.
+    module_ctx = module_failure_context(event_log)
     resets = stats_reset_events(event_log)
     faults = fault_history(event_log)
     sag = cell_sag(rides)
@@ -646,6 +649,7 @@ def assess(event_log, max_batt_temp_c=None, temp_units="C"):
         "cell_floor": floor,
         "derate": der,
         "charge_capacity": cap,
+        "module_failures": module_ctx,
         "pack_peak": peak,
         "lifetime_peak": lifetime,
         # how the bike is CHARGED, as against what the pack did while charging.
@@ -887,6 +891,70 @@ _FAULT_CLASSES = (
     ("Cell voltage difference", r"max allowed voltage difference"),
     ("ABS errors", r"abs .{0,20}error"),
 )
+
+
+# How close a thermal disable has to sit to a module-connect failure before the
+# two are worth mentioning in the same breath. Sixty seconds is generous enough
+# to survive a clock that ticks in whole seconds and tight enough that unrelated
+# events do not pair up by accident.
+MODULE_FAILURE_WINDOW_S = 60.0
+
+_MODULE_FAIL_RE = re.compile(r"cannot\s+connect\s+module", re.I)
+_HIGH_TEMP_DISABLE_RE = re.compile(r"disable.*high\s*temp|high\s*temp.*disable", re.I)
+
+
+def module_failure_context(event_log):
+    """How many module-connect failures sat beside a thermal disable, or None.
+
+    An ASSOCIATION and nothing more. The firmware writes "Cannot Connect Module
+    00" without naming a reason, so this counts what else was in the log at the
+    time and says so - it never states a cause, and the wording it feeds must
+    not either. On the reference bike the association is total (18/18, 18/18,
+    54/54 across three captures), which is striking and still not a mechanism.
+
+    Returns None when the capture has no module failures, and omits the
+    comparison entirely when it has no thermal disables to compare against - a
+    bike that never logged one says nothing either way, and "0 of 54" would read
+    as evidence of absence.
+    """
+    rows = [l for l in (event_log or "").splitlines() if _LOG_ENTRY_RE.match(l)]
+    fails, hots = [], []
+    for line in rows:
+        when = _ts_of(line)
+        if _MODULE_FAIL_RE.search(line):
+            fails.append(when)
+        elif _HIGH_TEMP_DISABLE_RE.search(line):
+            if when:
+                hots.append(_dt.datetime.strptime(when, _TS_FMT))
+    if not fails:
+        return None
+    if not hots:
+        return {"total": len(fails), "near_high_temp": None,
+                "window_s": MODULE_FAILURE_WINDOW_S}
+    near = 0
+    for when in fails:
+        if not when:
+            continue
+        try:
+            t = _dt.datetime.strptime(when, _TS_FMT)
+        except ValueError:
+            continue
+        if any(abs((t - h).total_seconds()) <= MODULE_FAILURE_WINDOW_S
+               for h in hots):
+            near += 1
+    return {"total": len(fails), "near_high_temp": near,
+            "window_s": MODULE_FAILURE_WINDOW_S}
+
+
+def module_failure_note(ctx):
+    """The association line, or "" when there is nothing to compare against."""
+    if not ctx or ctx.get("near_high_temp") is None or not ctx["near_high_temp"]:
+        return ""
+    n, total = ctx["near_high_temp"], ctx["total"]
+    how_many = "all %d" % total if n == total else "%d of %d" % (n, total)
+    return ("%s fell within %d s of a high-temperature disable in this capture "
+            "\u2014 association only; the log does not state a cause"
+            % (how_many, int(ctx["window_s"])))
 
 
 def fault_span(f):

@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from openmbb import condition, parsers, report, rides, sessions
+from openmbb import condition, library, parsers, report, rides, sessions
 
 # The real reset sequence: the bootloader line carries a clock, the reset entry
 # logged immediately after it does not (the console had just rebooted).
@@ -880,3 +880,127 @@ def test_the_report_says_the_dates_are_onsets_when_anything_cleared(tmp_path):
     text = report.format_report(report.analyze_session(s))
     assert "2 frames: 1 onset, 1 clearing" in text
     assert "the dates above are the onsets" in text
+
+
+# --- three fields that are not readings, and a reply that is not a log -------
+
+MODULE_FAIL_LINE = (
+    " 00063     06/24/2026 22:20:27   ERROR: Cannot Connect Module 00! "
+    "modv=0mV, maxv=0mV, minv=4294967295mV, raw0:101372mV, raw1:0mV, "
+    "cur0:0A, cur1:0A, diff_allowed:1575mV")
+
+REFUSAL = (" Sorry, 'dumplogs' is an invalid command. "
+           'Type "help" for a list of commands')
+
+
+def test_the_aggregate_triple_is_refused_on_arithmetic_not_on_a_constant():
+    # maxv (0) below minv (4294967295) cannot happen over a non-empty set, and
+    # 4294967295 mV is not 4,294,967 volts. That is the whole argument - it needs
+    # no firmware knowledge and holds on any bike.
+    d = parsers.decode_module_connect_failure(MODULE_FAIL_LINE)
+    assert d["aggregates"] is None
+    assert "maxv 0 mV is below minv 4294967295 mV" in d["aggregates_refused_because"]
+    # the number must be legible: the absurdity IS the evidence
+    assert "4294967295" in d["aggregates_refused_because"]
+    assert "e+09" not in d["aggregates_refused_because"]
+
+    # And the reason the predicate is `maxv < minv` rather than a match on
+    # 0xFFFFFFFF: a DIFFERENT sentinel must still be refused. On the reference
+    # bike both tests agree, so only a fixture where they diverge can show that
+    # the general one was chosen. 65535 is 0xFFFF, the 16-bit equivalent.
+    other = MODULE_FAIL_LINE.replace("minv=4294967295mV", "minv=65535mV")
+    d2 = parsers.decode_module_connect_failure(other)
+    assert d2["aggregates"] is None, "a 16-bit sentinel slipped through"
+    assert "maxv 0 mV is below minv 65535 mV" in d2["aggregates_refused_because"]
+
+
+def test_what_the_line_does_measure_is_kept():
+    d = parsers.decode_module_connect_failure(MODULE_FAIL_LINE)
+    assert d["module"] == "00"
+    # raw0 moves line to line and sits at a plausible pack voltage, so it is real
+    assert d["raw0_mv"] == 101372
+    assert d["diff_allowed_mv"] == 1575
+
+
+def test_a_populated_triple_is_accepted_so_the_guard_is_not_just_always_refuse():
+    ok = MODULE_FAIL_LINE.replace("modv=0mV, maxv=0mV, minv=4294967295mV",
+                                  "modv=114170mV, maxv=114180mV, minv=114160mV")
+    d = parsers.decode_module_connect_failure(ok)
+    assert d["aggregates"] == {"modv_mv": 114170, "maxv_mv": 114180,
+                               "minv_mv": 114160}
+    assert d["aggregates_refused_because"] is None
+
+
+def test_it_never_states_why_the_module_was_ineligible():
+    # "the module did not answer" is a plausible mechanism and it is not in the
+    # line. The entry states no cause and neither may this.
+    d = parsers.decode_module_connect_failure(MODULE_FAIL_LINE)
+    blob = repr(d).lower()
+    for forbidden in ("did not answer", "not answer", "no response", "timeout",
+                      "too hot", "overheat"):
+        assert forbidden not in blob, forbidden
+    assert parsers.decode_module_connect_failure("Riding PackSOC: 60%") is None
+
+
+def test_the_thermal_association_is_reported_as_an_association():
+    log = "\n".join([
+        " 00001     06/24/2026 22:20:20   BMS Disable - High Temp",
+        MODULE_FAIL_LINE,
+        " 00099     07/01/2026 10:00:00   ERROR: Cannot Connect Module 00! modv=0mV",
+    ])
+    ctx = condition.module_failure_context(log)
+    assert ctx["total"] == 2 and ctx["near_high_temp"] == 1
+    note = condition.module_failure_note(ctx)
+    assert "1 of 2" in note
+    assert "association only" in note and "does not state a cause" in note
+    # never a causal claim
+    assert "because" not in note.lower() and "caused" not in note.lower()
+
+
+def test_no_thermal_disables_means_no_comparison_rather_than_zero_of_n():
+    # "0 of 54" would read as evidence of absence; a bike that logged no thermal
+    # disable says nothing either way
+    log = " 00099     07/01/2026 10:00:00   ERROR: Cannot Connect Module 00! modv=0mV"
+    ctx = condition.module_failure_context(log)
+    assert ctx["total"] == 1 and ctx["near_high_temp"] is None
+    assert condition.module_failure_note(ctx) == ""
+    # and no failures at all is None, not an empty tally
+    assert condition.module_failure_context("Riding PackSOC: 60%") is None
+
+
+def test_the_consoles_refusal_is_not_an_event_log(tmp_path):
+    # `dumplogs` is not a real rev-41 command. The saved reply is 77 non-empty
+    # characters, which every `if text.strip()` fallback accepted as a log - so a
+    # capture with no log at all reported that it had one.
+    assert parsers.is_console_refusal(REFUSAL) is True
+    assert parsers.is_console_refusal("") is False
+    # a real log is not mistaken for a refusal, however long
+    assert parsers.is_console_refusal(
+        " 00001  06/24/2026 Riding PackSOC: 60%\n" * 50) is False
+
+    folder = tmp_path / "cap"
+    folder.mkdir()
+    (folder / "001_bms.txt").write_text("# command: bms\n\n  - Pack SOC : 61%\n",
+                                        encoding="utf-8")
+    (folder / "016_dumplogs.txt").write_text(
+        "# command: dumplogs\n\n" + REFUSAL + "\n", encoding="utf-8")
+    s = sessions.load_session(str(folder))
+    assert parsers.event_log_text(s) == ""
+    assert library.summarize(str(folder))["has_event_log"] is False
+    assert library.deep_verdict(str(folder)) is None
+
+
+def test_a_real_log_still_wins_over_a_refusal_sitting_beside_it(tmp_path):
+    folder = tmp_path / "cap"
+    folder.mkdir()
+    real = "\n".join(
+        " 00001  06/24/2026 08:%02d:00  Riding  PackTemp: h 30C, PackSOC: %d%%, "
+        "Vpack:110.0V, BattAmps: 30, Odo: %dkm" % (i, 90 - i, 6000 + i)
+        for i in range(30))
+    (folder / "015_eventlogdump.txt").write_text(
+        "# command: eventlogdump\n\n" + real, encoding="utf-8")
+    (folder / "016_dumplogs.txt").write_text(
+        "# command: dumplogs\n\n" + REFUSAL + "\n", encoding="utf-8")
+    s = sessions.load_session(str(folder))
+    assert len(parsers.event_log_text(s)) > 500
+    assert library.summarize(str(folder))["has_event_log"] is True

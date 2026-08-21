@@ -4691,12 +4691,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             """
             if session is None:
                 return None
-            for cmd in ("eventlogdump", "dumplogs"):
-                text = session.cmd(cmd) or ""
-                if text.strip():
-                    pk = condition_mod.pack_peak(parsers.parse_ride_log(text))
-                    return pk["pack_temp_c"] if pk else None
-            return None
+            text = parsers.event_log_text(session)
+            if not text:
+                return None
+            pk = condition_mod.pack_peak(parsers.parse_ride_log(text))
+            return pk["pack_temp_c"] if pk else None
 
         def _analyze_set(self, session):
             self.analyze_session = session
@@ -4748,11 +4747,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.cond_tree.delete(*self.cond_tree.get_children())
             if not self.analyze_session:
                 return
-            text = ""
-            for cmd in ("eventlogdump", "dumplogs"):
-                text = self.analyze_session.cmd(cmd) or ""
-                if text.strip():
-                    break
+            text = parsers.event_log_text(self.analyze_session)
             tu = config.get_temp_units()
             # hoisted: assess now wants the lifetime temperature counter, and the
             # snapshot was being built a line later anyway
@@ -4904,6 +4899,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                      % (f["count"], condition_mod.fault_span(f),
                         (" · %s, dates are the onsets" % detail) if detail else ""),
                      "measured")
+                if f["name"].lower().startswith("module connect"):
+                    assoc = condition_mod.module_failure_note(
+                        a.get("module_failures"))
+                    if assoc:
+                        _row("└ what was happening", assoc, "measured")
             for ev in a["stats_resets"]:
                 _row("Statistics RESET",
                      "%s — every 'lifetime' figure on the Health tab dates "
@@ -5016,6 +5016,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     source = "session event log"
                 else:
                     text = s.cmd("dumplogs") or ""
+                    if parsers.is_console_refusal(text):
+                        text = ""      # the console declining, not a legacy log
                     source = "session dumplogs (legacy)" if text.strip() else ""
             recs = parsers.parse_ride_log(text)
             if recs:

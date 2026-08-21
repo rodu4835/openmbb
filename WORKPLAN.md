@@ -204,72 +204,39 @@ that ceiling is worth more than anything that polishes what sits behind it.
   Also established: the sentinel is 100% POST-reflash (earliest 06/24/2026, eleven days
   after), so it is not a stale-layout artifact - the same firmware wrote and read it.
 
-- [ ] **Refuse the module-connect aggregate triple, and report the association.** Ship the
-  `maxv < minv` refusal above as a console-echo note (raw bytes stay visible, unedited),
-  plus a per-capture measured association on the fault line: on the reference bike all 54
-  module-connect failures fell within 60 s of a "BMS Disable - High Temp". Printed as an
-  association, never as a cause - the entry does not state one. Computed per capture, and
-  omitted entirely when there are no thermal disables. *Cost:* small; the design is
-  settled, only the building is left.
+- [x] **Refuse the module-connect aggregate triple, and report the association.**
+  *(shipped: `parsers.decode_module_connect_failure` and
+  `condition.module_failure_context`.)* `modv`/`maxv`/`minv` are refused on the arithmetic
+  - maxv 0 mV sits below minv 4294967295 mV, and no max/min pair over a non-empty set can
+  invert. The predicate is `maxv < minv`, not a match on 0xFFFFFFFF, and there is a test
+  with a 16-bit sentinel (65535) that only passes for the general form - on the reference
+  bike both tests agree, so nothing else could show which was chosen. `raw0` is kept: it
+  moves line to line and sits at a plausible pack voltage, so it is a real reading.
 
-- [x] **Attempt the undecodable entries.** *(CLOSED - there is nothing to decode, and the
-  premise does not describe this data path.)* The "about 5%" figure is not reproducible by
-  any measure: the true rate is **16 rows out of 25,415 entry-reads**, and there are zero
-  `???` markers anywhere in the tree. Those 16 are not an unknown entry type at all - they
-  are a 64-word ARM stack dump the firmware printed deliberately during one watchdog
-  reset, self-labelled by the `Stack: 0x2000F970` entry directly above them. Resolving
-  them to symbols needs a Rev 12 firmware image that is not obtainable, so they stay raw
-  and are already rendered correctly.
-
-  The `0x.. ???` rendering belongs to BINARY-log decoders. This MBB rejects `dumplogs`
-  outright ("Sorry, 'dumplogs' is an invalid command"), so that path could not be
-  exercised - recorded as not run, never as a pass and never as a refutation.
-
-  **The real undecodable population is something else entirely, 24x larger, and already
-  handled correctly**: 1,051 records of firmware-revision layout mismatch, splitting
-  perfectly at the 2026-06-13 reflash (526/526 and 525/525 corrupt before, 0 of 16,729
-  after). The existing guard in `_mode_samples` refuses them, which is right - a wrong
-  cell voltage there reads as a pack that never sags, the unsafe direction. Never attempt
-  to decode that population.
-
-- [x] **`parse_ride_log` ignores the `BattTemp:` dialect** *(handled, and deliberately
-  NOT by merging it into `pack_temp_c`.)* It is parsed into its own `batt_temp_c`, so the
-  reading is not thrown away, and kept out of the peak. `pack_temp_c` means the HIGHEST
-  module - `PackTemp: h 60C, l 58C` gives 60 - which is what makes it comparable with the
-  BMS lifetime counter. This dialect prints a single number and no capture available
-  establishes whether that is the max, a mean across modules, or one sensor. If it is a
-  mean, reading it as a peak reports the pack COOLER than it got, and this tool grades a
-  hot pack - so the error would run in the unsafe direction. It is no longer silent: the
-  peak sentence names the dialect and says exactly what is unknown about it.
-  **Still wants ground truth** on which firmware emits it and what the number means; that
-  is a question for a second bike, not for more code.
-
-- [x] **`openmbb analyze` renders distance in km only** *(fixed: `--distance km|mi`, and
-  `format_report(dist_units=...)`. Distances stay canonical in kilometres in the report
-  dict exactly as temperatures stay Celsius, so JSON consumers and every threshold in the
-  codebase are untouched; only the rendering converts. Note per-km RATES convert the other
-  way - Wh/mi is a larger number than Wh/km - which has its own test.)*
-
-- [x] **Read `Max Charge Temp` from the bike** instead of hardcoding the same 50 C in
-  `health.py`'s note. *(shipped: `parse_bms` now yields `max_charge_temp_c`,
-  `min_charge_temp_c` and `min_discharge_temp_c`; the Health note quotes the bike's own
-  range where it states one and says "documented default, not read from this bike" where
-  it does not — the REG-2 treatment the motor row already had.)* The **grading bands are
-  deliberately untouched**: `Max Charge Temp` is a CHARGE limit and the row it annotates is
-  a lifetime maximum that may have been set while riding, so grading by it would be
-  measuring one thing with another thing's ruler. There is a test with a bike stating 45 C
-  that pins this, because a bike stating 50 C cannot distinguish the bike's figure from the
-  hardcoded band.
+  The association is printed as an association: *"all 54 fell within 60 s of a
+  high-temperature disable in this capture — association only; the log does not state a
+  cause"*. Computed per capture (18/18, 18/18, 54/54 across the three), and omitted
+  entirely when a capture logged no thermal disables, because "0 of 54" would read as
+  evidence of absence. Nothing anywhere says why the module was ineligible; there is a
+  test asserting the words "did not answer" never appear.
 
 - [ ] **Rename or re-describe the "Module connect failures" fault class.** On the
   reference bike 100% of them are downstream of thermal disables, so the name implies a
   connection defect the evidence does not support. The count is honest; the label may not
   be. Wants a second bike before renaming.
 
-- [ ] **`dumplogs` is called but is not a real rev-41 command.** `transport.py` records
-  that the bike replies "invalid command", yet `condition`/`health`/`library` still fall
-  back to `session.cmd("dumplogs")`. Establish whether that is a harmless dead path kept
-  for pre-rev-41 captures or a silent fallback masking a missing read.
+- [x] **`dumplogs` is called but is not a real rev-41 command.** *(investigated: neither
+  dead code nor a masked read - a third thing.)* It is NOT dead: a real capture contains
+  `016_dumplogs.txt`. What that file contains is the console declining -
+  *"Sorry, 'dumplogs' is an invalid command"* - which is 77 non-empty characters, so every
+  `if text.strip()` fallback in the codebase accepted it as an event log.
+
+  Nothing downstream was fooled into a wrong VERDICT: it parses to zero records and the
+  checks correctly reported "cannot tell". But `library.summarize` reported
+  `has_event_log: True` for a capture that has none, and the tool then walked a
+  megabyte-sized code path to prove it had nothing to say. Fixed with one shared predicate
+  (`parsers.is_console_refusal`) and one shared picker (`parsers.event_log_text`), so the
+  five hand-rolled fallbacks cannot drift apart again.
 
 ## Tier 4 — structural
 

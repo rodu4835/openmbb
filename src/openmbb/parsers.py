@@ -396,6 +396,43 @@ def _mode_samples(text, mode_word, required):
     return records
 
 
+# The console's refusal, which several commands can produce:
+#
+#   Sorry, 'dumplogs' is an invalid command. Type "help" for a list of commands
+#
+# It is saved to the capture like any other reply, and it is not empty - so a
+# bare `if text.strip()` accepts it as command output. `dumplogs` is the case
+# that matters, because it is not a real rev-41 command and is still the
+# fallback every event-log reader tries second.
+_CONSOLE_REFUSAL_RE = re.compile(
+    r"is an invalid command|invalid command\b|type \"help\" for a list", re.I)
+
+
+def is_console_refusal(text):
+    """True if a captured reply is the console declining, not answering.
+
+    Checked against the whole reply rather than the first line, because the
+    header the capture writes sits above it.
+    """
+    body = (text or "").strip()
+    if not body or len(body) > 400:      # a real log is orders of magnitude bigger
+        return False
+    return bool(_CONSOLE_REFUSAL_RE.search(body))
+
+
+def event_log_text(session, commands=("eventlogdump", "dumplogs")):
+    """The first real event log in a session, or "".
+
+    Shared so the several places that used to do this by hand cannot drift, and
+    so a console refusal is rejected in all of them at once.
+    """
+    for cmd in commands:
+        text = session.cmd(cmd) or ""
+        if text.strip() and not is_console_refusal(text):
+            return text
+    return ""
+
+
 def parse_ride_log(text):
     """Extract riding records from a dumplogs/eventlog block.
 
@@ -476,6 +513,76 @@ def _state_val(line):
     """
     _k, _sep, val = line.partition(":")
     return re.split(r"\s+-\s+Raw\b", val, maxsplit=1)[0].strip()
+
+
+# --- a module-connect failure, and the three fields in it that are not data --
+#
+# A real line, from the reference bike:
+#
+#   ERROR: Cannot Connect Module 00! modv=0mV, maxv=0mV, minv=4294967295mV,
+#   raw0:101372mV, raw1:0mV, cur0:0A, cur1:0A, diff_allowed:1575mV
+#
+# `modv`, `maxv` and `minv` are REFUSED, and the ground for refusing them is
+# arithmetic rather than firmware knowledge: maxv (0 mV) is BELOW minv
+# (4294967295 mV), and no max/min pair over a non-empty set can invert. Whatever
+# those fields are, they are not a measured maximum and minimum, and 4294967295
+# mV is not 4,294,967 volts.
+#
+# The predicate is `maxv < minv`, deliberately NOT a match on 0xFFFFFFFF. A
+# constant match is pattern-recognition on one machine's output; the inversion
+# test holds on any bike, any firmware and any module count, and it keeps working
+# if a different sentinel shows up.
+#
+# What this must never say is WHY the module was ineligible. "The module did not
+# answer" is a plausible mechanism and it is not in the line - the entry does not
+# state a cause, and inventing one is exactly the confident wrongness the rest of
+# this codebase refuses. raw0 IS a live reading (it moves line to line and sits at
+# a plausible pack voltage) and may be read as one.
+
+_MC_RE = re.compile(r"cannot\s+connect\s+module\s*(\w+)", re.I)
+
+# a pack that exists at all is under this; anything above is not a voltage
+_PLAUSIBLE_PACK_MV = 200000
+
+
+def decode_module_connect_failure(line):
+    """One 'Cannot Connect Module' entry, with its aggregates refused.
+
+    Returns None for a line that is not one. `aggregates` is None whenever the
+    triple cannot be believed, and `aggregates_refused_because` says which test
+    it failed - never a cause for the failure itself, which the entry does not
+    state.
+    """
+    m = _MC_RE.search(line or "")
+    if not m:
+        return None
+    vals = {}
+    for key in ("modv", "maxv", "minv", "raw0", "raw1", "diff_allowed"):
+        mm = re.search(key + r"\s*[:=]\s*(-?\d+)", line, re.I)
+        if mm:
+            vals[key] = float(mm.group(1))
+    out = {"module": m.group(1),
+           "raw0_mv": vals.get("raw0"),
+           "diff_allowed_mv": vals.get("diff_allowed"),
+           "aggregates": None,
+           "aggregates_refused_because": None}
+    maxv, minv = vals.get("maxv"), vals.get("minv")
+    if maxv is None or minv is None:
+        out["aggregates_refused_because"] = "the entry carries no max/min pair"
+        return out
+    if maxv < minv:
+        # %d, not %g: the whole point is that a reader sees 4294967295 rather
+        # than 4.29497e+09, because the absurdity of the number IS the evidence
+        out["aggregates_refused_because"] = (
+            "maxv %d mV is below minv %d mV" % (maxv, minv))
+        return out
+    if any(v is not None and abs(v) > _PLAUSIBLE_PACK_MV
+           for v in (vals.get("modv"), maxv, minv)):
+        out["aggregates_refused_because"] = "a value is beyond any pack voltage"
+        return out
+    out["aggregates"] = {"modv_mv": vals.get("modv"), "maxv_mv": maxv,
+                         "minv_mv": minv}
+    return out
 
 
 def parse_inputs(text):

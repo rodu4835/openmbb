@@ -48,11 +48,8 @@ MIN_DELTA_KM = 20
 
 
 def _event_log(session):
-    for cmd in RIDE_LOG_COMMANDS:
-        text = session.cmd(cmd) or ""
-        if text.strip():
-            return text
-    return ""
+    """The capture's event log, or "" - a console refusal is not a log."""
+    return parsers.event_log_text(session, RIDE_LOG_COMMANDS)
 
 
 def pack_trend(sessions):

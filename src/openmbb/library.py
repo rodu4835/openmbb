@@ -116,11 +116,13 @@ def summarize(folder):
 
 
 def _event_log_text(session):
-    for cmd in ("eventlogdump", "dumplogs"):
-        text = session.cmd(cmd) or ""
-        if text.strip():
-            return text
-    return ""
+    """The capture's event log, or "".
+
+    Delegates so a console refusal - `dumplogs` is not a real rev-41 command and
+    the saved reply says so in 77 non-empty characters - is not mistaken for a
+    log. Without that, a capture with no log at all reported has_event_log True.
+    """
+    return parsers.event_log_text(session)
 
 
 def scan(root, limit=60):
