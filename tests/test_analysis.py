@@ -6,7 +6,8 @@ import math
 
 import pytest
 
-from openmbb import compare, gearing, health, parsers, rides, sessions
+from openmbb import (compare, gearing, health, parsers, report, rides,
+                     sessions)
 from openmbb.sim import SimPort
 from openmbb.transport import (DUMP_COMMANDS, READ_COMMANDS, SessionLogger,
                                Transport)
@@ -633,3 +634,101 @@ def test_gearing_delta_needs_minimum_distance(tmp_path):
     _, r1, b1 = res["gearing_trend"][1]
     assert "lifetime" in b1                    # fell back (delta too short)
     assert abs(r1 - 4.50) < 0.05               # not the bogus 8:1 the 1-km delta implies
+
+
+# --- the commands that were captured for a year and never read ---------------
+
+REAL_INPUTS = """
+  - Key On                    :       Yes  - Raw : 1 (1 at last read)
+  - Pack Voltage              : 112167 mV  - (   3889 ADC)
+  - 3.3V Supply               :   3256 mV  - (   2223 ADC)
+  - Battery Thr En            :   Enabled  - Raw :  2762 mV (   2439 ADC)
+  - Kill Switch Pos           :       Run  - Raw :  2911 mV (   3975 ADC)
+  - Kickstand Switch Pos      :      Down  - Raw :  2999 mV (   4095 ADC)
+  - Brake Switch              :       Off
+  - OB Charger 0 Attached     :        No
+"""
+
+REAL_OUTPUTS = """
+  - System On                 :   On
+  - Warning Light             :   On
+  - Temp Warning LED          :  Off
+  - ABS LED                   :   On
+"""
+
+REAL_RUNTIME = """
+  - Total run time            :  00001:01:10:36
+  - Total charger time        :  00012:21:23:39
+"""
+
+REAL_OBD = """
+ - MIL On                      0
+ - active dtcs                 00
+ - pending dtcs                00
+"""
+
+
+def test_inputs_reads_the_interlocks_without_the_raw_adc_tail():
+    i = parsers.parse_inputs(REAL_INPUTS)
+    assert i["kickstand"] == "Down"          # not "Down  - Raw : 2999 mV ..."
+    assert i["kill_switch"] == "Run"
+    assert i["key_on"] == "Yes"
+    assert i["throttle_enabled"] == "Enabled"
+    assert i["brake_switch"] == "Off"
+    assert i["pack_mv"] == 112167
+
+
+def test_outputs_reads_the_warning_light():
+    o = parsers.parse_outputs(REAL_OUTPUTS)
+    assert o["warning_light"] == "On"
+    assert o["temp_warning_led"] == "Off"
+
+
+def test_runtime_is_days_hours_minutes_seconds():
+    r = parsers.parse_runtime(REAL_RUNTIME)
+    assert r["run_s"] == ((1 * 24 + 1) * 60 + 10) * 60 + 36     # 90636
+    assert r["charge_s"] == ((12 * 24 + 21) * 60 + 23) * 60 + 39
+
+
+def test_obd_reads_the_fault_memory():
+    o = parsers.parse_obd(REAL_OBD)
+    assert o["active_dtcs"] == 0 and o["pending_dtcs"] == 0
+    assert o["mil_on"] is False
+    stored = parsers.parse_obd(REAL_OBD.replace("active dtcs                 00",
+                                                "active dtcs                 02"))
+    assert stored["active_dtcs"] == 2
+
+
+def test_a_stored_fault_code_is_an_alert(tmp_path):
+    clean = sessions.Session(str(tmp_path), {"obd": REAL_OBD}, "")
+    m = {x["label"]: x for x in health.health_snapshot(clean)}["Fault codes"]
+    assert m["status"] == "ok" and m["display"] == "none stored"
+    dirty = sessions.Session(str(tmp_path), {
+        "obd": REAL_OBD.replace("active dtcs                 00",
+                                "active dtcs                 03")}, "")
+    m = {x["label"]: x for x in health.health_snapshot(dirty)}["Fault codes"]
+    assert m["status"] == "alert" and "3 active" in m["display"]
+
+
+def test_the_state_block_names_what_would_stop_the_bike(tmp_path):
+    s = sessions.Session(str(tmp_path), {"inputs": REAL_INPUTS,
+                                         "outputs": REAL_OUTPUTS,
+                                         "runtime": REAL_RUNTIME,
+                                         "stats": REAL_STATS}, "")
+    text = report.format_report(report.analyze_session(s))
+    assert "would not move as captured: kickstand DOWN" in text
+    assert "the dash warning light was ON at capture" in text
+
+
+def test_run_time_against_the_odometer_catches_a_statistics_reset(tmp_path):
+    # 6155 km against 25.2 hours is 244 km/h — the two counters cannot be
+    # describing the same period, which on this platform means a reset
+    s = sessions.Session(str(tmp_path), {"runtime": REAL_RUNTIME,
+                                         "stats": REAL_STATS}, "")
+    text = report.format_report(report.analyze_session(s))
+    assert "km/h average" in text and "statistics were reset" in text
+
+
+def test_a_capture_without_those_commands_prints_no_state_block(tmp_path):
+    s = sessions.Session(str(tmp_path), {"bms": REAL_BMS}, "")
+    assert "== Bike state ==" not in report.format_report(report.analyze_session(s))

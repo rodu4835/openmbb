@@ -380,3 +380,113 @@ def parse_charge_log(text):
     not comparable across firmware and anything anchored to voltage is.
     """
     return _mode_samples(text, "charging", ("soc", "vpack"))
+
+
+# --- commands the tool captured for a year and never read --------------------
+
+def _state_val(line):
+    """The value from a state line, dropping the raw ADC tail the bike appends.
+
+        - Kickstand Switch Pos      :      Down  - Raw : 2999 mV ( 4095 ADC)
+
+    yields "Down". The raw counts are diagnostic detail for a bench session, not
+    something a rider needs, and keeping them would bury the state they qualify.
+    """
+    _k, _sep, val = line.partition(":")
+    return re.split(r"\s+-\s+Raw\b", val, maxsplit=1)[0].strip()
+
+
+def parse_inputs(text):
+    """The `inputs` block: switch positions and supply rails.
+
+    These are the interlocks. When a Gen2 bike will not move, the answer is
+    almost always in here — a kickstand still down, a kill switch at Off, a
+    throttle the BMS has not enabled — and OpenMBB has been capturing it on every
+    pull without ever showing it.
+    """
+    out = {}
+    for line in (text or "").splitlines():
+        low = line.lower()
+        if ":" not in line:
+            continue
+        for key, needle in (("key_on", "key on"),
+                            ("kill_switch", "kill switch"),
+                            ("kickstand", "kickstand switch"),
+                            ("start_switch", "start switch"),
+                            ("brake_switch", "brake switch"),
+                            ("throttle_enabled", "thr en"),
+                            ("charger_attached", "charger 0 attached")):
+            if needle in low and key not in out:
+                out[key] = _state_val(line)
+    for key, needle in (("pack_mv", "pack voltage"), ("supply_3v3", "3.3v supply"),
+                        ("supply_5v", "5v supply")):
+        for line in (text or "").splitlines():
+            if needle in line.lower():
+                out[key] = num(line.partition(":")[2])
+                break
+    return out
+
+
+def parse_outputs(text):
+    """The `outputs` block: what the MBB is driving, including the warning light."""
+    out = {}
+    for line in (text or "").splitlines():
+        low = line.lower()
+        if ":" not in line:
+            continue
+        for key, needle in (("warning_light", "warning light"),
+                            ("temp_warning_led", "temp warning led"),
+                            ("armed_led", "armed led"),
+                            ("abs_light", "abs led"),
+                            ("dcdc_enabled", "dc/dc converter en"),
+                            ("system_on", "system on")):
+            if needle in low and key not in out:
+                out[key] = _state_val(line)
+    return out
+
+
+_RUNTIME_RE = re.compile(r"(\d+):(\d\d):(\d\d):(\d\d)")
+
+
+def _runtime_seconds(line):
+    m = _RUNTIME_RE.search(line or "")
+    if not m:
+        return None
+    d, h, mi, s = (int(x) for x in m.groups())
+    return ((d * 24 + h) * 60 + mi) * 60 + s
+
+
+def parse_runtime(text):
+    """The `runtime` block, as seconds.
+
+    Paired with the odometer this is a sanity check with teeth: run time that
+    implies an impossible average speed means the two counters do not cover the
+    same period, which on this platform means the statistics were reset.
+    """
+    out = {}
+    for line in (text or "").splitlines():
+        low = line.lower()
+        if "total run time" in low:
+            out["run_s"] = _runtime_seconds(line)
+        elif "charger time" in low or "charge time" in low:
+            out["charge_s"] = _runtime_seconds(line)
+    return out
+
+
+def parse_obd(text):
+    """The `obd` block: fault codes, in the sense any mechanic would recognise.
+
+    Presence or absence of a stored code needs no calibration and no reference
+    bike, which makes it one of the few things a capture can say flatly.
+    """
+    out = {}
+    for line in (text or "").splitlines():
+        low = line.lower()
+        if "mil on" in low:
+            out["mil_on"] = bool(num(line.split("MIL On")[-1] if "MIL On" in line
+                                     else line.partition("mil on")[2]))
+        elif "active dtc" in low:
+            out["active_dtcs"] = num(line.rsplit(None, 1)[-1])
+        elif "pending dtc" in low:
+            out["pending_dtcs"] = num(line.rsplit(None, 1)[-1])
+    return out

@@ -66,6 +66,7 @@ def analyze_session(session, temp_units="C"):
         # health block's single-reading metrics. Empty-ish rather than absent
         # when there is no event log: its `undetermined` list is the answer.
         "clocks": condition.clock_check(session),
+        "bike_state": _bike_state(session),
         "condition": condition.assess(ride_text),
         "verdict": condition.verdict(condition.assess(ride_text), metrics),
     }
@@ -120,6 +121,7 @@ def format_report(report):
         out += ["", "No ride telemetry in this session "
                     "(pull the event log from the bike to add it)."]
 
+    out += _bike_state_lines(report.get("bike_state") or {})
     out += _clock_lines(report.get("clocks") or {})
     out += _condition_lines(report.get("condition") or {})
     out += _verdict_lines(report.get("verdict") or {})
@@ -138,6 +140,61 @@ def _verdict_lines(v):
         out.append("    [%-7s] %-24s %s" % (c["level"], c["name"], c["detail"]))
     for c in v["caveats"]:
         out.append("    note: %s" % c)
+    return out
+
+
+def _bike_state(session):
+    """Switch positions, outputs and run time - captured on every pull since the
+    beginning and never once read. When a Gen2 bike will not move, the answer is
+    usually a switch in here rather than anything in the pack.
+
+    The odometer travels with it so the run-time cross-check can be made without
+    the session.
+    """
+    return {
+        "inputs": parsers.parse_inputs(session.cmd("inputs")),
+        "outputs": parsers.parse_outputs(session.cmd("outputs")),
+        "runtime": parsers.parse_runtime(session.cmd("runtime")),
+        "odo_km": parsers.parse_stats(session.cmd("stats")).get("odo_km"),
+    }
+
+
+def _bike_state_lines(s):
+    """The interlocks, and a run-time cross-check with teeth."""
+    if not s or not (s.get("inputs") or s.get("runtime")):
+        return []
+    out = ["", "== Bike state =="]
+    i = s.get("inputs") or {}
+    if i:
+        holds = []
+        if str(i.get("kickstand", "")).lower().startswith("down"):
+            holds.append("kickstand DOWN")
+        if str(i.get("kill_switch", "")).lower().startswith(("off", "stop")):
+            holds.append("kill switch OFF")
+        if str(i.get("throttle_enabled", "")).lower().startswith("dis"):
+            holds.append("throttle NOT enabled")
+        out.append("  key %s \u00b7 kill switch %s \u00b7 kickstand %s \u00b7 brake %s"
+                   % (i.get("key_on", "?"), i.get("kill_switch", "?"),
+                      i.get("kickstand", "?"), i.get("brake_switch", "?")))
+        out.append("  " + ("would not move as captured: " + ", ".join(holds)
+                           if holds else "no interlock was holding it"))
+    o = s.get("outputs") or {}
+    if str(o.get("warning_light", "")).lower() == "on":
+        out.append("  ! the dash warning light was ON at capture")
+    r = s.get("runtime") or {}
+    if r.get("run_s"):
+        hours = r["run_s"] / 3600.0
+        line = "  run time %.1f h" % hours
+        if r.get("charge_s"):
+            line += " \u00b7 charger time %.1f h" % (r["charge_s"] / 3600.0)
+        out.append(line)
+        km = s.get("odo_km")
+        if km and hours > 0:
+            avg = km / hours
+            out.append("  odometer / run time = %.0f km/h average%s"
+                       % (avg, " \u2014 impossible, so the two counters do not cover "
+                               "the same period, which means the statistics were "
+                               "reset" if avg > 120 else ""))
     return out
 
 

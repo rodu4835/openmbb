@@ -28,7 +28,8 @@ value None and displays "n/a".
 """
 
 from . import gearing, rides
-from .parsers import first_val, parse_bms, parse_stats, parse_status
+from .parsers import (first_val, parse_bms, parse_obd, parse_stats,
+                      parse_status)
 from .transport import first_number, parse_settings_dump
 
 # F1 (revised 2026-08-20, SUPERSEDES the earlier reading): the 2026-06-13 reflash
@@ -273,6 +274,27 @@ def health_snapshot(session, temp_units="C"):
         out.append(_metric("Isolation resistance", iso, "kOhm", status=st, note=note,
                            display=("at or above %g kOhm (sensor ceiling)" % iso
                                     if iso >= ISO_CEILING_KOHM else None)))
+
+    # Stored fault codes are the plainest thing a capture can report: a code is
+    # either there or it is not, so this needs no threshold and no second bike.
+    obd = parse_obd(session.cmd("obd"))
+    if obd.get("active_dtcs") is not None or obd.get("pending_dtcs") is not None:
+        active = obd.get("active_dtcs") or 0
+        pending = obd.get("pending_dtcs") or 0
+        st = "alert" if active else ("watch" if pending or obd.get("mil_on")
+                                     else "ok")
+        bits = []
+        if active:
+            bits.append("%g active" % active)
+        if pending:
+            bits.append("%g pending" % pending)
+        if obd.get("mil_on"):
+            bits.append("warning lamp ON")
+        out.append(_metric("Fault codes", active, status=st,
+                           display=", ".join(bits) or "none stored",
+                           note="the bike's own OBD fault memory. A stored code "
+                                "is a fact rather than a threshold - read it "
+                                "before anything else on this tab."))
 
     # F5: surface any live console warning as its own row
     for w in (status.get("warnings") or []):
