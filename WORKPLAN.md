@@ -240,11 +240,54 @@ that ceiling is worth more than anything that polishes what sits behind it.
 
 ## Tier 4 — structural
 
-- [ ] **Split `gui.py`.** ~5,000 lines, ~95% inside one nested class inside one function,
-  which is why `test_gui_flow.py` needs 2,400. The device-read orchestration is trapped in
-  there. *What it unlocks:* `openmbb read --port COM3` — headless capture, scriptable,
-  able to run unattended on a Raspberry Pi. The single biggest structural unlock in the
-  project. *Cost:* large, and it wants the bike to verify against.
+- [~] **Split `gui.py`.** **DEFERRED — planned in full, deliberately not started.**
+  ~5,800 lines, ~95% inside one nested class inside one function. *What it would unlock:*
+  `openmbb read --port COM3` — headless capture, scriptable, able to run unattended on a
+  Raspberry Pi.
+
+  A full extraction plan exists and is sound: strangler route, read-only surface,
+  `openmbb probe` at day 5 and `openmbb read` at day 7, ten PRs, ~9 working days. It was
+  not skipped for being hard. It was skipped because of what the planning turned up:
+
+  1. **The urgent part was never the refactor.** The two defects that made this look
+     urgent — the write chain enforcing one of its four links, and the contactor gate not
+     existing below the GUI — were plain bugs, not consequences of the entanglement. Both
+     are fixed. What remains is a capability, not a repair.
+  2. **The headline feature is speculative here.** Unattended capture on a Pi is genuinely
+     useful to somebody. The owner goes to his bike with a laptop and opens the GUI, and
+     in the project's life to date the unattended case has never arisen.
+  3. **It does not deliver what the item's title implies.** `gui.py` goes 5,817 → ~5,200,
+     about 11%. Roughly 700 wire-touching lines leave and ~80 return as progress and
+     consent plumbing. Read as "make this file manageable", the work fails; read as "unlock
+     headless capture", it succeeds completely. The two readings lead to very different
+     weeks and the title invites the wrong one.
+
+  **What the planning is worth keeping:** the entanglement is not 863 lines of device code
+  waiting to be moved. It is ~1,900 lines across 36 methods where serial work and dialog
+  work are interleaved in the same breath — `_baseline` (148 lines), `_login` (119),
+  `_connect` (110). Anybody who reopens this should start from that number, not from the
+  file size.
+
+  **Reopen when:** headless or unattended capture becomes something actually wanted, or a
+  second person starts working in `gui.py` and the file's size becomes a collaboration
+  cost rather than an aesthetic one.
+
+- [ ] **Golden transcripts and richer port fakes.** *(Split out of the extraction above,
+  which no longer gates it.)* Record the exact sequence of transport calls and the
+  byte-normalised session folder the read path produces, commit them as goldens, and add
+  port fakes for real-bike behaviours the simulator structurally cannot produce:
+  - a **clamping** port — the write that answers `SUCCESS  maxcustspmph set to 102` and
+    reads back `89`. That is the only write behaviour ever confirmed on this hardware
+    (2026-07-12 captures 022→023) and **it has no test at all**;
+  - a **no-prompt dump** port — on real firmware a dump ending with no console prompt is
+    the NORMAL exit, and `SimPort._respond` always appends one, so the truncation and
+    `_resync` paths are unreachable in the simulator by construction;
+  - a **paced** port at 3,840 B/s, so idle timeouts and the confirming lull are actually
+    exercised rather than short-circuited by `SimPort.is_sim`.
+
+  *Why it stands alone:* it is the project's first behaviour-preserving oracle, it gives
+  the silent-clamp branch its first coverage, and it is worth having whether or not any
+  extraction ever follows. *Cost:* ~1.5 days, no bike needed.
 
 - [ ] **Version the capture format.** Session folders carry no schema version. We were
   just bitten by *firmware* record layouts changing underneath us; our own format should
