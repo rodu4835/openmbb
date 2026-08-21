@@ -574,3 +574,104 @@ def fault_history(event_log):
                         "last": stamps[-1] if stamps else None,
                         "graded": False})
     return sorted(out, key=lambda f: -f["count"])
+
+
+# --- clocks ------------------------------------------------------------------
+#
+# A Gen2 bike carries at least three clocks that are set independently and drift
+# apart: the MBB's (which timestamps the event log), the BMS's (which prints an
+# epoch beside it), and the dash's. On the reference bike the MBB and BMS agree
+# within seconds while the dash runs ten minutes ahead. On a bike reported from
+# the Czech Republic the MBB reads seven hours behind local while the BMS reads
+# nine, because one counter was set to local time and the other to UTC.
+#
+# The fix needs no timezone database and no setting. OpenMBB records the
+# capturing machine's clock next to every command, and the bike prints its own
+# clock in `stats`, so the two sides of one instant are both on disk: their
+# difference is exactly what must be added to any MBB-rendered timestamp — the
+# whole event log — to read in the time the capture was taken in.
+_CLOCK_RE = re.compile(r"(\d\d/\d\d/\d{4}\s+\d\d:\d\d:\d\d)")
+_EPOCH_RE = re.compile(r"\(\s*(\d{9,11})\s*,")
+
+# Under this the bike is merely drifting, not offset, and shifting the display
+# would be noise. The reference bike drifted 2, 3 and 7 minutes across captures.
+CLOCK_DRIFT_TOLERANCE_S = 600
+
+
+def _parse_stamp(text, fmt):
+    try:
+        return _dt.datetime.strptime(text, fmt)
+    except (TypeError, ValueError):
+        return None
+
+
+def clock_check(session):
+    """Every clock the bike reports, and the correction for its event log.
+
+    `offset_s` is capture-machine minus bike: add it to an MBB-rendered
+    timestamp to get the time the capture was taken in. None when the capture
+    lacks either side of the pair, which must be said rather than assumed to be
+    zero.
+    """
+    stats_txt = session.cmd("stats") or ""
+    bms_txt = session.cmd("bms") or ""
+    dash_txt = session.cmd("dash") or ""
+
+    m = _CLOCK_RE.search(_first_line_with(stats_txt, "system time"))
+    mbb = _parse_stamp(m.group(1) if m else None, "%m/%d/%Y %H:%M:%S")
+    bms_line = _first_line_with(bms_txt, "bms clock")
+    m = _CLOCK_RE.search(bms_line)
+    bms = _parse_stamp(m.group(1) if m else None, "%m/%d/%Y %H:%M:%S")
+    m = _EPOCH_RE.search(bms_line)
+    epoch = int(m.group(1)) if m else None
+    m = re.search(r"(\d\d:\d\d)", _first_line_with(dash_txt, "clock"))
+    dash = m.group(1) if m else None
+
+    pc = _parse_stamp(session.captured_at.get("stats"), "%Y-%m-%d %H:%M:%S")
+    offset_s = int((pc - mbb).total_seconds()) if (pc and mbb) else None
+
+    # printed-versus-counter: how the console renders the epoch it stores. On
+    # both bikes measured this is -7 h, US Pacific, where they are built.
+    render_h = None
+    if bms and epoch:
+        as_utc = _dt.datetime.fromtimestamp(epoch, _dt.timezone.utc).replace(
+            tzinfo=None)
+        render_h = round((bms - as_utc).total_seconds() / 3600.0, 2)
+
+    return {
+        "mbb_clock": mbb.strftime("%m/%d/%Y %H:%M:%S") if mbb else None,
+        "bms_clock": bms.strftime("%m/%d/%Y %H:%M:%S") if bms else None,
+        "bms_epoch": epoch,
+        "dash_clock": dash,
+        "captured_at": session.captured_at.get("stats"),
+        "offset_s": offset_s,
+        "mbb_vs_bms_s": int((mbb - bms).total_seconds()) if (mbb and bms) else None,
+        "console_renders_epoch_at_h": render_h,
+        "worth_correcting": bool(offset_s is not None
+                                 and abs(offset_s) > CLOCK_DRIFT_TOLERANCE_S),
+    }
+
+
+def _first_line_with(text, needle):
+    for line in (text or "").splitlines():
+        if needle in line.lower():
+            return line
+    return ""
+
+
+def describe_offset(seconds):
+    """A signed offset as something a person reads, e.g. '7 h 12 m behind'."""
+    if seconds is None:
+        return "unknown"
+    s = abs(int(seconds))
+    h, m = s // 3600, (s % 3600) // 60
+    parts = ("%d h " % h if h else "") + ("%d m" % m if (m or not h) else "")
+    return "%s %s" % (parts.strip(), "behind" if seconds > 0 else "ahead")
+
+
+def shift_timestamp(ts, offset_s, fmt="%m/%d/%Y %H:%M:%S"):
+    """An MBB-rendered timestamp moved into the capture's local time."""
+    t = _parse_stamp(ts, fmt)
+    if t is None or offset_s is None:
+        return ts
+    return (t + _dt.timedelta(seconds=offset_s)).strftime(fmt)
