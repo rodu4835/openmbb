@@ -4225,6 +4225,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.cond_tree.insert("", "end", tags=(tag,),
                                       values=(check, finding))
 
+            clk = condition_mod.clock_check(self.analyze_session)
+            if clk.get("mbb_clock"):
+                bits = ["MBB %s" % clk["mbb_clock"]]
+                if clk.get("bms_clock"):
+                    bits.append("BMS %s" % clk["bms_clock"])
+                if clk.get("dash_clock"):
+                    bits.append("dash %s" % clk["dash_clock"])
+                _row("Clocks", " · ".join(bits), "measured")
+            if clk.get("captured_at"):
+                _row("Bike clock vs capture",
+                     "%s · captured at %s%s"
+                     % (condition_mod.describe_offset(clk["offset_s"]),
+                        clk["captured_at"],
+                        " · event-log times are shifted to match on the Rides tab"
+                        if clk.get("worth_correcting") else ""),
+                     "attention" if clk.get("worth_correcting") else "measured")
             cov = a["coverage"]
             if cov["first"]:
                 _row("Log window", "%s → %s  ·  %d ride / %d charge samples"
@@ -4423,6 +4439,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             def _na(v):
                 return "n/a" if v is None else v
 
+            # The event log is timestamped by the bike's own MBB clock, which can
+            # be hours out — one reported bike reads 7 h behind its owner's local
+            # time. The capture records the machine's clock beside the bike's, so
+            # the correction is measured rather than configured.
+            clk = (condition_mod.clock_check(self.analyze_session)
+                   if self.analyze_session else {})
+            shift = clk.get("offset_s") if clk.get("worth_correcting") else None
+            tnote = ("" if shift is None else
+                     "  ·  times shifted %s to this capture's clock"
+                     % condition_mod.describe_offset(-shift).replace(
+                         "behind", "forward").replace("ahead", "back"))
+
             self.lbl_ride_totals.config(
                 text="%s: %d rides · %.1f %s · mean %s SOC%%/%s · max pack %s / "
                 "motor %s · %d samples%s"
@@ -4430,10 +4458,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                    _na(_e(t["mean_soc_per_km"])), unit,
                    _na(health_mod.fmt_temp(t["max_pack_temp_c"], tu)),
                    _na(health_mod.fmt_temp(t["max_motor_temp_c"], tu)),
-                   t["samples"], warn))
+                   t["samples"], warn + tnote))
             for r in summ["rides"]:
                 self.ride_tree.insert("", "end", values=(
-                    r["start_ts"] or "?", _d(r["distance_km"]), r["soc_used_pct"],
+                    condition_mod.shift_timestamp(r["start_ts"], shift)
+                    if r["start_ts"] else "?",
+                    _d(r["distance_km"]), r["soc_used_pct"],
                     _na(_e(r["soc_per_km"])), _na(_t(r["max_pack_temp_c"])),
                     _na(_t(r["max_motor_temp_c"])), _na(r["max_rpm"])))
 

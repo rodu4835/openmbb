@@ -5,7 +5,7 @@ real 2017 FXS actually printed, not from the simulator, because the whole point
 of this module is what it says about a bike nobody has a baseline for.
 """
 
-from openmbb import condition, parsers
+from openmbb import condition, parsers, sessions
 
 # The real reset sequence: the bootloader line carries a clock, the reset entry
 # logged immediately after it does not (the console had just rebooted).
@@ -338,3 +338,68 @@ def test_the_worst_check_decides_the_verdict():
 def test_a_stats_reset_becomes_a_caveat_on_the_verdict():
     v = condition.verdict(condition.assess(RESET_LOG + _loaded_log(3940)))
     assert any("statistics were reset" in c.lower() for c in v["caveats"])
+
+
+# --- clocks ------------------------------------------------------------------
+
+def _clock_session(mbb, bms_line, captured, dash="11:04"):
+    return sessions.Session("x", {
+        "stats": "  - System Time               :  %s" % mbb,
+        "bms": "  - BMS Clock                 :  %s" % bms_line,
+        "dash": "  - Clock (24H)               :  %s" % dash,
+    }, "", {"stats": captured})
+
+
+def test_the_bike_clock_offset_is_measured_not_configured():
+    # Both sides of one instant are on disk: the bike prints its clock in
+    # `stats`, and the capture records the machine's clock beside it. No
+    # timezone database and no user setting are involved.
+    s = _clock_session("08/19/2026 15:58:01",
+                       "08/19/2026 15:58:03 ( 1787180283, 0x6A8634FB )",
+                       "2026-08-19 16:05:13")
+    c = condition.clock_check(s)
+    assert c["offset_s"] == 432                      # 7 m 12 s behind
+    assert "7 m behind" in condition.describe_offset(c["offset_s"])
+    assert c["worth_correcting"] is False            # drift, not an offset
+
+
+def test_a_bike_hours_out_is_flagged_and_correctable():
+    # The reported Czech case: ride data 7 h behind local while the BMS clock
+    # reads 9 h behind, because the two counters were set differently.
+    s = _clock_session("08/10/2026 09:18:20",
+                       "08/10/2026 07:17:04 ( 1786371424, 0x6A79DD60 )",
+                       "2026-08-10 16:18:22")
+    c = condition.clock_check(s)
+    assert c["worth_correcting"] is True
+    assert "7 h" in condition.describe_offset(c["offset_s"])
+    # the MBB and BMS counters are two hours apart - that is the 7-versus-9
+    assert round(c["mbb_vs_bms_s"] / 3600.0) == 2
+    # and an event-log timestamp shifts into the capture's local time
+    assert condition.shift_timestamp("08/10/2026 09:00:00",
+                                     c["offset_s"]) == "08/10/2026 16:00:02"
+
+
+def test_the_console_renders_its_stored_counter_seven_hours_back():
+    # Measured identically on two bikes in different countries, so this is a
+    # firmware constant rather than anything set per bike.
+    for bms_line in ("08/19/2026 15:58:03 ( 1787180283, 0x6A8634FB )",
+                     "08/10/2026 07:17:04 ( 1786371424, 0x6A79DD60 )"):
+        c = condition.clock_check(_clock_session("01/01/2026 00:00:00", bms_line,
+                                                 "2026-01-01 00:00:00"))
+        assert c["console_renders_epoch_at_h"] == -7
+
+
+def test_a_capture_missing_either_side_says_unknown():
+    # no capture-time header -> the offset is not knowable, and must not be zero
+    s = _clock_session("08/19/2026 15:58:01",
+                       "08/19/2026 15:58:03 ( 1787180283, 0x6A8634FB )", None)
+    c = condition.clock_check(s)
+    assert c["offset_s"] is None and c["worth_correcting"] is False
+    assert condition.describe_offset(None) == "unknown"
+    # and a timestamp with no known offset is returned untouched
+    assert condition.shift_timestamp("08/19/2026 12:00:00", None) == "08/19/2026 12:00:00"
+
+
+def test_clock_check_survives_a_session_with_no_clocks_at_all():
+    c = condition.clock_check(sessions.Session("x", {}, ""))
+    assert c["mbb_clock"] is None and c["offset_s"] is None

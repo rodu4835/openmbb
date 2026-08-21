@@ -65,6 +65,7 @@ def analyze_session(session, temp_units="C"):
         # what the ride/charge samples say about the PACK, as distinct from the
         # health block's single-reading metrics. Empty-ish rather than absent
         # when there is no event log: its `undetermined` list is the answer.
+        "clocks": condition.clock_check(session),
         "condition": condition.assess(ride_text),
         "verdict": condition.verdict(condition.assess(ride_text), metrics),
     }
@@ -119,6 +120,7 @@ def format_report(report):
         out += ["", "No ride telemetry in this session "
                     "(pull the event log from the bike to add it)."]
 
+    out += _clock_lines(report.get("clocks") or {})
     out += _condition_lines(report.get("condition") or {})
     out += _verdict_lines(report.get("verdict") or {})
     out.append("")
@@ -136,6 +138,42 @@ def _verdict_lines(v):
         out.append("    [%-7s] %-24s %s" % (c["level"], c["name"], c["detail"]))
     for c in v["caveats"]:
         out.append("    note: %s" % c)
+    return out
+
+
+def _clock_lines(c):
+    """What the bike's several clocks read, and the correction for its event log.
+
+    A Gen2 bike carries at least three clocks, set independently: the MBB's
+    timestamps the event log, the BMS prints an epoch beside its own, and the
+    dash keeps a third. They disagree — by seconds on one bike, by hours on
+    another — so a ride-log timestamp means nothing until you know which clock
+    wrote it and how far out that clock was.
+    """
+    if not c or not c.get("mbb_clock"):
+        return []
+    out = ["", "== Clocks =="]
+    out.append("  MBB (writes the event log): %s" % c["mbb_clock"])
+    if c.get("bms_clock"):
+        out.append("  BMS:                        %s%s"
+                   % (c["bms_clock"],
+                      "" if not c.get("bms_epoch") else " (epoch %d)" % c["bms_epoch"]))
+    if c.get("dash_clock"):
+        out.append("  Dash:                       %s" % c["dash_clock"])
+    if c.get("captured_at"):
+        out.append("  This capture was taken at:  %s (the capturing machine's clock)"
+                   % c["captured_at"])
+        out.append("  -> the bike's MBB clock is %s"
+                   % condition.describe_offset(c["offset_s"]))
+    if c.get("console_renders_epoch_at_h") is not None:
+        out.append("  The console renders its stored counter at %+g h, so its printed "
+                   "clock and" % c["console_renders_epoch_at_h"])
+        out.append("  the epoch beside it are not the same number.")
+    if c.get("worth_correcting"):
+        out.append("  ! Event-log timestamps are offset by more than ten minutes. Add "
+                   "the figure above")
+        out.append("    to any time in the Rides or Condition blocks to read it in "
+                   "this capture's local time.")
     return out
 
 

@@ -38,7 +38,10 @@ def test_report_shape_from_a_real_capture(tmp_path):
     rep = report.analyze_folder(_sim_session(tmp_path))
     assert set(rep) == {"session", "units", "counts", "health", "rides",
                         "ride_source", "ride_log_truncated", "condition",
-                        "verdict"}
+                        "verdict", "clocks"}
+    # the bike carries several independently-set clocks and the event log is
+    # timestamped by one of them, so what they read travels with the report
+    assert "offset_s" in rep["clocks"]
     # the verdict is always present; "unknown" is its answer when a capture
     # carries no evidence, never an absent key that reads as fine
     assert rep["verdict"]["level"] in ("ok", "watch", "concern", "unknown")
