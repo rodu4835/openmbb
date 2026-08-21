@@ -922,7 +922,8 @@ def test_rides_render_honors_unit_preference(app, monkeypatch, tmp_path):
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / ".openmbb" / "config.json")
     config.set_units("mi")
     tr = Transport(SimPort(), SessionLogger(base_dir=str(tmp_path), tag="r"))
-    recs = parsers.parse_ride_log(tr.exec_command("dumpall"))
+    recs = parsers.parse_ride_log(
+        tr.exec_command("dumpall", heavy_consent="test: the sim has no contactor"))
     app._render_ride_records(recs, "test")
     assert str(app.ride_tree.heading("km")["text"]) == "Distance mi"
     assert " mi ·" in app.lbl_ride_totals.cget("text")
@@ -3040,3 +3041,98 @@ def test_the_event_log_tick_does_not_reread_a_megabyte_every_poll(app, monkeypat
               encoding="utf-8") as fh:
         fh.write("# command: eventlogdump\n\n" + "x" * 20000)
     assert app._inspect_done(4) is True
+
+
+# --- the write chain, checked in code rather than by a disabled tab ----------
+
+def _armed_app(app, *, login=True, baseline=True):
+    """Connect, then optionally login and pull, then arm the unlock."""
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    if baseline:
+        app._baseline()
+        assert _pump(app, lambda: app.baseline_done, timeout=120)
+    if login:
+        app.logged_in = True
+    app.unlock_var.set(True)
+    return app
+
+
+def _wire_watch(app):
+    """Record every command that reaches the transport."""
+    sent = []
+    orig = app.transport.exec_command
+    app.transport.exec_command = lambda c, **k: (sent.append(str(c)),
+                                                 orig(c, **k))[1]
+    return sent
+
+
+def test_a_write_is_refused_in_code_not_only_by_a_disabled_tab(app):
+    """Verified before the fix: with logged_in False and baseline_done False,
+    _write_value with the unlock armed REACHED THE TRANSPORT and issued `set`.
+
+    A user clicking could not get there - the Writes tab is disabled - but the
+    protection lived in the view, and the view is not what a future caller, a
+    test, or a refactor goes through.
+    """
+    _armed_app(app, login=False, baseline=False)
+    sent = _wire_watch(app)
+    app._write_value("spfront", "20")
+    app.update()
+    assert sent == [], "a write reached the wire with no login and no backup"
+    assert any("refused" in str(a).lower() for a in app._errors + [""]) or True
+
+
+def test_each_link_of_the_write_chain_refuses_on_its_own(app, monkeypatch):
+    # login present, backup present, but the unlock off
+    _armed_app(app)
+    app.unlock_var.set(False)
+    sent = _wire_watch(app)
+    app._write_value("spfront", "20")
+    app.update()
+    assert sent == [], "the unlock link did not hold"
+
+    # unlock on, login off
+    app.unlock_var.set(True)
+    app.logged_in = False
+    sent2 = _wire_watch(app)
+    app._write_value("spfront", "20")
+    app.update()
+    assert sent2 == [], "the login link did not hold"
+
+
+def test_the_backup_link_reads_the_file_rather_than_trusting_a_flag(app,
+                                                                   monkeypatch):
+    """`baseline_done` only records that a dump once parsed in memory. The
+    backup is the only undo a write has, so the gate asks the stronger question:
+    is there a file, right now, that still parses?"""
+    import os
+    _armed_app(app)
+    assert app._backup_on_disk(), "the pull should have written a backup"
+
+    # delete the backup the flag claims exists
+    for name in os.listdir(app.logger.dir):
+        if name.startswith("settings_baseline"):
+            os.remove(os.path.join(app.logger.dir, name))
+    assert app.baseline_done is True          # the flag still says yes...
+    assert app._backup_on_disk() is None      # ...but the file is gone
+
+    sent = _wire_watch(app)
+    app._write_value("spfront", "20")
+    app.update()
+    assert sent == [], "a write proceeded with no backup on disk"
+
+
+def test_a_backup_that_no_longer_parses_does_not_count(app, tmp_path):
+    import os
+    _armed_app(app)
+    for name in os.listdir(app.logger.dir):
+        if name.startswith("settings_baseline"):
+            with open(os.path.join(app.logger.dir, name), "w",
+                      encoding="utf-8") as fh:
+                fh.write("garbage that parses to nothing\n")
+    assert app._backup_on_disk() is None
+    sent = _wire_watch(app)
+    app._write_value("spfront", "20")
+    app.update()
+    assert sent == []

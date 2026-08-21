@@ -210,7 +210,8 @@ def test_sim_dumplogs_is_invalid_like_the_real_bike(tmp_path):
 def test_sim_heavy_dump_uses_real_field_keys(tmp_path):
     # E2: the heavy `dumpall` emits the real zero-log-parser DECODED field keys
     tr = Transport(SimPort(), SessionLogger(base_dir=str(tmp_path), tag="da"))
-    dump = tr.exec_command("dumpall", idle_timeout=3.0, max_time=60.0)
+    dump = tr.exec_command("dumpall", idle_timeout=3.0, max_time=60.0,
+                            heavy_consent="test: the sim has no contactor")
     assert "Riding" in dump and "PackTemp: h" in dump and "MotTemp:" in dump
     recs = parsers.parse_ride_log(dump)
     assert len(recs) > 100
@@ -269,7 +270,8 @@ def test_health_value_is_none_when_the_capture_lacks_it(tmp_path):
 def test_rides_summary_from_sim(tmp_path):
     # ride telemetry now comes from a heavy dump / external log, not the baseline
     tr = Transport(SimPort(), SessionLogger(base_dir=str(tmp_path), tag="r"))
-    summ = rides.summarize_rides(parsers.parse_ride_log(tr.exec_command("dumpall")))
+    summ = rides.summarize_rides(parsers.parse_ride_log(
+        tr.exec_command("dumpall", heavy_consent="test: the sim has no contactor")))
     assert summ["totals"]["ride_count"] >= 1
     assert summ["totals"]["samples"] > 100
     assert any(r["soc_per_km"] is not None for r in summ["rides"])

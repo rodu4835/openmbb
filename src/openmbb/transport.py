@@ -85,6 +85,26 @@ HEAVY_COMMANDS = ["eventlogdump", "dumpall"]
 LONG_COMMANDS = set(DUMP_COMMANDS) | set(HEAVY_COMMANDS)
 
 
+def timeouts_for(cmd):
+    """(idle_timeout, max_time) for a command. One table, every caller.
+
+    Two entries, not one constant: LONG_COMMANDS folds DUMP and HEAVY together,
+    so raising a shared value to suit the event log would add 30 s of dead wait
+    to every database pull through `errorlogdump`.
+
+    The heavy idle window is 45 s because a real contactor stall on the bike
+    exceeded the 30 s first used. Being wrong upward costs at most 30 s of
+    waiting on a stream that has already finished; being wrong downward truncates
+    a 1 MB read that cost a permanent error-log entry to obtain.
+    """
+    head = (str(cmd).strip().split() or [""])[0].lower()
+    if head in HEAVY_COMMANDS:
+        return 45.0, 900.0
+    if head in DUMP_COMMANDS:
+        return 15.0, 900.0
+    return 2.5, 60.0
+
+
 class SessionLogger:
     def __init__(self, base_dir=None, tag="session"):
         # microsecond precision so two connects in the same second (a fast
@@ -242,13 +262,36 @@ class Transport:
             self.logger.raw("RX", buf)
 
     def exec_command(self, cmd, idle_timeout=2.0, max_time=30.0, progress_cb=None,
-                     redact=None, _write_ok=False, confirmed=False):
+                     redact=None, _write_ok=False, confirmed=False,
+                     heavy_consent=None):
         """Send `cmd`, return the response text. Refuses control characters and
         anything the blocklist bans. If `redact` is given, that substring (e.g. a
         typed password) is registered with the session logger and masked in
         EVERYTHING written to disk for the rest of the session — including a late
         echo caught by a later command's drain. `_write_ok` is private: only
-        Transport.write_setting sets it, to permit one validated write."""
+        Transport.write_setting sets it, to permit one validated write.
+
+        `heavy_consent` gates HEAVY_COMMANDS and nothing else. It is a short
+        string describing HOW consent was obtained ("gui dialog, 2026-08-21
+        15:09"), journalled into the session before the first byte goes out, so
+        the capture itself can answer "did a human agree to this?" long after the
+        dialog is gone. `confirmed=True` does NOT satisfy it: that flag is about
+        the blocklist, and conflating two unrelated gates is how the raw-console
+        box would have leaked past this one."""
+        # A heavy read can make the BMS OPEN THE DRIVETRAIN CONTACTOR and writes
+        # a PERMANENT "Line Contactor o/c" entry this app cannot clear. The gate
+        # used to be two dialogs in gui.py, which protected the buttons and
+        # nothing else - a script, a REPL or a future headless caller reached the
+        # wire unchallenged. It lives here now, where there is no way around it.
+        head = (str(cmd).strip().split() or [""])[0].lower()
+        if head in HEAVY_COMMANDS and not (isinstance(heavy_consent, str)
+                                           and heavy_consent.strip()):
+            raise BlockedCommandError(
+                "'%s' reads the full event log and can make the BMS open the "
+                "drivetrain contactor, leaving a permanent error-log entry this "
+                "app CANNOT clear. It runs only with explicit consent from "
+                "somebody who knows the bike is safely parked - pass "
+                "heavy_consent describing how that was obtained." % head)
         # Fail closed on control characters: the whole string goes on the wire,
         # so an embedded CR/LF would smuggle a second (possibly blocked) command
         # past the first-token check. Single-line, 7-bit ASCII commands only.

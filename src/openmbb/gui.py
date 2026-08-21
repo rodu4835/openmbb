@@ -40,7 +40,8 @@ from .theme import PALETTE, apply_theme
 from .transport import (DUMP_COMMANDS, HEAVY_COMMANDS, LONG_COMMANDS,
                         READ_COMMANDS, ConsoleRebootError, SessionLogger, Transport,
                         first_number, list_serial_ports, looks_like_prompt,
-                        nonprintable_ratio, open_real_port, parse_settings_dump)
+                        nonprintable_ratio, open_real_port, parse_settings_dump,
+                        timeouts_for)
 
 # Connect-tab / cable-wizard button labels. Cable verification (receive-only) is
 # offered via the "Test your cable" wizard; the live connect is a single button.
@@ -3218,6 +3219,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             except Exception:
                 return False
 
+        def _heavy_consent(self, cmd):
+            """The consent record for a heavy read, or None if it is not one.
+
+            Minted only after the user has been through the contactor confirm.
+            It is journalled before the first byte, so the capture itself
+            answers "did somebody agree to this?" once the dialog is gone.
+            """
+            head = (str(cmd).strip().split() or [""])[0].lower()
+            if head not in HEAVY_COMMANDS:
+                return None
+            return ("gui dialog accepted at %s"
+                    % _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"))
+
         def _read_heavy(self, cmd, confirmed=False, out=None, then=None):
             # Refuse up front while another op is in flight — otherwise we'd open
             # the blocking modal and then _run_bg would refuse the read behind it,
@@ -3244,11 +3258,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # A2: raise the blocking modal BEFORE the first wire byte, then run the
             # read (modal=True routes completion through the Continue finalizer).
             self._show_read_modal("Reading '%s' from the bike" % cmd)
-            # 45 s idle: the real-bike contactor stall during a heavy dump can pause
-            # the stream longer than the 30 s we first used (which finished, but with
-            # no margin) — give it room so the read isn't cut mid-log.
-            self._read_cmd(cmd, idle_timeout=45.0, confirmed=confirmed, out=out,
-                           then=then, modal=True)
+            # timeouts come from the one table now (transport.timeouts_for), so
+            # this command cannot get a different idle window depending on which
+            # button started it
+            idle, _mx = timeouts_for(cmd)
+            self._read_cmd(cmd, idle_timeout=idle, confirmed=confirmed, out=out,
+                           then=then, modal=True,
+                           heavy_consent=self._heavy_consent(cmd))
 
         def _toggle_watch(self):
             # E1: start/stop the repeat-read timer.
@@ -3284,7 +3300,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.after(secs * 1000, self._watch_tick)
 
         def _read_cmd(self, cmd, quiet=False, idle_timeout=None, confirmed=False,
-                      out=None, then=None, modal=False):
+                      out=None, then=None, modal=False, heavy_consent=None):
             emit = out or self._out          # button reads -> txt_out; Console -> its own
             # A1/SAFE-2: classify by the lowercased FIRST TOKEN (like the transport),
             # not an exact full-string match — so a raw-box variant such as
@@ -3304,7 +3320,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 out = self.transport.exec_command(
                     cmd, idle_timeout=idle,
                     max_time=900.0 if is_dump else 60.0,
-                    progress_cb=prog if is_dump else None, confirmed=confirmed)
+                    progress_cb=prog if is_dump else None, confirmed=confirmed,
+                    heavy_consent=heavy_consent)
                 return out, self.transport.last_saved_path
 
             def apply_read(result):
@@ -3634,6 +3651,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # once, up front — it carries the contactor risk). If they decline, the
             # pull runs without it and the completion note says it wasn't captured.
             include_heavy = bool(self.baseline_heavy_var.get())
+            # minted once, after the confirm below, and handed to the one command
+            # that needs it; None for every ordinary read in the sequence
+            heavy_consent = None
             if include_heavy:
                 if messagebox.askokcancel(APP_NAME,
                         "You asked to also pull the full event log (eventlogdump) as "
@@ -3643,6 +3663,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         "recovers when the read finishes). Keep the bike SAFELY "
                         "PARKED.\n\nInclude it?"):
                     seq = seq + ["eventlogdump"]
+                    heavy_consent = self._heavy_consent("eventlogdump")
                 else:
                     include_heavy = False
                     self.baseline_heavy_var.set(False)
@@ -3671,9 +3692,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                                    "so far." % (c, n // 1024))))
                     # C6: each command tolerant — one failure doesn't discard the pass
                     try:
+                        idle, mx = timeouts_for(cmd)
                         out = self.transport.exec_command(
-                            cmd, idle_timeout=15.0 if is_dump else 2.5,
-                            max_time=900.0 if is_dump else 60.0, progress_cb=prog)
+                            cmd, idle_timeout=idle, max_time=mx,
+                            progress_cb=prog,
+                            heavy_consent=(heavy_consent
+                                           if cmd in HEAVY_COMMANDS else None))
                         results[cmd] = out
                         self._cbq.put(lambda c=cmd: self._baseline_mark(c, "ok"))
                         # persist the settings baseline the MOMENT `set` returns —
@@ -4376,11 +4400,55 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self._open_new_editor(row)
                 return "break"
 
+        def _backup_on_disk(self):
+            """The settings backup, re-read and re-parsed from disk.
+
+            `baseline_done` only records that a dump once parsed in memory. This
+            asks the stronger question the write gate is actually relying on:
+            is there a file, right now, that still parses into settings? A write
+            is the one operation whose undo IS that file.
+            """
+            logger = getattr(self, "logger", None)
+            if logger is None or not getattr(logger, "dir", None):
+                return None
+            try:
+                names = sorted(n for n in os.listdir(logger.dir)
+                               if n.startswith("settings_baseline")
+                               and n.endswith(".txt"))
+            except OSError:
+                return None
+            for name in reversed(names):          # newest first
+                path = os.path.join(logger.dir, name)
+                try:
+                    with open(path, encoding="utf-8", errors="replace") as fh:
+                        parsed, _order = parse_settings_dump(fh.read())
+                except OSError:
+                    continue
+                if parsed:
+                    return path
+            return None
+
+        def _write_refused(self, why):
+            messagebox.showwarning(
+                APP_NAME,
+                "Write refused \u2014 %s.\n\nEvery write on this bike needs all "
+                "four: a connection, a login, a settings backup that parses, and "
+                "the master UNLOCK WRITES gate. The backup is the only undo a "
+                "write has." % why)
+
         def _write_value(self, name, new_val):
+            # The four links of the write chain, checked HERE. Three of them used
+            # to be enforced only by the Writes tab being disabled - a property of
+            # the user interface, not a check this function performs.
+            if not self.connected:
+                return self._write_refused("not connected to the bike")
+            if not self.logged_in:
+                return self._write_refused("not logged in")
+            if not self._backup_on_disk():
+                return self._write_refused(
+                    "no settings backup on disk that still parses")
             if not self.unlock_var.get():
-                messagebox.showwarning(APP_NAME, "Writes are locked. Toggle the master "
-                                       "'UNLOCK WRITES' gate first.")
-                return
+                return self._write_refused("the master UNLOCK WRITES gate is off")
             new_val = (new_val or "").strip()
             if not new_val or name not in WRITE_WHITELIST:
                 return

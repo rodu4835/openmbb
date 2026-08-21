@@ -326,7 +326,8 @@ def test_sim_eeprom_gated_at_level0_but_obd_in_help():
 def test_dump_streams_and_reports_progress():
     tr = make_transport()
     seen = []
-    big = tr.exec_command("dumpall", idle_timeout=3.0, max_time=60.0,
+    big = tr.exec_command("dumpall", heavy_consent="test: the sim has no contactor",
+                     idle_timeout=3.0, max_time=60.0,
                           progress_cb=lambda n: seen.append(n))
     assert len(big) > 100_000
     assert len(seen) > 3
@@ -474,7 +475,8 @@ def test_truncated_read_marks_incomplete():
                       (0.22, b" partial data with no closing prompt\r\n")])
     tr = Transport(port, SessionLogger(base_dir=tempfile.mkdtemp(prefix="zctr_"),
                                        tag="t"))
-    out = tr.exec_command("dumpall", idle_timeout=0.15, max_time=3.0)
+    out = tr.exec_command("dumpall", heavy_consent="test: the sim has no contactor",
+                          idle_timeout=0.15, max_time=3.0)
     assert "TRUNCATED" in out
     assert tr.last_truncated is True
 
@@ -528,7 +530,8 @@ def test_eventlogdump_complete_without_prompt_reports_captured_not_truncated():
     chunks = [b"eventlogdump\r\n", _eventlog_bytes(50, 50)]
     tr = Transport(ScriptedPort(chunks),
                    SessionLogger(base_dir=tempfile.mkdtemp(prefix="zev_"), tag="t"))
-    out = tr.exec_command("eventlogdump", idle_timeout=0.3, max_time=5.0,
+    out = tr.exec_command("eventlogdump", heavy_consent="test: the sim has no contactor",
+                          idle_timeout=0.3, max_time=5.0,
                           confirmed=True)
     assert "TRUNCATED" not in out
     assert "event log captured (50 of 50" in out
@@ -541,7 +544,8 @@ def test_eventlogdump_genuinely_short_still_truncated():
     chunks = [b"eventlogdump\r\n", _eventlog_bytes(50, 40)]
     tr = Transport(ScriptedPort(chunks),
                    SessionLogger(base_dir=tempfile.mkdtemp(prefix="zev_"), tag="t"))
-    out = tr.exec_command("eventlogdump", idle_timeout=0.3, max_time=5.0,
+    out = tr.exec_command("eventlogdump", heavy_consent="test: the sim has no contactor",
+                          idle_timeout=0.3, max_time=5.0,
                           confirmed=True)
     assert "TRUNCATED" in out
     assert "event log captured" not in out
@@ -699,3 +703,61 @@ def test_session_files_written():
     tr.exec_command("bms")
     assert os.path.isfile(tr.logger.raw_path)
     assert len(os.listdir(tr.logger.dir)) >= 2
+
+
+# --- the two gates that were enforced by the user interface ------------------
+
+def test_a_heavy_read_is_refused_below_the_gui(tmp_path):
+    """The contactor gate used to be two dialogs in gui.py and nothing beneath.
+
+    transport.py documented the arrangement as "These are NEVER auto-run - the
+    GUI gates them behind an explicit confirm dialog", which is a comment
+    describing a convention. Any script, REPL or future headless caller reached
+    the wire unchallenged and could open the drivetrain contactor, leaving a
+    permanent error-log entry the app cannot clear.
+    """
+    from openmbb.safety import BlockedCommandError
+    tr = Transport(SimPort(), SessionLogger(base_dir=str(tmp_path), tag="hv"))
+    for cmd in ("eventlogdump", "dumpall"):
+        with pytest.raises(BlockedCommandError, match="safely parked"):
+            tr.exec_command(cmd)
+        # nothing may reach the wire on a refusal
+        assert cmd.encode() not in getattr(tr.port, "written", b"")
+
+
+def test_confirmed_does_not_satisfy_the_contactor_gate(tmp_path):
+    # `confirmed` is about the BLOCKLIST. Conflating two unrelated gates is how
+    # the raw-console box would have leaked past this one.
+    from openmbb.safety import BlockedCommandError
+    tr = Transport(SimPort(), SessionLogger(base_dir=str(tmp_path), tag="hv2"))
+    with pytest.raises(BlockedCommandError):
+        tr.exec_command("eventlogdump", confirmed=True)
+    with pytest.raises(BlockedCommandError):
+        tr.exec_command("eventlogdump", heavy_consent="   ")   # empty is not consent
+    # a real consent record runs
+    assert len(tr.exec_command("eventlogdump", heavy_consent="test")) > 100
+
+
+def test_an_ordinary_read_is_untouched_by_the_gate(tmp_path):
+    tr = Transport(SimPort(), SessionLogger(base_dir=str(tmp_path), tag="hv3"))
+    for cmd in ("bms", "stats", "errorlogdump"):
+        assert len(tr.exec_command(cmd)) > 20, cmd
+
+
+def test_one_timeout_table_not_two_call_sites():
+    """The same contactor-opening command got a 3x shorter idle window depending
+    on which button started it - 45 s from the Read tab, 15 s folded into the
+    database pull, where the 45 carries a comment saying a real stall exceeded
+    the 30 s first used.
+
+    A shared constant cannot express this: LONG_COMMANDS folds DUMP and HEAVY
+    together, so raising one value would add 30 s of dead wait to every database
+    pull through errorlogdump.
+    """
+    from openmbb.transport import timeouts_for
+    assert timeouts_for("eventlogdump") == (45.0, 900.0)
+    assert timeouts_for("dumpall") == (45.0, 900.0)
+    assert timeouts_for("errorlogdump") == (15.0, 900.0)     # unchanged
+    assert timeouts_for("bms") == (2.5, 60.0)
+    # keyed on the FIRST TOKEN, like the transport's own classification
+    assert timeouts_for("  EventLogDump  ") == (45.0, 900.0)
