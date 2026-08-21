@@ -892,12 +892,47 @@ _FAULT_CLASSES = (
 def fault_span(f):
     """A fault class's date range, phrased for a reader. Some console entries
     carry no clock at all — they are logged before the bike knows the time —
-    and saying so beats printing a question mark."""
+    and saying so beats printing a question mark.
+
+    The dates are the ONSETS' dates. A class whose every frame was a clearing has
+    no onset in this capture to date, which is a real thing to say rather than a
+    gap to fill with the clearing's timestamp.
+    """
     if not f.get("first"):
+        if f.get("clearings"):
+            return "no onset in this capture (every frame was a clearing)"
         return "no dates logged"
     if f["first"] == f["last"]:
         return f["first"]
     return "%s to %s" % (f["first"], f["last"])
+
+
+def fault_detail(f):
+    """"23 frames: 13 onsets, 10 clearings", or "" when nothing cleared."""
+    if not f.get("clearings"):
+        return ""
+    return "%d frames: %d onset%s, %d clearing%s" % (
+        f["count"], f["onsets"], "" if f["onsets"] == 1 else "s",
+        f["clearings"], "" if f["clearings"] == 1 else "s")
+
+
+# A logged entry begins with its five-digit record number. Anything else in the
+# captured text is console output that happened to arrive during the read -
+# notably the asynchronous DEBUG trace the firmware emits when something goes
+# wrong WHILE the tool is talking to it. Counting those made the same bike report
+# different totals on two reads of the same log: 26 Sevcon frames against a table
+# holding 23, and 16 precharge problems against 12.
+_LOG_ENTRY_RE = re.compile(r"^\s*\d{5}\s")
+
+# A Sevcon emergency frame carrying error code 0x0000 is the controller saying
+# the fault has CLEARED. Ten of one capture's 23 frames were clearings, and the
+# last of them dated the bike's most recent "fault" to what was actually a reset.
+_EMCY_CODE_RE = re.compile(r"error\s*code[:\s]*0x([0-9a-f]{4})", re.I)
+
+
+def _is_clearing(line):
+    m = _EMCY_CODE_RE.search(line)
+    return bool(m) and int(m.group(1), 16) == 0
 
 
 def fault_history(event_log):
@@ -906,21 +941,31 @@ def fault_history(event_log):
     The error log is a small rolling buffer holding a handful of entries; the
     event log holds thousands, so this reads the event log and sees months where
     the error log sees days.
+
+    Two things this is careful about. Only NUMBERED log entries are counted, so a
+    burst of live DEBUG trace caught mid-read cannot inflate a total. And a frame
+    that says a fault CLEARED does not date the fault: the count keeps every
+    frame, because a controller resetting itself ten times is worth seeing, but
+    `first` and `last` come from onsets alone.
     """
     out = []
     for name, pattern in _FAULT_CLASSES:
         rx = re.compile(pattern, re.I)
         stamps = []
-        count = 0
+        count = clearings = 0
         for line in (event_log or "").splitlines():
-            if not rx.search(line):
+            if not _LOG_ENTRY_RE.match(line) or not rx.search(line):
                 continue
             count += 1
+            if _is_clearing(line):
+                clearings += 1
+                continue                 # counted, but it dates nothing
             ts = _TS_RE.search(line)
             if ts:
                 stamps.append(ts.group(0))
         if count:
             out.append({"name": name, "count": count,
+                        "onsets": count - clearings, "clearings": clearings,
                         "first": stamps[0] if stamps else None,
                         "last": stamps[-1] if stamps else None,
                         "graded": False})

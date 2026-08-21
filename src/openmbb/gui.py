@@ -4865,8 +4865,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                      "log's resolution (~10 min, whole amps)"
                      % (ch["peak_amps_median"], ch["peak_amps_max"]), "measured")
             for f in a["faults"]:
-                _row(f["name"], "%d logged · %s · counted, not graded"
-                     % (f["count"], condition_mod.fault_span(f)), "measured")
+                detail = condition_mod.fault_detail(f)
+                _row(f["name"], "%d logged · %s · counted, not graded%s"
+                     % (f["count"], condition_mod.fault_span(f),
+                        (" · %s, dates are the onsets" % detail) if detail else ""),
+                     "measured")
             for ev in a["stats_resets"]:
                 _row("Statistics RESET",
                      "%s — every 'lifetime' figure on the Health tab dates "

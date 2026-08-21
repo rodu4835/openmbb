@@ -170,13 +170,48 @@ that ceiling is worth more than anything that polishes what sits behind it.
   `Pack Temps : 27C 27C 27C 28C -100C -100C -100C -100C`. Any future consumer of that
   field has to exclude it.
 
-- [ ] **Decode the error-log conditions.** `modv=0mV, maxv=0mV, minv=4294967295mV` is
-  shown raw; that is a sentinel and two zeroes, and it means "the module did not answer".
-  Say so.
+- [x] **Decode the error-log conditions.** *(investigated; the premise was wrong and the
+  fix is a REFUSAL, not a decoding.)* "The module did not answer" could not be
+  substantiated and must not appear in the tool - it is a plausible mechanism, not a
+  demonstrated one.
 
-- [ ] **Attempt the undecodable entries.** About 5% of event-log entries are raw hex even
-  Zero's own decoder renders as `0x.. ???`. Worth one investigation to see whether any
-  carry a known shape.
+  What the data does prove is arithmetic, needs no reference bike and no firmware
+  knowledge: **`maxv` (0 mV) is below `minv` (4294967295 mV)**, and no max/min pair over a
+  non-empty set can invert. So the three fields are placeholders, not readings. The
+  refusal predicate is `maxv < minv` rather than matching the 0xFFFFFFFF constant, because
+  the inversion test holds on any bike and any firmware while a constant match is
+  pattern-recognition on one machine.
+
+  Also established: the sentinel is 100% POST-reflash (earliest 06/24/2026, eleven days
+  after), so it is not a stale-layout artifact - the same firmware wrote and read it.
+
+- [ ] **Refuse the module-connect aggregate triple, and report the association.** Ship the
+  `maxv < minv` refusal above as a console-echo note (raw bytes stay visible, unedited),
+  plus a per-capture measured association on the fault line: on the reference bike all 54
+  module-connect failures fell within 60 s of a "BMS Disable - High Temp". Printed as an
+  association, never as a cause - the entry does not state one. Computed per capture, and
+  omitted entirely when there are no thermal disables. *Cost:* small; the design is
+  settled, only the building is left.
+
+- [x] **Attempt the undecodable entries.** *(CLOSED - there is nothing to decode, and the
+  premise does not describe this data path.)* The "about 5%" figure is not reproducible by
+  any measure: the true rate is **16 rows out of 25,415 entry-reads**, and there are zero
+  `???` markers anywhere in the tree. Those 16 are not an unknown entry type at all - they
+  are a 64-word ARM stack dump the firmware printed deliberately during one watchdog
+  reset, self-labelled by the `Stack: 0x2000F970` entry directly above them. Resolving
+  them to symbols needs a Rev 12 firmware image that is not obtainable, so they stay raw
+  and are already rendered correctly.
+
+  The `0x.. ???` rendering belongs to BINARY-log decoders. This MBB rejects `dumplogs`
+  outright ("Sorry, 'dumplogs' is an invalid command"), so that path could not be
+  exercised - recorded as not run, never as a pass and never as a refutation.
+
+  **The real undecodable population is something else entirely, 24x larger, and already
+  handled correctly**: 1,051 records of firmware-revision layout mismatch, splitting
+  perfectly at the 2026-06-13 reflash (526/526 and 525/525 corrupt before, 0 of 16,729
+  after). The existing guard in `_mode_samples` refuses them, which is right - a wrong
+  cell voltage there reads as a pack that never sags, the unsafe direction. Never attempt
+  to decode that population.
 
 - [x] **`parse_ride_log` ignores the `BattTemp:` dialect** *(handled, and deliberately
   NOT by merging it into `pack_temp_c`.)* It is parsed into its own `batt_temp_c`, so the
@@ -206,6 +241,16 @@ that ceiling is worth more than anything that polishes what sits behind it.
   measuring one thing with another thing's ruler. There is a test with a bike stating 45 C
   that pins this, because a bike stating 50 C cannot distinguish the bike's figure from the
   hardcoded band.
+
+- [ ] **Rename or re-describe the "Module connect failures" fault class.** On the
+  reference bike 100% of them are downstream of thermal disables, so the name implies a
+  connection defect the evidence does not support. The count is honest; the label may not
+  be. Wants a second bike before renaming.
+
+- [ ] **`dumplogs` is called but is not a real rev-41 command.** `transport.py` records
+  that the bike replies "invalid command", yet `condition`/`health`/`library` still fall
+  back to `session.cmd("dumplogs")`. Establish whether that is a harmless dead path kept
+  for pre-rev-41 captures or a silent fallback masking a missing read.
 
 ## Tier 4 — structural
 

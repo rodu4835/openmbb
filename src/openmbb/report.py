@@ -468,6 +468,11 @@ def _condition_lines(c, units="C"):
     for f in c.get("faults") or []:
         out.append("  %-27s %d logged, %s"
                    % (f["name"] + ":", f["count"], condition.fault_span(f)))
+        detail = condition.fault_detail(f)
+        if detail:
+            # a controller that resets itself is worth seeing, but a reset is not
+            # a fault and must not date one
+            out.append("    %s - the dates above are the onsets" % detail)
     for ev in c.get("stats_resets") or []:
         out.append("  ! statistics were RESET at %s - every 'lifetime' figure "
                    "above dates from then, not from" % (ev["when"] or "an unlogged time"))

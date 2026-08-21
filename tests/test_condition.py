@@ -805,3 +805,78 @@ def test_the_report_names_the_dialect_rather_than_going_quiet(tmp_path):
     assert "not one riding record in this capture carries a pack temperature" in text
     assert "prints a single `BattTemp`" in text
     assert "report the pack cooler than it got" in text
+
+
+# --- what counts as a logged fault, and what dates one -----------------------
+
+def _emcy(rec, ts, code):
+    return (" %05d     %s   SEVCON CAN EMCY Frame      Error Code: 0x%s, "
+            "Error Reg: 0x44" % (rec, ts, code))
+
+
+def test_live_console_trace_caught_mid_read_is_not_a_logged_fault():
+    # The firmware emits an asynchronous DEBUG trace when something goes wrong
+    # WHILE the tool is talking to it. Counting those made the same bike report
+    # different totals on two reads: 26 Sevcon frames against a table of 23.
+    log = "\n".join([
+        _emcy(1, "06/26/2026 08:12:27", "4000"),
+        "ZERO MBB> DEBUG:        326648  ..\\src\\Application\\zero_mbb_can.c "
+        ": line 214 - SEVCON CAN EMCY Frame Error Code: 0x4000",
+    ])
+    f = [x for x in condition.fault_history(log) if "Sevcon" in x["name"]][0]
+    assert f["count"] == 1, "console trace was counted as a log entry"
+
+
+def test_a_fault_clearing_does_not_date_the_fault():
+    # Error Code 0x0000 is the controller saying the fault CLEARED. Ten of one
+    # capture's 23 frames were clearings, and the last of them dated the bike's
+    # most recent "fault" to what was actually a reset.
+    log = "\n".join([
+        _emcy(1, "06/26/2026 08:12:27", "4000"),      # onset
+        _emcy(2, "08/12/2026 19:13:10", "3100"),      # onset
+        _emcy(3, "08/12/2026 19:14:55", "0000"),      # clearing
+    ])
+    f = [x for x in condition.fault_history(log) if "Sevcon" in x["name"]][0]
+    # every frame still counts - a controller resetting itself is worth seeing
+    assert f["count"] == 3
+    assert f["onsets"] == 2 and f["clearings"] == 1
+    # ...but the dates are the onsets'
+    assert f["last"] == "08/12/2026 19:13:10"
+    assert "19:14:55" not in condition.fault_span(f)
+    assert condition.fault_detail(f) == "3 frames: 2 onsets, 1 clearing"
+
+
+def test_a_class_that_only_ever_cleared_says_so_rather_than_borrowing_a_date():
+    log = _emcy(1, "08/12/2026 19:14:55", "0000")
+    f = [x for x in condition.fault_history(log) if "Sevcon" in x["name"]][0]
+    assert f["count"] == 1 and f["onsets"] == 0
+    assert f["first"] is None
+    assert "no onset in this capture" in condition.fault_span(f)
+    assert "19:14:55" not in condition.fault_span(f)
+
+
+def test_a_class_with_nothing_to_clear_prints_no_detail():
+    log = _emcy(1, "06/26/2026 08:12:27", "4000")
+    f = [x for x in condition.fault_history(log) if "Sevcon" in x["name"]][0]
+    assert condition.fault_detail(f) == ""
+
+    # And the classes that carry NO error code at all - most of them - must not
+    # be read as clearings for want of one. Absence of a code is absence of
+    # evidence, not evidence of a reset; treating it as one would strip the dates
+    # off every precharge and module-connect entry in the log.
+    pre = " 00001     06/24/2026 22:20:35   Precharge Lost. CapV: 78V"
+    g = [x for x in condition.fault_history(pre) if "Precharge" in x["name"]][0]
+    assert g["count"] == 1 and g["clearings"] == 0 and g["onsets"] == 1
+    assert g["first"] == "06/24/2026 22:20:35"
+    assert condition.fault_detail(g) == ""
+
+
+def test_the_report_says_the_dates_are_onsets_when_anything_cleared(tmp_path):
+    log = "\n".join([
+        _emcy(1, "06/26/2026 08:12:27", "4000"),
+        _emcy(2, "08/12/2026 19:14:55", "0000"),
+    ])
+    s = sessions.Session(str(tmp_path), {"eventlogdump": log}, "")
+    text = report.format_report(report.analyze_session(s))
+    assert "2 frames: 1 onset, 1 clearing" in text
+    assert "the dates above are the onsets" in text
