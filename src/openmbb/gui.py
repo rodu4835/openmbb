@@ -4701,12 +4701,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 text = self.analyze_session.cmd(cmd) or ""
                 if text.strip():
                     break
-            a = condition_mod.assess(text)
-            self._cond_verdict = condition_mod.verdict(
-                a, health_mod.health_snapshot(self.analyze_session,
-                                              config.get_temp_units()))
-            self._paint_verdict()
             tu = config.get_temp_units()
+            # hoisted: assess now wants the lifetime temperature counter, and the
+            # snapshot was being built a line later anyway
+            metrics = health_mod.health_snapshot(self.analyze_session, tu)
+            a = condition_mod.assess(
+                text,
+                max_batt_temp_c=parsers.parse_stats(
+                    self.analyze_session.cmd("stats")).get("max_batt_temp_c"),
+                temp_units=tu)
+            self._cond_verdict = condition_mod.verdict(a, metrics)
+            self._paint_verdict()
 
             def _t(c):
                 return health_mod.fmt_temp(c, tu) or "n/a"

@@ -107,9 +107,54 @@ that ceiling is worth more than anything that polishes what sits behind it.
 
 ## Tier 3 — more from the data we already read
 
-- [ ] **Normalise temperature against ambient.** `AmbTemp` is parsed and unused. It
-  separates a hot pack from a hot day, which is exactly the distinction the 60 C battery
-  alert needs before it means anything.
+- [x] **Normalise temperature against ambient.** *(shipped, but NOT as written - see
+  below)* `AmbTemp` separates a hot pack from a hot day, which is exactly the distinction
+  the 60 C battery alert needs before it means anything.
+
+  **Two things in the original item were false, and the investigation is worth more than
+  the feature.** First, `AmbTemp` was never unused: `rides.consumption` has always
+  reported the ambient range a measurement was taken across. Second, and decisively, the
+  sensor does not measure one thing. On the reference bike it reads a median 29 C between
+  midnight and 06:00 while charging, where the *same sensor* reads 16 C riding at those
+  same hours, and it sits at or above the pack in 107 of 1424 charging samples. It is on
+  the bike, not in the air. So no aggregate of it is computed anywhere, and an ambient may
+  only ever be printed beside a pack temperature off the same log line.
+
+  A `pack rise over ambient` metric was designed, measured, and **rejected**: across two
+  captures of the same bike the absolute peak moved 1 C while the rise p90 moved 4 C, so
+  normalising against a soaked ~1 C-resolution thermistor *adds* variance to the steadier
+  number already on screen. Rise also turns out to be a ride-duration statistic (median
+  +11 C in the first 5 minutes, +31 C by 15-20), so reporting it as a pack property would
+  have dressed up how long the bike gets ridden.
+
+  What shipped instead is provenance: `condition.pack_peak` / `lifetime_peak` /
+  `lifetime_peak_note`, one sentence on the existing `undetermined` list. It says where
+  the hottest figure came from, and that the lifetime counter is *not* a log reading -
+  which matters, because the two disagree in BOTH directions on the reference bike
+  (2026-08-19 reports 60 C where the log's hottest sample is 59 C; 2026-07-10 reports
+  59 C where the log holds a genuine 60 C). Ambient enters only as a disconfirmer: it can
+  rule the weather out of a hot reading, never in. The error is one-directional and
+  conservative, because sensor soak inflates ambient, which only ever *weakens* a
+  disconfirmation.
+
+- [ ] **The graded battery row can under-report against the same capture's log.** On
+  2026-07-10 `stats` says 59 C and `health.py` grades that `watch` (`59 < 60`), while that
+  capture's own event log holds a genuine 60 C sample — the `alert` band of the same
+  function. The prose above now names the higher number on the same page, but the *grade*
+  is still taken from the counter alone. Fixing it properly means letting
+  `health_snapshot` see the event log, which breaks the documented invariant that it only
+  re-parses short command output (`library.py`). Wants an optional `log_peak_c` kwarg.
+
+- [ ] **`parsers.find` is substring-based, and "discharge" contains "charge".** Confirmed
+  live: `find(kv, "min", "charge", "temp")` returns **-25 C**, the `Min Discharge Temp`
+  line, because it appears first. `find(kv, "max", "charge", "temp")` returns the right
+  answer only by the accident that no `Max Discharge Temp` line precedes it. Nothing reads
+  those keys today, so this is latent rather than live — but it is a trap sitting directly
+  under the next Tier 3 item.
+
+- [ ] **A `-100 C` sentinel is live in the BMS pack-temperature output** —
+  `Pack Temps : 27C 27C 27C 28C -100C -100C -100C -100C`. Any future consumer of that
+  field has to exclude it.
 
 - [ ] **Decode the error-log conditions.** `modv=0mV, maxv=0mV, minv=4294967295mV` is
   shown raw; that is a sentinel and two zeroes, and it means "the module did not answer".
@@ -126,8 +171,12 @@ that ceiling is worth more than anything that polishes what sits behind it.
   temperature and no distance flag, while the GUI honours a miles preference.
 
 - [ ] **Read `Max Charge Temp` from the bike** instead of hardcoding the same 50 C in
-  `health.py`'s note. It is captured at permission level 0 and discarded, and the file
-  already reads motor thresholds from the bike this way.
+  `health.py`'s note. It is captured at permission level 0 and discarded (verified present
+  in `007_bms.txt`: `Max Charge Temp: 50 C`, `Min Charge Temp: 0 C`,
+  `Min Discharge Temp: -25 C`), and the file already reads motor thresholds from the bike
+  this way. **Fix the `parsers.find` collision above first** — reading these keys naively
+  today returns the wrong value. Note also that this is a *charge* limit, so it cannot
+  legitimately grade a lifetime maximum that may have been set while riding.
 
 ## Tier 4 — structural
 

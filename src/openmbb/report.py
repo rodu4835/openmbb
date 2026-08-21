@@ -58,6 +58,14 @@ def analyze_session(session, temp_units="C"):
         else:
             ride_source = None
 
+    # one assessment, not two: this parses the whole ~1 MB event log
+    assessment = condition.assess(
+        ride_text,
+        # the bike's LIFETIME temperature counter, which is a different channel
+        # from the log and is never corrected by it - only placed beside it
+        max_batt_temp_c=parsers.parse_stats(session.cmd("stats")).get(
+            "max_batt_temp_c"),
+        temp_units=temp_units)
     return {
         "session": {
             "name": session.name,
@@ -78,8 +86,8 @@ def analyze_session(session, temp_units="C"):
         # when there is no event log: its `undetermined` list is the answer.
         "clocks": condition.clock_check(session),
         "bike_state": _bike_state(session),
-        "condition": condition.assess(ride_text),
-        "verdict": condition.verdict(condition.assess(ride_text), metrics),
+        "condition": assessment,
+        "verdict": condition.verdict(assessment, metrics),
     }
 
 
@@ -208,7 +216,7 @@ def format_report(report, with_path=True):
 
     out += _bike_state_lines(report.get("bike_state") or {})
     out += _clock_lines(report.get("clocks") or {})
-    out += _condition_lines(report.get("condition") or {})
+    out += _condition_lines(report.get("condition") or {}, report["units"])
     out += _verdict_lines(report.get("verdict") or {})
     out.append("")
     return "\n".join(out)
@@ -380,7 +388,7 @@ def _clock_lines(c):
     return out
 
 
-def _condition_lines(c):
+def _condition_lines(c, units="C"):
     """The pack-condition block. Nothing here is graded: two of the three
     measurements have no reference bike to be judged against, and the third is a
     comparable index rather than the pack's capacity. What could not be measured
@@ -408,14 +416,15 @@ def _condition_lines(c):
                    % (floor["min_cell_mv"], floor["samples"], floor["source"]))
     sag = c.get("cell_sag")
     if sag:
-        out.append("  weakest cell under load: %g mV at %g A, %g%% SOC, %g C"
+        out.append("  weakest cell under load: %g mV at %g A, %g%% SOC, %s"
                    % (sag["min_cell_mv"], sag["at_amps"], sag["at_soc_pct"],
-                      sag["at_pack_temp_c"]))
+                      health.fmt_temp(sag["at_pack_temp_c"], units)))
     der = c.get("derate")
     if der:
-        out.append("  discharge allowance: median %g%%, worst %g%% at %g C / %g%% SOC"
+        out.append("  discharge allowance: median %g%%, worst %g%% at %s / %g%% SOC"
                    % (der["median_pct"], der["worst_pct"],
-                      der["worst_at_pack_temp_c"], der["worst_at_soc_pct"]))
+                      health.fmt_temp(der["worst_at_pack_temp_c"], units),
+                      der["worst_at_soc_pct"]))
     for f in c.get("faults") or []:
         out.append("  %-27s %d logged, %s"
                    % (f["name"] + ":", f["count"], condition.fault_span(f)))
@@ -423,13 +432,13 @@ def _condition_lines(c):
         out.append("  ! statistics were RESET at %s - every 'lifetime' figure "
                    "above dates from then, not from" % (ev["when"] or "an unlogged time"))
         out.append("    the bike's build date")
-    out += _charging_lines(c.get("charging") or {})
+    out += _charging_lines(c.get("charging") or {}, units)
     for u in c.get("undetermined") or []:
         out.append("  could not determine: %s" % u)
     return out
 
 
-def _charging_lines(ch):
+def _charging_lines(ch, units="C"):
     """How the bike is charged. Habits, not faults - nothing here is graded,
     because the thresholds that would turn "plugged in at 46 C" into a verdict
     need a population nobody has. It earns its place anyway: time spent sitting
@@ -458,8 +467,9 @@ def _charging_lines(ch):
         out.append("    time at full is the main driver of calendar ageing; "
                    "unplugging when it finishes costs nothing")
     if ch.get("hot_plugins"):
-        out.append("  plugged in with the pack still hot (>= %g C): %d of %d sessions"
-                   % (ch["hot_plugin_c"], ch["hot_plugins"], ch["sessions"]))
+        out.append("  plugged in with the pack still hot (>= %s): %d of %d sessions"
+                   % (health.fmt_temp(ch["hot_plugin_c"], units),
+                      ch["hot_plugins"], ch["sessions"]))
     if ch.get("peak_amps_median") is not None:
         out.append("  charge current: median peak %g A, highest %g A"
                    % (ch["peak_amps_median"], ch["peak_amps_max"]))

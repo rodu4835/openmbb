@@ -33,7 +33,7 @@ dicts out. No hardware, no serial port, no GUI.
 import datetime as _dt
 import re
 
-from . import parsers
+from . import health, parsers
 
 # The one capacity measurement on this platform that does NOT go through the SOC
 # display. Charge accepted between two fixed pack voltages is a physical
@@ -387,7 +387,176 @@ def _median(values):
 
 
 
-def assess(event_log):
+# --- where the hottest reading came from, and what the air was doing at it ---
+#
+# An ambient temperature may only ever be printed alongside a pack temperature
+# that came from the SAME log line. Not a neighbouring sample, not an average,
+# not a ride's starting value, and never from a charging record. The sensor is on
+# the bike, not in the air: while riding it settles to something like the air
+# within a few minutes, but on a charger it climbs to meet the pack - measured on
+# the reference bike, a median 29 C between midnight and 06:00 where the same
+# sensor reads 16 C riding at those same hours, reaching 51 C against a 54 C
+# pack, and reading at or above the pack in 107 of 1424 charging samples. The
+# pack-minus-ambient difference during a charge measures the enclosure and the
+# sensor, not the pack. The arithmetic works; the measurement does not.
+#
+# An ambient temperature may never move a threshold, and none is passed to
+# anything that has one. An ambient-adjusted limit can only ever FORGIVE - a
+# seller's bike pulled on a hot day would score better for it - which converts a
+# check into a pass it did not earn. Ambient can rule the weather out of a hot
+# reading; it can never rule it in. That asymmetry is why the error here is safe:
+# sensor soak inflates ambient, which makes the day look warmer, which makes the
+# disconfirmation WEAKER rather than stronger.
+#
+# The lifetime maximum in `stats` is not a log reading and is never presented as
+# explained or corrected by one. The two channels disagree in BOTH directions on
+# the reference bike: the 2026-08-19 capture reports 60 C where the log's hottest
+# sample anywhere is 59 C, and the 2026-07-10 capture reports 59 C where the log
+# holds a genuine 60 C sample. Even where a log sample ties the lifetime figure,
+# six samples tied it at three different ambients - a candidate set, not a value.
+#
+# No aggregate of the ambient channel is computed anywhere, because a median over
+# it would silently average two different physical quantities together.
+
+
+def pack_peak(ride_records):
+    """The hottest pack reading in the log, and the air at that same reading.
+
+    Riding records only. The ambient figures are taken from the tying samples
+    themselves and from nothing else, so they describe the moment rather than the
+    capture. Returns None when no riding record carries a readable pack
+    temperature - which is the honest answer for the `BattTemp:` dialect, not a
+    reason to reach for another source.
+    """
+    with_temp = [r for r in ride_records or []
+                 if r.get("pack_temp_c") is not None]
+    if not with_temp:
+        return None
+    peak = max(r["pack_temp_c"] for r in with_temp)
+    ties = [r for r in with_temp if r["pack_temp_c"] == peak]
+    ambs = [r["amb_temp_c"] for r in ties if r.get("amb_temp_c") is not None]
+    return {
+        "pack_temp_c": peak,
+        "ts": ties[0].get("ts"),
+        "ties": len(ties),
+        "amb_low_c": min(ambs) if ambs else None,
+        "amb_high_c": max(ambs) if ambs else None,
+        "amb_samples": len(ambs),
+        "ride_samples": len(ride_records or []),
+        "graded": False,
+    }
+
+
+def lifetime_peak(peak, stat_c, n_ride_records):
+    """How the bike's lifetime temperature counter stands against this log.
+
+    `case` is one of:
+      outside_log    - the counter is higher than anything the log holds
+      log_is_hotter  - the LOG holds a sample hotter than the counter reports
+      log_reaches_it - the log contains the counter's own figure
+      no_pack_temp   - riding records exist but none carry a pack temperature
+
+    Neither channel corrects the other and neither is presented as doing so.
+    """
+    if stat_c is None or not n_ride_records:
+        return None
+    if peak is None:
+        return {"stat_c": stat_c, "log_peak_c": None, "ts": None, "ties": 0,
+                "amb_low_c": None, "amb_high_c": None, "amb_samples": 0,
+                "case": "no_pack_temp", "graded": False}
+    log_peak = peak["pack_temp_c"]
+    if log_peak > stat_c:
+        case = "log_is_hotter"
+    elif log_peak < stat_c:
+        case = "outside_log"
+    else:
+        case = "log_reaches_it"
+    out = dict(peak)
+    out.pop("ride_samples", None)
+    out.update({"stat_c": stat_c, "log_peak_c": log_peak, "case": case,
+                "graded": False})
+    out.pop("pack_temp_c", None)
+    return out
+
+
+def _amb_phrase(lp, temp_units):
+    """"at 19 C to 23 C ambient", or "" when this firmware prints no ambient."""
+    if not lp or not lp.get("amb_samples"):
+        return ""
+    lo, hi = lp["amb_low_c"], lp["amb_high_c"]
+    if lo == hi:
+        return ", at %s ambient" % health.fmt_temp(lo, temp_units)
+    return ", at %s to %s ambient" % (health.fmt_temp(lo, temp_units),
+                                      health.fmt_temp(hi, temp_units))
+
+
+# The clause that keeps a reader from over-reading the ambient figure. It travels
+# with every sentence that prints one, and with none that does not.
+_SENSOR_CAVEAT = ("That ambient figure is the bike's own sensor, which reads the "
+                  "bike's heat for the first minutes of a ride - it can rule the "
+                  "weather out of a hot reading, never in.")
+_SENSOR_CAVEAT_PLURAL = _SENSOR_CAVEAT.replace("That ambient figure is",
+                                               "Those ambient figures are")
+
+
+def lifetime_peak_note(lp, temp_units="C"):
+    """One sentence about where the pack's hottest figure came from, or None.
+
+    Composed here and nowhere else, so the GUI and the report cannot drift - the
+    same arrangement `fault_span` already uses.
+    """
+    if not lp:
+        return None
+    stat = health.fmt_temp(lp["stat_c"], temp_units)
+
+    if lp["case"] == "no_pack_temp":
+        return ("the pack's peak temperature: not one riding record in this "
+                "capture carries a pack temperature this tool can read, so the "
+                "bike's lifetime counter (%s) is the only thermal figure here "
+                "and it cannot be placed in time." % stat)
+
+    log_peak = health.fmt_temp(lp["log_peak_c"], temp_units)
+    amb = _amb_phrase(lp, temp_units)
+    caveat = ("" if not amb else " " + (_SENSOR_CAVEAT_PLURAL if lp["ties"] > 1
+                                        else _SENSOR_CAVEAT))
+    ties_note = "" if lp["ties"] <= 1 else " (%d samples tie it)" % lp["ties"]
+
+    if lp["case"] == "outside_log":
+        body = ("the air at the lifetime peak: the bike's lifetime counter "
+                "reports %s and no line in this log reaches it - the hottest "
+                "riding sample here is %s on %s%s%s. The counter is not a log "
+                "reading, so nothing in this capture can say when the pack was "
+                "%s or how warm the air was."
+                % (stat, log_peak, lp["ts"], amb, ties_note, stat))
+    elif lp["case"] == "log_is_hotter":
+        body = ("which reading is the pack's real maximum: this log holds %s on "
+                "%s%s - hotter than the %s the bike's lifetime counter reports. "
+                "They are separate channels and neither corrects the other; the "
+                "log sample was actually taken, so %s is the peak this capture "
+                "can prove."
+                % (log_peak, lp["ts"], amb, stat, log_peak))
+    elif lp["ties"] > 1:
+        body = ("the air at the lifetime peak: this log reaches the %s the "
+                "bike's lifetime counter reports, on %d samples%s. The counter "
+                "and the log are separate channels, so those are candidates for "
+                "the peak, not the peak - there is no single ambient to attach "
+                "to the lifetime figure."
+                % (stat, lp["ties"], amb))
+    else:
+        body = ("the air at the lifetime peak: one sample in this log reaches "
+                "the %s the bike's lifetime counter reports - %s%s. The counter "
+                "and the log are separate channels, so that is the nearest this "
+                "capture comes to the lifetime figure, not proof it is the same "
+                "moment." % (stat, lp["ts"], amb))
+
+    if not amb:
+        body += (" This firmware prints no ambient temperature on its riding "
+                 "lines, so a hot pack and a hot day cannot be told apart in "
+                 "this capture.")
+    return body + caveat
+
+
+def assess(event_log, max_batt_temp_c=None, temp_units="C"):
     """Everything this module can say about a pack, from one event log.
 
     Every check that could not be answered is named in `undetermined` with the
@@ -405,6 +574,12 @@ def assess(event_log):
     limits = parsers.parse_limit_events(event_log)
     first, last = log_coverage(rides)
 
+    # Where the hottest reading came from. `max_batt_temp_c` is the bike's
+    # LIFETIME counter, out of `stats` - a different channel from the log, which
+    # is the whole point of saying anything about it. Passing None simply omits
+    # the sentence; nothing here is graded and no threshold sees any of it.
+    peak = pack_peak(rides)
+    lifetime = lifetime_peak(peak, max_batt_temp_c, len(rides))
     resets = stats_reset_events(event_log)
     faults = fault_history(event_log)
     sag = cell_sag(rides)
@@ -438,6 +613,13 @@ def assess(event_log):
         undetermined.append("whether the statistics were ever reset: none found, "
                             "but this log only reaches back to %s, so a reset "
                             "before that would not appear" % (first or "an unknown date"))
+    # rides out on `undetermined` rather than growing a surface of its own: it is
+    # precisely a statement about what this capture could not establish, and the
+    # Condition tab, the report block and the verdict caveats all already render
+    # that list
+    note = lifetime_peak_note(lifetime, temp_units)
+    if note:
+        undetermined.append(note)
 
     return {
         "coverage": {"first": first, "last": last,
@@ -453,6 +635,8 @@ def assess(event_log):
         "cell_floor": floor,
         "derate": der,
         "charge_capacity": cap,
+        "pack_peak": peak,
+        "lifetime_peak": lifetime,
         # how the bike is CHARGED, as against what the pack did while charging.
         # Habits, not faults - and the one measurement in this module an owner
         # can act on the same afternoon.

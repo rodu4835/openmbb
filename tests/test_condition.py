@@ -5,9 +5,11 @@ real 2017 FXS actually printed, not from the simulator, because the whole point
 of this module is what it says about a bike nobody has a baseline for.
 """
 
+import os
+
 import pytest
 
-from openmbb import condition, parsers, report, sessions
+from openmbb import condition, parsers, report, rides, sessions
 
 # The real reset sequence: the bootloader line carries a clock, the reset entry
 # logged immediately after it does not (the console had just rebooted).
@@ -540,3 +542,187 @@ def test_the_report_prints_the_charging_block_and_its_caveat(tmp_path):
     # the caveat has to travel with the number, or a reader assumes a taper was
     # looked for and found healthy
     assert "the taper is NOT visible here" in text
+
+
+# --- where the hottest reading came from -------------------------------------
+#
+# The sensor called AmbTemp is on the bike, not in the air. Measured on the
+# reference bike: a median 29 C between midnight and 06:00 while charging, where
+# the SAME sensor reads 16 C riding at those same hours, and reading at or above
+# the pack in 107 of 1424 charging samples. So an ambient may only ever appear
+# beside a pack temperature off the same log line, and never as an aggregate.
+
+def _hot(ts, pack, amb=None, soc=60):
+    amb_bit = "" if amb is None else "AmbTemp: %dC, " % amb
+    return (" 00001     %s   Riding                     PackTemp: h %dC, l %dC, "
+            "%sPackSOC: %d%%, Vpack:110.000V, BattAmps:  30, MotAmps:  30, "
+            "MotRPM:3000, Odo: 6000km, MinCell: 3700mV"
+            % (ts, pack, pack - 2, amb_bit, soc))
+
+
+def test_the_ambient_comes_from_the_same_line_as_the_peak():
+    # a neighbouring sample's ambient is a different moment, and on this sensor
+    # possibly a different physical quantity
+    recs = parsers.parse_ride_log("\n".join([
+        _hot("06/24/2026 08:00:00", 40, amb=40),      # cooler pack, hot "ambient"
+        _hot("06/24/2026 08:01:00", 59, amb=19),      # THE peak
+        _hot("06/24/2026 08:02:00", 41, amb=41),
+    ]))
+    pk = condition.pack_peak(recs)
+    assert pk["pack_temp_c"] == 59
+    assert pk["amb_low_c"] == 19 and pk["amb_high_c"] == 19
+    assert pk["ties"] == 1 and pk["graded"] is False
+
+
+def test_every_sample_tying_the_peak_is_reported_not_just_the_first():
+    # the reference bike ties its log maximum on six samples at three different
+    # ambients: a candidate set, not a value
+    recs = parsers.parse_ride_log("\n".join([
+        _hot("06/24/2026 08:00:00", 59, amb=19),
+        _hot("06/24/2026 08:01:00", 59, amb=23),
+        _hot("06/24/2026 08:02:00", 59, amb=20),
+        _hot("06/24/2026 08:03:00", 50, amb=30),
+    ]))
+    pk = condition.pack_peak(recs)
+    assert pk["ties"] == 3
+    assert pk["amb_low_c"] == 19 and pk["amb_high_c"] == 23
+
+
+def test_a_firmware_with_no_pack_temperature_yields_no_peak():
+    # the BattTemp: dialect - the honest answer is nothing, not a substitute
+    recs = [{"soc": 60, "amb_temp_c": 20, "pack_temp_c": None, "ts": "x"}]
+    assert condition.pack_peak(recs) is None
+    assert condition.pack_peak([]) is None
+
+
+def test_the_lifetime_counter_and_the_log_disagree_in_both_directions():
+    # measured on the reference bike: 2026-08-19 reports 60 C where the log's
+    # hottest sample is 59 C, and 2026-07-10 reports 59 C where the log holds 60
+    recs = parsers.parse_ride_log(_hot("06/24/2026 08:00:00", 59, amb=19))
+    pk = condition.pack_peak(recs)
+    assert condition.lifetime_peak(pk, 60.0, len(recs))["case"] == "outside_log"
+    assert condition.lifetime_peak(pk, 59.0, len(recs))["case"] == "log_reaches_it"
+    assert condition.lifetime_peak(pk, 58.0, len(recs))["case"] == "log_is_hotter"
+    # no counter, or no rides, means no claim at all
+    assert condition.lifetime_peak(pk, None, len(recs)) is None
+    assert condition.lifetime_peak(pk, 60.0, 0) is None
+
+
+def test_the_note_never_attaches_an_ambient_to_the_lifetime_counter():
+    # the durable guard on the invariant: the counter is not a log reading, and
+    # an ambient beside it would be fabricated
+    recs = parsers.parse_ride_log("\n".join([
+        _hot("06/24/2026 08:00:00", 59, amb=19),
+        _hot("06/24/2026 08:01:00", 59, amb=23)]))
+    pk = condition.pack_peak(recs)
+    for stat in (58.0, 59.0, 60.0):
+        lp = condition.lifetime_peak(pk, stat, len(recs))
+        note = condition.lifetime_peak_note(lp)
+        # the failure this guards is the helpful-sounding join: "the
+        # counter reports 60 C, at 19 C ambient". An ambient may only
+        # ever be bound to the LOG sample, which was actually taken.
+        for glue in (", at ", " at "):
+            assert ("%g C%s" % (stat, glue)) not in note, (stat, note)
+
+
+def test_the_note_says_so_when_the_firmware_prints_no_ambient():
+    # never a dangling "at None C ambient", and never silence either
+    recs = parsers.parse_ride_log(_hot("06/24/2026 08:00:00", 59))
+    lp = condition.lifetime_peak(condition.pack_peak(recs), 60.0, len(recs))
+    note = condition.lifetime_peak_note(lp)
+    assert "a hot pack and a hot day cannot be told apart" in note
+    # the sentence may SAY the word while printing no ambient VALUE,
+    # which is exactly the distinction: no dangling "at None C ambient",
+    # and no silence either
+    assert " C ambient" not in note and " F ambient" not in note
+    assert "None" not in note
+    # the sensor caveat only makes sense beside a figure, so it is dropped
+    assert "rule the weather out" not in note
+
+
+def test_the_note_follows_the_requested_units():
+    recs = parsers.parse_ride_log(_hot("06/24/2026 08:00:00", 59, amb=19))
+    lp = condition.lifetime_peak(condition.pack_peak(recs), 60.0, len(recs))
+    f = condition.lifetime_peak_note(lp, "F")
+    assert "140 F" in f and "138 F" in f and "66 F" in f
+    assert " C" not in f
+
+
+def test_a_capture_with_no_pack_temperatures_says_which_figure_survives():
+    recs = [{"soc": 60, "amb_temp_c": 20, "pack_temp_c": None, "ts": "x"}]
+    lp = condition.lifetime_peak(condition.pack_peak(recs), 60.0, len(recs))
+    assert lp["case"] == "no_pack_temp"
+    note = condition.lifetime_peak_note(lp)
+    assert "not one riding record" in note and "cannot be placed in time" in note
+
+
+def test_the_new_context_never_reaches_a_graded_surface():
+    """THE structural test, and the one that must survive every refactor.
+
+    An ambient-adjusted threshold can only ever FORGIVE - a seller's bike
+    pulled on a hot day would score better for it - which converts a check
+    into a pass it did not earn. So the verdict must be identical whether or
+    not the lifetime figure and units are passed.
+
+    The fixture has to be one that actually grades something, or the test
+    passes against code that has quietly dropped a check: `_loaded_log(3850)`
+    is 150 mV down and grades "watch".
+    """
+    # the fixture must carry BOTH a graded check and an ambient reading:
+    # without the deviation there is no grade to move, and without the
+    # ambient a mutation that keys off the weather cannot even fire
+    log = _loaded_log(3850).replace("PackTemp: h 30C,",
+                                    "PackTemp: h 30C, AmbTemp: 34C,")
+    plain = condition.verdict(condition.assess(log))
+    withctx = condition.verdict(condition.assess(log, 60.0, "F"))
+    assert plain["level"] == "watch"
+    assert any(c["level"] != "unknown" for c in plain["checks"])
+    lp = condition.assess(log, 60.0)["lifetime_peak"]
+    assert lp and lp["amb_high_c"] == 34        # the weather IS visible
+    assert plain["level"] == withctx["level"]
+    assert plain["headline"] == withctx["headline"]
+    assert plain["checks"] == withctx["checks"]
+
+
+def test_the_peak_agrees_with_what_the_rides_block_reports():
+    # two code paths, one bike: they must not be able to disagree about the
+    # hottest reading in the same log
+    log = "\n".join([_hot("06/24/2026 08:%02d:00" % i, 40 + i, amb=20)
+                      for i in range(20)])
+    recs = parsers.parse_ride_log(log)
+    assert (condition.pack_peak(recs)["pack_temp_c"]
+            == rides.summarize_rides(recs)["totals"]["max_pack_temp_c"])
+
+
+_REAL_CAPTURES = os.path.join(os.path.expanduser("~"), "Documents",
+                              "OpenMBB", "openmbb-sessions")
+
+
+@pytest.mark.skipif(not os.path.isdir(_REAL_CAPTURES),
+                    reason="reference captures not present")
+def test_the_condition_block_follows_the_requested_units():
+    """Three Celsius numbers were printed into a Fahrenheit report - in the page
+    built to be handed to a buyer.
+
+    Runs against a real capture on purpose. The lines at risk are the
+    weakest-cell, discharge-allowance and plugged-in-hot lines, and a synthetic
+    log that carries no loaded cell reading, no current limit and no charging
+    renders none of them - so a synthetic version of this test passes without
+    ever exercising what it claims to guard.
+    """
+    import re
+    folder = os.path.join(_REAL_CAPTURES, "2026-08-19_160449_675068_COM4")
+    if not os.path.isdir(folder):
+        pytest.skip("reference capture not present")
+    body = report.format_report(
+        report.analyze_folder(folder, temp_units="F")).split(
+        "== Condition (pack) ==")[1]
+    # the three lines this exists for must actually be present...
+    for needle in ("weakest cell under load", "discharge allowance", "still hot"):
+        assert needle in body, needle
+    # ...and none of them may carry Celsius
+    assert not re.search(r"\d+\s*C\b", body), body
+    cbody = report.format_report(
+        report.analyze_folder(folder, temp_units="C")).split(
+        "== Condition (pack) ==")[1]
+    assert not re.search(r"\d+\s*F\b", cbody)

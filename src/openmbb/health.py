@@ -217,9 +217,15 @@ def health_snapshot(session, temp_units="C"):
         st = "ok" if batt_t < 50 else ("watch" if batt_t < 60 else "alert")
         out.append(_metric("Max battery temp (lifetime)", batt_t, "C",
                            status=st, display=_t(batt_t),
-                           note="highest EVER recorded, not the current temperature; "
-                                "charge tapers ~%s, operation stop ~%s"
-                                % (_rng(43, 50), _rng(50, 60))))
+                           note="highest EVER recorded, not the current "
+                                "temperature — a counter the BMS keeps, NOT a "
+                                "reading from the event log, so it need not match "
+                                "the log's own maximum (on this project's "
+                                "reference bike the two disagree in both "
+                                "directions). Bands %s / %s are documented "
+                                "defaults, not read from this bike; charge tapers "
+                                "~%s, operation stop ~%s"
+                                % (_t(50), _t(60), _rng(43, 50), _rng(50, 60))))
     ctrl_t = stats.get("max_ctrl_temp_c")
     if ctrl_t is not None:
         st = "ok" if ctrl_t < 70 else ("watch" if ctrl_t < 90 else "alert")
