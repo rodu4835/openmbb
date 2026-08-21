@@ -93,6 +93,12 @@ that ceiling is worth more than anything that polishes what sits behind it.
 
 - [ ] **Update check.** A quiet "0.22.1 is available". *Why:* this project shipped four
   releases in three days and its own author ran five commits behind for weeks.
+  **Held for a decision, not for effort.** This is the only item in Tiers 1-2 that makes
+  the program talk to the network, and the shape is an owner's call rather than an
+  implementation detail: opt-in or on by default, which endpoint, and what (if anything)
+  the request reveals about who is asking. The tool's users are people plugging a laptop
+  into a bike's diagnostic port, and several of them care about exactly that. Everything
+  else here can be built and judged afterwards; this one should be decided first.
 
 - [x] **Session notes.** *(shipped: a note per capture, written into the capture folder so
   it travels with a copy)* Annotate a capture — "before the re-gear", "after the firmware
