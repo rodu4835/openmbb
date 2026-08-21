@@ -15,7 +15,12 @@ import pytest
 
 from openmbb import condition, health, library, parsers, redact, report, rides, sessions
 
-REAL = r"C:\Users\durha\Documents\OpenMBB\openmbb-sessions"
+# Resolved from the home directory rather than hardcoded. A literal path
+# names this machine's account in a public repo, and it makes these tests
+# silently skip on any other machine - the worst combination, because a
+# skip reads as a pass in a summary line.
+REAL = os.path.join(os.path.expanduser("~"), "Documents", "OpenMBB",
+                    "openmbb-sessions")
 _HAVE_REAL = os.path.isdir(REAL)
 needs_real = pytest.mark.skipif(not _HAVE_REAL, reason="reference captures not present")
 
