@@ -231,6 +231,23 @@ session folder — or the current one:
   clocks against the capturing machine's clock — more than ten minutes out and
   the Rides timestamps are shifted to match — and drops cell readings a firmware
   change left undecodable rather than believing them.
+
+  It also reports **charging habits** — a separate thing from the pack's health,
+  and the only part of the whole report an owner can act on this afternoon. How
+  often the bike is charged and at what SOC it is plugged in; how many charges
+  began with the pack still above 45 °C (hottest right after a ride); and, most
+  of all, **how long it sits at full with the charger still attached**. That last
+  one is read from the charger events (`Entering Charge Standby Mode` → unplug),
+  not from the charging samples, because the bike *stops writing samples when the
+  charge finishes* — on the reference bike the samples account for 13 of the 430
+  hours the events show. A spell ends at the first evidence the bike stopped
+  sitting there, riding included, and one the log can't bound is dropped rather
+  than guessed at, so the total runs under the truth. None of it is graded: the
+  thresholds that would turn "plugged in at 46 °C" into a verdict need a
+  population nobody has. The charge **taper** is *not* reported at all — charging
+  is sampled about every 10 minutes at whole-amp resolution, which is coarser
+  than the constant-voltage knee it would take to see one, and the report says so
+  rather than inventing a number.
 - **Rides** — per-ride start time, distance, SOC used, SOC per unit distance,
   peak pack/motor temperature and peak rpm, read **straight off the bike**:
   `eventlogdump` prints the full event log as decoded text (including per-sample
@@ -318,6 +335,7 @@ src/openmbb/
   report.py      saved session -> JSON-ready report (the headless path)
   health.py      health snapshot (typed metrics + ok/watch/alert status)
   condition.py   pack condition from the ride/charge SAMPLES + the verdict + clocks
+                 + charging habits (time held at full, plugged-in-hot)
   rides.py       ride-log summaries + effective gearing from the odometer
   gearing.py     gearing math (teeth -> ratio -> speedo settings)
   compare.py     settings diff + the pack's own figures across sessions

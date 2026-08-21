@@ -277,6 +277,49 @@ def _condition_lines(c):
         out.append("  ! statistics were RESET at %s - every 'lifetime' figure "
                    "above dates from then, not from" % (ev["when"] or "an unlogged time"))
         out.append("    the bike's build date")
+    out += _charging_lines(c.get("charging") or {})
     for u in c.get("undetermined") or []:
         out.append("  could not determine: %s" % u)
+    return out
+
+
+def _charging_lines(ch):
+    """How the bike is charged. Habits, not faults - nothing here is graded,
+    because the thresholds that would turn "plugged in at 46 C" into a verdict
+    need a population nobody has. It earns its place anyway: time spent sitting
+    at full is the largest calendar-ageing term there is, and it is the only
+    thing in this whole report an owner can change this afternoon."""
+    if not ch:
+        return []
+    out = ["", "  -- charging (habits, not graded) --"]
+    if ch.get("sessions"):
+        line = "  %d charge sessions" % ch["sessions"]
+        if ch.get("span_days"):
+            line += " over %g days" % ch["span_days"]
+        if ch.get("per_week"):
+            line += " (%g a week)" % ch["per_week"]
+        out.append(line)
+    if ch.get("start_soc_median") is not None:
+        out.append("  plugged in at a median %g%% SOC (lowest %g%%)"
+                   % (ch["start_soc_median"], ch["start_soc_min"]))
+    if ch.get("held_full_h"):
+        line = "  sat at FULL with the charger still attached: %g h" % ch["held_full_h"]
+        if ch.get("held_full_share") is not None:
+            line += " - %.0f%% of the logged period" % (ch["held_full_share"] * 100)
+        out.append(line)
+        out.append("    %d spells, median %g h, longest %g h"
+                   % (ch["holds"], ch["held_full_median_h"], ch["held_full_max_h"]))
+        out.append("    time at full is the main driver of calendar ageing; "
+                   "unplugging when it finishes costs nothing")
+    if ch.get("hot_plugins"):
+        out.append("  plugged in with the pack still hot (>= %g C): %d of %d sessions"
+                   % (ch["hot_plugin_c"], ch["hot_plugins"], ch["sessions"]))
+    if ch.get("peak_amps_median") is not None:
+        out.append("  charge current: median peak %g A, highest %g A"
+                   % (ch["peak_amps_median"], ch["peak_amps_max"]))
+    if not ch.get("taper_resolvable"):
+        out.append("    the taper is NOT visible here: charging is sampled every "
+                   "~10 min at whole-amp resolution,")
+        out.append("    which is coarser than the constant-voltage knee it would "
+                   "take to see one")
     return out

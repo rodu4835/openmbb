@@ -4457,6 +4457,39 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                      % (der["median_pct"], der["worst_pct"],
                         _t(der["worst_at_pack_temp_c"]), der["worst_at_soc_pct"]),
                      "measured")
+            ch = a.get("charging") or {}
+            if ch.get("sessions"):
+                bits = "%d sessions" % ch["sessions"]
+                if ch.get("per_week"):
+                    bits += " · %g a week" % ch["per_week"]
+                if ch.get("start_soc_median") is not None:
+                    bits += " · plugged in at a median %g%% SOC" % ch["start_soc_median"]
+                _row("Charging", bits, "measured")
+            if ch.get("held_full_h"):
+                # The largest calendar-ageing term there is, invisible in the
+                # charging samples (the bike stops writing them when the charge
+                # finishes) and the one thing on this tab an owner can change
+                # this afternoon. Flagged for attention, not graded: the level
+                # would need a population nobody has.
+                share = ("" if ch.get("held_full_share") is None
+                         else " · %.0f%% of the logged period"
+                         % (ch["held_full_share"] * 100))
+                _row("Sat at FULL, plugged in",
+                     "%g h%s · %d spells, longest %g h · time at full ages a "
+                     "pack; unplugging when it finishes costs nothing"
+                     % (ch["held_full_h"], share, ch["holds"],
+                        ch["held_full_max_h"]), "attention")
+            if ch.get("hot_plugins"):
+                _row("Plugged in hot",
+                     "%d of %d sessions began at %s or above · a pack is hottest "
+                     "right after a ride"
+                     % (ch["hot_plugins"], ch["sessions"], _t(ch["hot_plugin_c"])),
+                     "attention")
+            if ch.get("peak_amps_median") is not None:
+                _row("Charge current",
+                     "median peak %g A · highest %g A · the taper is below this "
+                     "log's resolution (~10 min, whole amps)"
+                     % (ch["peak_amps_median"], ch["peak_amps_max"]), "measured")
             for f in a["faults"]:
                 _row(f["name"], "%d logged · %s · counted, not graded"
                      % (f["count"], condition_mod.fault_span(f)), "measured")

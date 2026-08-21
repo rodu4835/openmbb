@@ -66,7 +66,10 @@ that ceiling is worth more than anything that polishes what sits behind it.
   odometer, verdict at a glance. *Why:* three captures already require remembering which
   timestamped folder is which.
 
-- [ ] **Charge-behaviour analysis.** ~1,470 charging samples per capture are used only for
+- [x] **Charge-behaviour analysis.** *(shipped: condition.charge_behaviour +
+  full_charge_holds, on the Condition tab and in the report. Taper turned out NOT to be
+  resolvable at ~10-min, whole-amp sampling, and the report says so rather than inventing
+  one)* ~1,470 charging samples per capture are used only for
   the capacity index. They also carry time spent sitting at 100% (the main driver of
   calendar aging), charge taper, and charger consistency over time. *Why:* real battery
   longevity advice from data already on disk.

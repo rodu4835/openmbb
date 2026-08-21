@@ -235,6 +235,158 @@ def charge_capacity(charge_records, window=CAPACITY_WINDOW_V):
     }
 
 
+
+
+# --- how the bike is charged, which is a habit rather than a fault -----------
+
+# The charger events the MBB writes around a charge. Two chargers are fitted on
+# most Gen2 bikes (a 720 W and a 1200 W Calex), so a single plug-in writes more
+# than one line; the state machine below only reacts to the first of each burst.
+_CHG_CONNECT_RE = re.compile(
+    r"charger\s*\d+\s+connected|power\s+on\s+.*onboard\s+charger", re.I)
+_CHG_DISCONNECT_RE = re.compile(
+    r"charger\s*\d+\s+disconnected|power\s+off\s+.*onboard\s+charger", re.I)
+_CHG_STANDBY_RE = re.compile(r"entering\s+charge\s+standby", re.I)
+# A ride ends a spell whether or not the unplug was recorded. Measured on the
+# reference bike: a standby at 07/09 13:23 was followed by a ride at 15:02 with
+# no disconnect line in between, and the next recorded disconnect was three days
+# later - so a spell bounded only by disconnects claimed 91 hours at full for a
+# bike that had been out riding.
+_RIDING_RE = re.compile(r"\briding\b", re.I)
+
+# A pack is hottest right after a hard ride. Plugging in then, rather than
+# letting it cool, is the charging habit with the clearest effect on ageing -
+# and unlike almost everything else here it is free to change.
+HOT_PLUGIN_C = 45.0
+
+
+def _log_events(event_log):
+    """(datetime, line) for every timestamped line, oldest first."""
+    out = []
+    for line in (event_log or "").splitlines():
+        m = _TS_RE.search(line)
+        if not m:
+            continue
+        try:
+            out.append((_dt.datetime.strptime(m.group(0), _TS_FMT), line))
+        except ValueError:
+            continue
+    out.sort(key=lambda p: p[0])
+    return out
+
+
+def full_charge_holds(event_log):
+    """Spells spent sitting at full charge with the charger still attached.
+
+    Measured between "Entering Charge Standby Mode" - the charger reporting the
+    pack full - and the charger being unplugged. This cannot be read from the
+    charging samples: the bike stops writing them when the charge finishes, so a
+    pack that then sat plugged in for three days leaves no samples at all. On the
+    reference bike the samples account for 13 hours of the 422 that the events
+    show.
+
+    A spell ends at the FIRST evidence the bike stopped sitting there: the
+    charger being unplugged, or the bike being ridden. Riding matters as much as
+    the unplug, because the unplug is not always recorded - and a spell bounded
+    only by disconnects will happily run straight through a ride.
+
+    A spell still open at the end of the buffer is dropped rather than guessed
+    at, so the total runs under the truth rather than over it.
+    """
+    holds, pending = [], None
+    for t, line in _log_events(event_log):
+        if _CHG_DISCONNECT_RE.search(line) or _RIDING_RE.search(line):
+            if pending is not None:
+                secs = (t - pending).total_seconds()
+                if secs > 0:
+                    holds.append((pending, secs))
+                pending = None
+        elif _CHG_CONNECT_RE.search(line):
+            # a plug-in with a spell still open means the unplug went unrecorded,
+            # and an unbounded spell is not a measurement
+            pending = None
+        elif _CHG_STANDBY_RE.search(line):
+            # Leaving and re-entering standby is the charger topping the pack up
+            # while it sits at full, so only the FIRST entry opens the spell -
+            # the whole stretch counts as time held at full.
+            if pending is None:
+                pending = t
+    return holds
+
+
+def charge_behaviour(event_log, charge_records=None):
+    """What the charging record says about how this bike is looked after.
+
+    Returns None when there is no charging in the capture. Nothing here is
+    graded: these are habits, not faults, and the thresholds that would turn
+    "charged at 46 C" into a verdict do not exist without a population to set
+    them against. What it does do is put a number on the one thing an owner can
+    change today.
+    """
+    records = (parsers.parse_charge_log(event_log) if charge_records is None
+               else charge_records)
+    sessions = _sessions(records)
+    holds = full_charge_holds(event_log)
+    events = _log_events(event_log)
+    if not sessions and not holds:
+        return None
+
+    span_days = None
+    if events:
+        span_days = (events[-1][0] - events[0][0]).total_seconds() / 86400.0
+        if span_days <= 0:
+            span_days = None
+
+    starts, hot_plugins, peaks = [], 0, []
+    for sess in sessions:
+        socs = [r["soc"] for _t, r in sess if r.get("soc") is not None]
+        temps = [r["pack_temp_c"] for _t, r in sess if r.get("pack_temp_c") is not None]
+        amps = [abs(r["battamps"]) for _t, r in sess if r.get("battamps") is not None]
+        if socs:
+            starts.append(socs[0])
+        if temps and temps[0] >= HOT_PLUGIN_C:
+            hot_plugins += 1
+        if amps:
+            peaks.append(max(amps))
+
+    hold_hours = sorted(secs / 3600.0 for _t, secs in holds)
+    total_held_h = sum(hold_hours)
+    out = {
+        "sessions": len(sessions),
+        "span_days": round(span_days, 1) if span_days else None,
+        "per_week": (round(len(sessions) / (span_days / 7.0), 1)
+                     if span_days and span_days >= 7 else None),
+        "start_soc_median": _median(starts),
+        "start_soc_min": min(starts) if starts else None,
+        "hot_plugins": hot_plugins,
+        "hot_plugin_c": HOT_PLUGIN_C,
+        "peak_amps_median": _median(peaks),
+        "peak_amps_max": max(peaks) if peaks else None,
+        "holds": len(hold_hours),
+        "held_full_h": round(total_held_h, 1) if hold_hours else None,
+        "held_full_median_h": (round(hold_hours[len(hold_hours) // 2], 2)
+                               if hold_hours else None),
+        "held_full_max_h": round(hold_hours[-1], 1) if hold_hours else None,
+        "held_full_share": (round(total_held_h / (span_days * 24.0), 3)
+                            if hold_hours and span_days else None),
+        # Sampled every ten minutes at whole-amp resolution, which is coarser
+        # than the constant-voltage knee it would take to see a taper. Saying so
+        # is the honest answer; a taper "measured" at this resolution would be
+        # an artefact of the sampling.
+        "taper_resolvable": False,
+        "graded": False,
+    }
+    return out
+
+
+def _median(values):
+    if not values:
+        return None
+    v = sorted(values)
+    return v[len(v) // 2]
+
+
+
 def assess(event_log):
     """Everything this module can say about a pack, from one event log.
 
@@ -301,6 +453,10 @@ def assess(event_log):
         "cell_floor": floor,
         "derate": der,
         "charge_capacity": cap,
+        # how the bike is CHARGED, as against what the pack did while charging.
+        # Habits, not faults - and the one measurement in this module an owner
+        # can act on the same afternoon.
+        "charging": charge_behaviour(event_log, charges),
         "undetermined": undetermined,
     }
 

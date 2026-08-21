@@ -5,7 +5,9 @@ real 2017 FXS actually printed, not from the simulator, because the whole point
 of this module is what it says about a bike nobody has a baseline for.
 """
 
-from openmbb import condition, parsers, sessions
+import pytest
+
+from openmbb import condition, parsers, report, sessions
 
 # The real reset sequence: the bootloader line carries a clock, the reset entry
 # logged immediately after it does not (the console had just rebooted).
@@ -403,3 +405,138 @@ def test_a_capture_missing_either_side_says_unknown():
 def test_clock_check_survives_a_session_with_no_clocks_at_all():
     c = condition.clock_check(sessions.Session("x", {}, ""))
     assert c["mbb_clock"] is None and c["offset_s"] is None
+
+
+# --- how the bike is charged -------------------------------------------------
+
+def _chg_line(ts, event):
+    return " 00001     %s   %s" % (ts, event)
+
+
+def _chg_sample(ts, soc, v, amps, temp=30):
+    """One charging sample. Keep them under an hour apart: the real bike writes
+    one about every ten minutes, and a wider spacing splits what should be a
+    single charge into two sessions."""
+    return ("00001     %s   Charging                   PackTemp: h %dC, l %dC, "
+            "AmbTemp: 20C, PackSOC: %d%%, Vpack:%.3fV, BattAmps: %4d, Mods: 10, "
+            "MbbChgEn" % (ts, temp, temp - 2, soc, v, amps))
+
+
+PLUG_IN = "Calex 720W Charger 0 Connected"
+UNPLUG = "Calex 720W Charger 0 Disconnected"
+STANDBY = "Entering Charge Standby Mode"
+
+
+def test_a_spell_at_full_runs_from_charge_complete_to_the_unplug():
+    # the measurement the charging SAMPLES cannot make: the bike stops writing
+    # them when the charge finishes, so a pack that then sat plugged in for
+    # three days leaves no samples at all
+    log = "\n".join([
+        _chg_line("07/01/2026 20:00:00", PLUG_IN),
+        _chg_sample("07/01/2026 20:10:00", 40, 104.0, -6),
+        _chg_sample("07/01/2026 20:40:00", 70, 110.0, -6),
+        _chg_sample("07/01/2026 21:10:00", 100, 116.0, -5),
+        _chg_line("07/01/2026 23:05:00", STANDBY),
+        _chg_line("07/04/2026 05:05:00", UNPLUG),
+    ])
+    holds = condition.full_charge_holds(log)
+    assert len(holds) == 1
+    _start, secs = holds[0]
+    assert secs == pytest.approx(54 * 3600, abs=60)      # 07/01 23:05 -> 07/04 05:05
+
+
+def test_a_ride_ends_a_spell_even_with_no_unplug_recorded():
+    # measured on the reference bike: a standby at 07/09 13:23 was followed by a
+    # ride at 15:02 with no disconnect line between them, and the next recorded
+    # disconnect was three days later. Bounded only by disconnects, that reads as
+    # 91 hours at full for a bike that had been out riding.
+    log = "\n".join([
+        _chg_line("07/09/2026 10:00:00", PLUG_IN),
+        _chg_line("07/09/2026 13:23:45", STANDBY),
+        " 00001     07/09/2026 15:02:29   Riding                     PackTemp: h 38C, "
+        "l 35C, PackSOC:100%, Vpack:115.186V, MotAmps: 40, MotRPM:2000, Odo:100km",
+        _chg_line("07/13/2026 08:37:32", UNPLUG),
+    ])
+    holds = condition.full_charge_holds(log)
+    assert len(holds) == 1
+    assert holds[0][1] == pytest.approx(98.7 * 60, abs=60)   # 13:23:45 -> 15:02:29
+
+
+def test_a_spell_still_open_at_the_end_of_the_log_is_dropped():
+    # the log is a rolling buffer, so its end is arbitrary; an unbounded spell is
+    # not a measurement, and the total must run under the truth rather than over
+    log = "\n".join([
+        _chg_line("07/01/2026 20:00:00", PLUG_IN),
+        _chg_line("07/01/2026 23:05:00", STANDBY),
+    ])
+    assert condition.full_charge_holds(log) == []
+    # ...and so is one where a fresh plug-in appears with no unplug before it
+    log2 = log + "\n" + _chg_line("07/02/2026 08:00:00", PLUG_IN)
+    assert condition.full_charge_holds(log2) == []
+
+
+def test_topping_up_at_full_does_not_split_the_spell():
+    # leaving and re-entering standby is the charger topping the pack up while it
+    # sits at full; the whole stretch is time at full, not two short spells
+    log = "\n".join([
+        _chg_line("07/01/2026 23:05:00", STANDBY),
+        _chg_line("07/02/2026 02:00:00", "Leaving Charge Standby Mode"),
+        _chg_line("07/02/2026 02:20:00", STANDBY),
+        _chg_line("07/02/2026 07:05:00", UNPLUG),
+    ])
+    holds = condition.full_charge_holds(log)
+    assert len(holds) == 1
+    assert holds[0][1] == pytest.approx(8 * 3600, abs=60)
+
+
+def test_charge_behaviour_reports_habits_and_grades_none_of_them():
+    log = "\n".join([
+        _chg_line("07/01/2026 20:00:00", PLUG_IN),
+        _chg_sample("07/01/2026 20:10:00", 30, 103.0, -6, temp=50),
+        _chg_sample("07/01/2026 20:40:00", 80, 110.0, -5, temp=40),
+        _chg_sample("07/01/2026 21:10:00", 100, 116.0, -5, temp=35),
+        _chg_line("07/01/2026 23:05:00", STANDBY),
+        _chg_line("07/02/2026 07:05:00", UNPLUG),
+    ])
+    ch = condition.charge_behaviour(log)
+    assert ch["sessions"] == 1
+    assert ch["start_soc_median"] == 30 and ch["start_soc_min"] == 30
+    assert ch["hot_plugins"] == 1          # pack was at 50 C when plugged in
+    assert ch["peak_amps_max"] == 6
+    assert ch["held_full_h"] == 8.0 and ch["holds"] == 1
+    # habits, not faults: nothing here carries a level, and the taper is not
+    # resolvable at ~10-minute, whole-amp sampling
+    assert ch["graded"] is False and ch["taper_resolvable"] is False
+    assert "level" not in ch
+
+
+def test_a_cool_plug_in_is_not_counted_as_a_hot_one():
+    log = "\n".join([
+        _chg_line("07/01/2026 20:00:00", PLUG_IN),
+        _chg_sample("07/01/2026 20:10:00", 30, 103.0, -6, temp=25),
+        _chg_sample("07/01/2026 20:40:00", 100, 116.0, -5, temp=30),
+    ])
+    assert condition.charge_behaviour(log)["hot_plugins"] == 0
+
+
+def test_a_capture_with_no_charging_says_nothing_rather_than_zero():
+    assert condition.charge_behaviour("") is None
+    assert condition.charge_behaviour(RIDE) is None
+
+
+def test_the_report_prints_the_charging_block_and_its_caveat(tmp_path):
+    log = "\n".join([
+        _chg_line("07/01/2026 20:00:00", PLUG_IN),
+        _chg_sample("07/01/2026 20:10:00", 30, 103.0, -6, temp=50),
+        _chg_sample("07/01/2026 20:40:00", 100, 116.0, -5, temp=35),
+        _chg_line("07/01/2026 23:05:00", STANDBY),
+        _chg_line("07/02/2026 07:05:00", UNPLUG),
+    ])
+    s = sessions.Session(str(tmp_path), {"eventlogdump": log}, "")
+    text = report.format_report(report.analyze_session(s))
+    assert "charging (habits, not graded)" in text
+    assert "sat at FULL with the charger still attached: 8 h" in text
+    assert "plugged in with the pack still hot" in text
+    # the caveat has to travel with the number, or a reader assumes a taper was
+    # looked for and found healthy
+    assert "the taper is NOT visible here" in text
