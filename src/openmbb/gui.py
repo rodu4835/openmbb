@@ -1869,6 +1869,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # the pull's green command borders so a reconnect doesn't LOOK pre-pulled.
             self.analyze_session = None
             self._trend_cache = None
+            self._log_trend_cache = None
             if hasattr(self, "unlock_var"):
                 self.unlock_var.set(False)
             if hasattr(self, "baseline_heavy_var"):
@@ -3248,6 +3249,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if not missing:
                     self.baseline_done = True
                     self._trend_cache = None      # a new pull -> refresh trend charts
+                    self._log_trend_cache = None
                     self._apply_gates()
                     # confirmation right under the Pull button (owner)
                     self.lbl_prog.config(text="✓ Full database pulled & backed up",
@@ -4533,7 +4535,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                           "SOC vs pack voltage", "Efficiency per ride (bar)",
                           "Trend: pack capacity", "Trend: charge cycles",
                           "Trend: max battery temp", "Trend: max motor temp",
-                          "Trend: effective gearing")
+                          "Trend: effective gearing", "Trend: charge index",
+                          "Trend: weakest cell deviation")
 
         # cross-session trends: label -> (extract(bms, stats), y-label, is_temp)
         _SESSION_TRENDS = {
@@ -4548,6 +4551,24 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             "Trend: effective gearing": (_trend_gearing_ratio,
                                          "effective ratio (:1)", False),
         }
+
+        # The two metrics worth plotting over years, and the only two here that
+        # survive a firmware change. "Trend: pack capacity" above is what the BMS
+        # SAYS; the charge index is what the pack ACTUALLY accepted between two
+        # fixed voltages, and the deviation is the weakest cell measured against
+        # its own pack average — neither can be moved by an SOC rescale. Both come
+        # out of the event log rather than `bms`, which is why they are cached
+        # separately from the cheap ones.
+        # label -> (key in the log-trend record, y-label)
+        _LOG_TRENDS = {
+            "Trend: charge index": ("charge_index_ah",
+                                    "Ah accepted 103–113 V"),
+            "Trend: weakest cell deviation": ("cell_deviation_mv",
+                                              "weakest cell below pack avg (mV)"),
+        }
+        # a pull's event log is about a megabyte and costs ~0.1 s to parse, so the
+        # history is read once, on demand, and only this far back
+        _LOG_TREND_LIMIT = 24
 
         def _build_charts_tab(self, sub):
             self._ride_records = []
@@ -4715,9 +4736,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             demonstrates what a real history looks like. Anchored on the sim's own
             current reading where available; clearly labelled SIMULATED on the chart."""
             import math
-            extract = self._SESSION_TRENDS[metric][0]
+            extract = self._SESSION_TRENDS.get(metric, (None,))[0]
             anchor = None
-            trend = self._load_trend_sessions()
+            trend = self._load_trend_sessions() if extract else []
             if trend:
                 v = extract(trend[-1][2], trend[-1][3])
                 if isinstance(v, (int, float)):
@@ -4726,7 +4747,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 anchor = {"Trend: pack capacity": 100.0, "Trend: charge cycles": 60.0,
                           "Trend: max battery temp": 34.0 if tu != "F" else 93.0,
                           "Trend: max motor temp": 55.0 if tu != "F" else 131.0,
-                          "Trend: effective gearing": 4.0
+                          "Trend: effective gearing": 4.0,
+                          "Trend: charge index": 17.9,
+                          "Trend: weakest cell deviation": 65.0,
                           }.get(metric, 50.0)
             now = _dt.datetime.now().timestamp()
             span, n = 365 * 86400, 26
@@ -4747,16 +4770,64 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 pts.append((t, round(val, 2)))
             return pts
 
+        def _load_log_trend(self):
+            """Event-log figures per saved pull (oldest->newest), built on demand.
+
+            Deliberately separate from `_load_trend_sessions`: that one parses two
+            short command outputs and is cheap enough to build whenever a chart is
+            drawn, while this one re-reads the event log of every capture. Nothing
+            asks for it until one of the `_LOG_TRENDS` metrics is selected.
+            """
+            cached = getattr(self, "_log_trend_cache", None)
+            if cached is not None:
+                return cached
+            out = []
+            try:
+                root, names = self._recent_sessions(limit=60)
+                real = [n for n in reversed(names)
+                        if not n.endswith(("_sim", "_listen"))]
+                for name in real[-self._LOG_TREND_LIMIT:]:
+                    try:
+                        folder = os.path.join(root, name)
+                        sess = sessions.load_session(folder)
+                        log = compare_mod._event_log(sess)
+                        if not log:
+                            continue
+                        cap = condition_mod.charge_capacity(parsers.parse_charge_log(log))
+                        dev = condition_mod.cell_deviation(parsers.parse_ride_log(log))
+                        out.append((os.path.getmtime(folder), name, {
+                            "charge_index_ah": cap["median_ah"] if cap else None,
+                            "cell_deviation_mv": dev["median_mv"] if dev else None,
+                        }))
+                    except Exception:
+                        pass
+            except Exception:
+                out = []
+            out.sort(key=lambda r: r[0])
+            self._log_trend_cache = out
+            return out
+
         def _chart_note(self, cv, text):
             w, _h = self._chart_size(cv)
             cv.create_text(w - 22, 22, text=text, fill=P["dim"], anchor="ne",
                            font=(self.sty["ui"], 8))
 
         def _render_session_trend(self, cv, metric):
-            extract, ylabel, is_temp = self._SESSION_TRENDS[metric]
+            log_metric = metric in self._LOG_TRENDS
+            if log_metric:
+                key, ylabel = self._LOG_TRENDS[metric]
+                is_temp = False
+
+                def extract(rec, _unused):
+                    return rec.get(key)
+                rows = [(mt, name, rec, None)
+                        for mt, name, rec in self._load_log_trend()]
+            else:
+                extract, ylabel, is_temp = self._SESSION_TRENDS[metric]
+                rows = self._load_trend_sessions()
             tu = config.get_temp_units()
             pts = []
-            for mt, _name, bms, stats in self._load_trend_sessions():
+            for mt, _name, bms, stats in rows:
                 v = extract(bms, stats)
                 if isinstance(v, (int, float)):
                     if is_temp and tu == "F":
@@ -4771,8 +4842,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             pts = self._apply_chart_range(pts)
             if not pts:
                 self._chart_msg(cv, "No saved sessions with this metric in this range."
-                                "\n\nPull full database on several visits to build a "
-                                "trend over time, or widen the Range.")
+                                + ("\n\nThis one is read out of the event log, so "
+                                   "it only appears for pulls taken with "
+                                   "'+event log' ticked." if log_metric else "")
+                                + "\n\nPull full database on several visits to build "
+                                "a trend over time, or widen the Range.")
                 return
             if is_temp:
                 ylabel = "%s (°%s)" % (ylabel, tu)
@@ -4787,6 +4861,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             note = "%d %spull%s · %s" % (
                 len(pts), "" if synthetic else "real ",
                 "" if len(pts) == 1 else "s", self.chart_range.get())
+            if log_metric:
+                note += " · an index, not capacity"
             self._chart_note(cv, ("SIMULATED · " + note) if synthetic else note)
 
         def _render_charts(self):
@@ -4801,7 +4877,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # a stale transform from the previous chart. (review v0.18: critical + major)
             self._chart_xform = None
             metric = self.chart_metric.get()
-            if metric in self._SESSION_TRENDS:      # cross-session trend (no ride log)
+            if metric in self._SESSION_TRENDS or metric in self._LOG_TRENDS:
+                # cross-session trend (one point per saved pull, not a ride log)
                 self._render_session_trend(cv, metric)
                 return
             recs = getattr(self, "_ride_records", [])
@@ -5068,10 +5145,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if len(ordered) < 2:
                 self._compare_out("\nAdd a second session to see the diff and trends.")
                 return
-            # Compare is now focused on WHAT CHANGED between two sessions (the
-            # settings diff). The over-time trends (pack capacity, charge cycles,
-            # temps, effective gearing) live on the Charts tab as 'Trend:' metrics —
-            # a real dated timeline instead of a text table (owner consolidation).
+            # Compare answers two questions a single capture cannot. What CHANGED
+            # between two pulls (the settings diff), and how the PACK moved across
+            # all of them. The dated timelines — capacity, charge cycles, temps,
+            # gearing — stay on the Charts tab, which draws them properly.
             res = compare_mod.compare_sessions(ordered)
             self._compare_out("\nSETTINGS CHANGED (%s -> %s):"
                               % (ordered[0].name, ordered[-1].name))
@@ -5080,9 +5157,47 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self._compare_out("  %-16s %s -> %s" % (name, old, new))
             else:
                 self._compare_out("  (none)")
-            self._compare_out("\nTrends across pulls (pack capacity, charge cycles, "
-                              "temps, effective gearing) live on the Charts tab — pick "
-                              "a 'Trend:' metric there for a dated timeline.")
+            # What a single capture cannot show. These are the measurements that
+            # survive a firmware change - the charge index is read between fixed
+            # pack voltages, and the deviation is the weakest cell against its own
+            # pack - so unlike the SOC gauge they stay comparable across time.
+            def g(v):
+                return "n/a" if v is None else ("%g" % v if isinstance(v, float)
+                                                else str(v))
+
+            trend = res.get("pack_trend") or []
+            if trend:
+                self._compare_out("\nPACK OVER TIME (nothing here is graded):")
+                self._compare_out("  %-30s %9s %8s  %s"
+                                  % ("capture", "index Ah", "dev mV", "weakest cell"))
+                for r in trend:
+                    cell = ("%s mV @ cell %s" % (g(r["low_cell_mv"]),
+                                                 g(r["low_cell_index"]))
+                            if r.get("low_cell_index") is not None
+                            else "%s mV" % g(r["low_cell_mv"]))
+                    self._compare_out("  %-30s %9s %8s  %s (at %s%% SOC)"
+                                      % (r["session"][:30], g(r["charge_index_ah"]),
+                                         g(r["cell_deviation_mv"]), cell,
+                                         g(r["soc_pct"])))
+                self._compare_out("  index Ah = charge accepted 103-113 V, a comparable "
+                                  "index rather than the pack's capacity")
+                self._compare_out("  dev mV   = how far the weakest cell sits below its "
+                                  "own pack average under load")
+            wc = res.get("weakest_cell")
+            if wc:
+                self._compare_out(
+                    "\n  %s Cell %d is the weakest reading in %d of %d captures."
+                    % ("!" if wc["always"] else "-", wc["cell"], wc["times"],
+                       wc["of_captures"]))
+                self._compare_out(
+                    "    A voltage that wanders between cells is a pack breathing; the "
+                    "same cell returning is a cell.")
+                self._compare_out(
+                    "    Read at rest, so discount any reading taken near full charge - "
+                    "the spread closes up there.")
+            self._compare_out("\nDated timelines for pack capacity, charge cycles, temps "
+                              "and effective gearing live on the Charts tab — pick a "
+                              "'Trend:' metric there.")
 
         def _gearing_plan(self):
             try:

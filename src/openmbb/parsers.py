@@ -138,6 +138,18 @@ def top_speed_mph(text):
     return round(float(m.group(1)) * 0.621371, 1) if m else None
 
 
+_CELL_IDX_RE = re.compile(r"\(\s*cell\s*(\d+)\s*\)", re.I)
+
+
+def _cell_index(text, needle):
+    """The cell number the BMS attributes a extreme reading to, or None."""
+    for line in (text or "").splitlines():
+        if needle in line.lower():
+            m = _CELL_IDX_RE.search(line)
+            return int(m.group(1)) if m else None
+    return None
+
+
 def parse_bms(text):
     """Normalize `bms` output. All fields optional."""
     kv = parse_kv(text)
@@ -158,6 +170,12 @@ def parse_bms(text):
         "fuel_pct": num(g("fuel")),
         "pack_v": first_val(num(g("pack", "voltage")), num(g("voltage"))),
         "low_cell_mv": first_val(num(g("lowest", "cell")), num(g("low", "cell"))),
+        # the console names the cell, not just the voltage:
+        #   - Lowest Cell Voltage : 4078 mV ( Cell 25 )
+        # a voltage says the pack is uneven; an INDEX says which cell, and a
+        # specific cell is a repairable thing rather than a bad feeling
+        "low_cell_index": _cell_index(text, "lowest cell"),
+        "high_cell_index": _cell_index(text, "highest cell"),
         "high_cell_mv": first_val(num(g("highest", "cell")), num(g("high", "cell"))),
         "balance_mv": num(g("balance")),
         "capacity_ah": caps[0] if caps else None,

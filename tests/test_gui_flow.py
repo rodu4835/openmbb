@@ -1449,6 +1449,56 @@ def test_compare_renders_diff_and_points_to_charts(app, monkeypatch):
     assert "EFFECTIVE GEARING RATIO" not in out
 
 
+def test_compare_shows_the_pack_moving_and_names_a_repeat_offender(app, monkeypatch):
+    # The one thing a single capture cannot give an owner. Both figures here are
+    # comparable across a firmware change - the index is read between fixed pack
+    # voltages, the deviation is a cell against its own pack - which is why they
+    # are worth a table when the SOC gauge is not.
+    from openmbb import sessions, gui as _gui
+    app.compare_list = [sessions.Session("/x/jul_COM4", {}, ""),
+                        sessions.Session("/x/aug_COM4", {}, "")]
+    monkeypatch.setattr(_gui.compare_mod, "compare_sessions", lambda ordered: {
+        "settings_diff": [], "capacity_trend": [], "gearing_trend": [],
+        "pack_trend": [
+            {"session": "jul_COM4", "charge_index_ah": 17.92, "charge_sessions": 4,
+             "cell_deviation_mv": 67.1, "loaded_samples": 900,
+             "low_cell_mv": 3674.0, "low_cell_index": 28, "soc_pct": 45.0},
+            {"session": "aug_COM4", "charge_index_ah": 17.83, "charge_sessions": 3,
+             "cell_deviation_mv": 63.6, "loaded_samples": 850,
+             "low_cell_mv": 4078.0, "low_cell_index": 28, "soc_pct": 96.0}],
+        "weakest_cell": {"cell": 28, "times": 2, "of_captures": 2,
+                         "always": True, "graded": False}})
+    app._render_compare()
+    app.update()
+    out = app.txt_compare.get("1.0", "end")
+    assert "PACK OVER TIME" in out and "nothing here is graded" in out
+    assert "17.92" in out and "3674 mV @ cell 28" in out
+    assert "at 96% SOC" in out            # the caveat travels with the reading
+    assert "Cell 28 is the weakest reading in 2 of 2 captures" in out
+    assert "Charts tab" in out            # dated timelines still live there
+
+
+def test_compare_survives_a_capture_that_named_no_cell(app, monkeypatch):
+    # an older console prints the voltage without attributing it; the row must
+    # still render rather than blanking the whole table
+    from openmbb import sessions, gui as _gui
+    app.compare_list = [sessions.Session("/x/a_COM4", {}, ""),
+                        sessions.Session("/x/b_COM4", {}, "")]
+    monkeypatch.setattr(_gui.compare_mod, "compare_sessions", lambda ordered: {
+        "settings_diff": [], "capacity_trend": [], "gearing_trend": [],
+        "pack_trend": [{"session": "a_COM4", "charge_index_ah": None,
+                        "charge_sessions": 0, "cell_deviation_mv": None,
+                        "loaded_samples": 0, "low_cell_mv": 3798.0,
+                        "low_cell_index": None, "soc_pct": None}],
+        "weakest_cell": None})
+    app._render_compare()
+    app.update()
+    out = app.txt_compare.get("1.0", "end")
+    assert "3798 mV" in out and "@ cell" not in out
+    assert "n/a" in out                   # missing reads as missing, not as 0
+    assert "is the weakest reading" not in out
+
+
 def test_gearing_trend_metric_available_and_computes(app, monkeypatch):
     # v0.18 E: an 'effective gearing' Trend metric exists on Charts, derived per
     # session from the odometer (rev/km) with the default wheel circ.
@@ -2512,3 +2562,74 @@ def test_modal_read_refused_tears_down_the_modal(app, monkeypatch):
     assert not app._read_modal_up          # torn down, not stuck
     assert not app.grab_current()
     app._busy = False
+
+
+def test_the_log_derived_trend_metrics_are_offered_and_plot(app, monkeypatch):
+    # These two are the only trend lines that survive a firmware change, which is
+    # the whole reason they exist: "Trend: pack capacity" is what the BMS SAYS,
+    # and the 2026-06-13 reflash moved that number without touching the pack.
+    import time as _time
+    assert "Trend: charge index" in app._CHART_METRICS
+    assert "Trend: weakest cell deviation" in app._CHART_METRICS
+    now = _time.time()
+    monkeypatch.setattr(app, "_load_log_trend", lambda: [
+        (now - 40 * 86400, "jul_COM4",
+         {"charge_index_ah": 17.92, "cell_deviation_mv": 67.1}),
+        (now - 5 * 86400, "aug_COM4",
+         {"charge_index_ah": 17.83, "cell_deviation_mv": 63.6})])
+    app.sim_var.set(False)
+    app.chart_range.set("All")
+    for metric in ("Trend: charge index", "Trend: weakest cell deviation"):
+        app.chart_metric.set(metric)
+        app._chart_xzoom = None
+        app._render_charts()
+        app.update()
+        drawn = app.chart_canvas.find_all()
+        assert drawn, "%s drew nothing" % metric
+        text = " ".join(app.chart_canvas.itemcget(i, "text")
+                        for i in drawn
+                        if app.chart_canvas.type(i) == "text")
+        # a falling line here reads as "my pack is dying" unless the chart says
+        # plainly that this is an index
+        assert "an index, not capacity" in text
+        assert "2 real pulls" in text
+
+
+def test_a_capture_with_no_event_log_is_skipped_not_plotted_as_zero(app, monkeypatch):
+    # a pull taken without '+event log' has nothing to measure; reporting 0 Ah
+    # would draw a cliff that never happened
+    monkeypatch.setattr(app, "_load_log_trend", lambda: [
+        (1.0, "a_COM4", {"charge_index_ah": None, "cell_deviation_mv": None})])
+    app.sim_var.set(False)
+    app.chart_metric.set("Trend: charge index")
+    app.chart_range.set("All")
+    app._chart_xzoom = None
+    app._render_charts()
+    app.update()
+    text = " ".join(app.chart_canvas.itemcget(i, "text")
+                    for i in app.chart_canvas.find_all()
+                    if app.chart_canvas.type(i) == "text")
+    assert "No saved sessions with this metric" in text
+    assert "+event log" in text          # names the actual cause
+
+
+def test_the_expensive_log_history_is_read_once_and_only_when_asked(app, monkeypatch):
+    # every full pull saves about a megabyte of event log, so building this for
+    # 24 captures is not something a chart resize should do
+    calls = []
+    real = app.__class__._load_log_trend
+    monkeypatch.setattr(app.__class__, "_load_log_trend",
+                        lambda self: (calls.append(1), real(self))[1])
+    app._log_trend_cache = None
+    app.sim_var.set(False)
+    app.chart_range.set("All")
+    app.chart_metric.set("Trend: pack capacity")     # a cheap metric
+    app._render_charts()
+    app.update()
+    assert calls == [], "a bms-derived chart must not touch the event logs"
+    app.chart_metric.set("Trend: charge index")
+    app._render_charts()
+    app._render_charts()
+    app.update()
+    assert len(calls) == 2                            # asked twice...
+    assert app._log_trend_cache is not None            # ...parsed once

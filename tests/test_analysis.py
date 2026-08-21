@@ -732,3 +732,75 @@ def test_run_time_against_the_odometer_catches_a_statistics_reset(tmp_path):
 def test_a_capture_without_those_commands_prints_no_state_block(tmp_path):
     s = sessions.Session(str(tmp_path), {"bms": REAL_BMS}, "")
     assert "== Bike state ==" not in report.format_report(report.analyze_session(s))
+
+
+# --- the pack over time: what one capture cannot show ------------------------
+
+def test_the_bms_names_which_cell_is_weakest_not_just_the_voltage():
+    # "3798 mV" says the pack is uneven; "( Cell 12 )" says which cell, and a
+    # named cell is a repairable thing rather than a bad feeling
+    b = parsers.parse_bms(REAL_BMS)
+    assert b["low_cell_index"] == 12
+    assert b["high_cell_index"] == 7
+    # a console that prints the voltage without the attribution still parses
+    plain = REAL_BMS.replace(" ( Cell 12 )", "")
+    assert parsers.parse_bms(plain)["low_cell_mv"] == 3798
+    assert parsers.parse_bms(plain)["low_cell_index"] is None
+
+
+def _trend_session(tmp_path, tag, bms):
+    # Session takes its name from the folder, so the tag IS the name
+    return sessions.Session(str(tmp_path / tag), {"bms": bms}, "")
+
+
+def test_pack_trend_carries_the_soc_each_reading_was_taken_at(tmp_path):
+    # cell spread closes up near full charge, so a deviation without the SOC it
+    # was read at is not comparable to the next one - the SOC travels with it
+    a = _trend_session(tmp_path, "jul", REAL_BMS)
+    b = _trend_session(tmp_path, "aug", REAL_BMS.replace("61%", "96%"))
+    trend = compare.pack_trend([a, b])
+    assert [t["session"] for t in trend] == ["jul", "aug"]   # in the order given
+    assert [t["soc_pct"] for t in trend] == [61, 96]
+    assert all(t["low_cell_index"] == 12 for t in trend)
+    # no event log in these captures, so the log-derived figures say so rather
+    # than reporting a confident zero
+    assert all(t["charge_index_ah"] is None for t in trend)
+    assert all(t["cell_deviation_mv"] is None for t in trend)
+
+
+def test_the_same_cell_returning_is_a_cell_a_wandering_one_is_not(tmp_path):
+    same = compare.pack_trend([_trend_session(tmp_path, "a", REAL_BMS),
+                               _trend_session(tmp_path, "b", REAL_BMS),
+                               _trend_session(tmp_path, "c", REAL_BMS)])
+    wc = compare.weakest_cell_identity(same)
+    assert wc["cell"] == 12 and wc["times"] == 3 and wc["always"] is True
+    assert wc["graded"] is False           # a pattern to look at, not a verdict
+
+    wander = compare.pack_trend([
+        _trend_session(tmp_path, "a", REAL_BMS),
+        _trend_session(tmp_path, "b", REAL_BMS.replace("Cell 12", "Cell 3")),
+        _trend_session(tmp_path, "c", REAL_BMS.replace("Cell 12", "Cell 21"))])
+    wander_wc = compare.weakest_cell_identity(wander)
+    assert wander_wc["times"] == 1 and wander_wc["always"] is False
+
+
+def test_one_capture_is_not_a_pattern(tmp_path):
+    # a single reading names a cell but says nothing about whether it repeats
+    one = compare.pack_trend([_trend_session(tmp_path, "a", REAL_BMS)])
+    assert compare.weakest_cell_identity(one) is None
+    # and captures that never named a cell cannot claim one either
+    plain = REAL_BMS.replace(" ( Cell 12 )", "")
+    blind = compare.pack_trend([_trend_session(tmp_path, "a", plain),
+                                _trend_session(tmp_path, "b", plain)])
+    assert compare.weakest_cell_identity(blind) is None
+
+
+def test_compare_sessions_reports_the_trend_alongside_the_diff(tmp_path):
+    a = _make_session(tmp_path, "old")
+    b = _make_session(tmp_path, "new")
+    res = compare.compare_sessions([a, b])
+    assert len(res["pack_trend"]) == 2
+    assert res["pack_trend"][0]["session"] == a.name
+    # the sim's two identical captures name the same cell, which is exactly the
+    # shape the identity check is meant to notice
+    assert res["weakest_cell"] is None or res["weakest_cell"]["of_captures"] == 2

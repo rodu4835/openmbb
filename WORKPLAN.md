@@ -15,27 +15,35 @@ that ceiling is worth more than anything that polishes what sits behind it.
 
 ## Tier 1 — breaks the one-bike ceiling
 
-- [ ] **Share-safe capture export.** A "Share this capture" action producing a bundle with
+- [x] **Share-safe capture export.** *(shipped: `openmbb redact`, File -> Export
+  share-safe copy)* A "Share this capture" action producing a bundle with
   the VIN, serial numbers and passwords stripped, safe to post on a forum or send to a
   maintainer. *Why first:* it is the only item that turns users into a calibration set,
   and it also removes a real hazard — today a user who wants help has no safe way to hand
   over a capture. The redaction map already exists from building the PII gate
   (`tests/_pii_shapes.py`, `SessionLogger.add_redaction`). *Cost:* small.
 
-- [ ] **Cross-capture history.** Everything today answers from a single capture. Track the
+- [x] **Cross-capture history.** *(shipped: a PACK OVER TIME table on Compare, plus
+  "Trend: charge index" and "Trend: weakest cell deviation" on Charts. Lifetime maxima
+  were already plotted.)* Everything today answers from a single capture. Track the
   gauge-independent capacity index (Ah accepted 103–113 V), weakest-cell deviation, and
   lifetime maxima across every saved session, and plot them. *Why:* the reference bike
   reads 17.83 and 17.92 Ah on two captures — half a percent apart — so the measurement is
   stable enough that a year of them is a genuine degradation curve. No other Zero tool
   does this well. *Cost:* medium; `compare.py` and the Charts trend code already exist.
 
-- [ ] **Track the weakest cell by identity, not just by voltage.** `bms` names the cell:
+- [x] **Track the weakest cell by identity, not just by voltage.** *(shipped: `bms` now
+  yields `low_cell_index`/`high_cell_index`; Compare names a cell that keeps returning,
+  and prints the SOC each reading was taken at so a near-full capture is discounted rather
+  than trusted.)* `bms` names the cell:
   `Lowest Cell Voltage : 3674 mV ( Cell 28 )`. The reference bike reads Cell 28, Cell 28,
   Cell 25 across three captures. *Why:* a voltage says the pack is uneven; an index says
   *which cell*, and a specific cell is a repairable thing. *Cost:* small, once history
   exists. Depends on the item above.
 
-- [ ] **Parse the seven commands captured on every pull and never read.** `sevcon`,
+- [x] **Parse the commands captured on every pull and never read.** *(shipped:
+  inputs/outputs/runtime/obd -> Fault codes on Health, and a Bike state block.
+  sevcon/chargers/bluetooth still unread.)* `sevcon`,
   `inputs`, `outputs`, `chargers`, `bluetooth`, `obd`, `runtime`. In value order:
   - `inputs` — kickstand, brake, throttle switch states: the "why won't it go into gear"
     answer, currently captured and discarded.
