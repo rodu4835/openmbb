@@ -1,5 +1,5 @@
 """Tkinter GUI: four phase-gated panels (Connect / Read / Login / Writes) plus
-an always-available Analyze tab (Health / Rides / Compare / Gearing)."""
+an always-available Analyze tab (Health / Condition / Rides / Charts / Compare)."""
 
 import datetime as _dt
 import difflib
@@ -160,11 +160,19 @@ WRITES
 ANALYZE (always available, no bike needed)
   Reads a saved session folder (or the current one) and interprets it:
     - Health : SOC vs voltage, cell balance/spread, capacity, temps, cycles,
-               odometer, efficiency and the effective gearing ratio, each flagged
-               ok / watch / alert.
-    - Rides  : per-ride distance, SOC%/km, and temps read STRAIGHT OFF THE BIKE —
-               'Pull ride log from bike' runs the console's eventlogdump (decoded
-               text). No Zero app, no external decoder. Or load a saved .txt.
+               odometer, efficiency and the effective gearing ratio. Rows with a
+               threshold are flagged ok / watch / alert; the rest are
+               informational. Click a row for a plain-language explanation.
+    - Conditn: what the ride and charge SAMPLES say about the pack, ending in a
+               verdict — healthy / worth a look / walk away / CANNOT TELL. It
+               grades only what one capture can judge with no second bike to
+               compare against, and names every check it could not answer rather
+               than letting silence read as a pass. Also flags a statistics RESET
+               and shows the bike's MBB/BMS/dash clocks against your own.
+    - Rides  : per-ride distance, SOC per distance, and temps read STRAIGHT OFF
+               THE BIKE — 'Pull ride log from bike' runs the console's
+               eventlogdump (decoded text). No Zero app, no external decoder. Or
+               load a saved .txt. Distances and temps follow your unit setting.
     - Charts : plot the ride-log series, or a 'Trend:' metric (pack capacity,
                charge cycles, temps, effective gearing) across your real pulls
                over time — pick a date Range, or drag to zoom (double-click resets).
@@ -1462,10 +1470,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
             def _refresh_pw():
                 c = len(config.get_saved_passwords())
-                lbl_pw.config(text=("%d saved password(s) — remembered so 'Try known "
-                                    "passwords' can reuse them." % c) if c
-                              else "No saved passwords. After a successful login you "
-                                   "can choose to remember it.")
+                lbl_pw.config(text=("%d saved password(s), stored in clear text in "
+                                    "~/.openmbb/config.json and tried automatically "
+                                    "on login. Forget them below." % c) if c
+                              else "No saved passwords. After a successful login "
+                                   "with a password you typed, you can choose to "
+                                   "remember it — it is then stored in clear text "
+                                   "in ~/.openmbb/config.json.")
             _refresh_pw()
 
             def _forget_and_refresh():
@@ -3446,9 +3457,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if used and used not in COMMUNITY_PASSWORDS \
                         and used not in config.get_saved_passwords():
                     if messagebox.askyesno(APP_NAME, "Remember this password so OpenMBB "
-                            "tries it automatically next time? It is stored in your "
-                            "config file (~/.openmbb/config.json). You can clear it via "
-                            "Tools → Settings → Login."):
+                            "tries it automatically next time? It is stored IN CLEAR "
+                            "TEXT in your config file (~/.openmbb/config.json) — say no "
+                            "if it is a password you use anywhere else. You can clear it "
+                            "via Tools → Settings → Login."):
                         config.add_saved_password(used)
                         self._login_log("Password remembered — it'll be tried "
                                         "automatically next session (clear it via "
@@ -3977,7 +3989,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       "commands need a typed 'confirm'", style="Muted.TLabel").pack(
                           anchor="w", pady=(2, 0))
 
-        # -- Analyze tab (Health / Rides / Compare / Gearing) ----------------
+        # -- Analyze tab (Health / Condition / Rides / Charts / Compare) -----
         def _build_analyze_tab(self):
             f = self._new_tab(" Analyze ", "Analyze the data",
                               "health, rides, and comparisons")

@@ -22,9 +22,12 @@ bike, the model/firmware, and why it's dangerous.
 
 In scope — examples of what's worth reporting:
 
-- A way to get a **destructive command onto the wire without the informed-consent
-  confirm** (e.g. bypassing the control-character / multi-line refusal, or the
-  raw-box `set` refusal).
+- A way to get a **destructive command onto the wire with no typed `confirm` at
+  all** — that is the line worth defending. Note that the raw box's refusal of a
+  blocklisted `set` is *deliberately* overridable by typing `confirm`, so "I typed
+  confirm and it sent it" is intended behaviour, not a finding. The refusals that
+  are unconditional, and whose bypass would be a real report, are the control
+  character / non-ASCII / multi-line ones.
 - A write that **skips the whitelist re-validation** in `Transport.write_setting`.
 - A path that could **brick a component or leave the bike in an unsafe state**
   more easily than the documented, confirmed flow.

@@ -2,10 +2,10 @@
 
 **Read your Gen2 Zero motorcycle's own diagnostics** over the service port —
 battery health, motor controller, error logs, settings — back them up, and make
-sense of them offline. A safe, **read-first** desktop app for the **MBB serial
-console** (OBD-II / C3 port); any writes are whitelist-only and gated. Try the
-whole thing with the built-in **simulator** — no bike needed. Windows-11-native
-look (Sun Valley theme).
+sense of them offline, ending in a plain verdict on the pack. A safe,
+**read-first** desktop app for the **MBB serial console** (OBD-II / C3 port); any
+writes are whitelist-only and gated. Try the whole thing with the built-in
+**simulator** — no bike needed. Windows-11-native look (Sun Valley theme).
 
 > ⚠️ **USE AT YOUR OWN RISK.** OpenMBB is an unofficial, independent hobby tool
 > for diagnosing **your own** vehicle. It is **not affiliated with, authorized,
@@ -20,8 +20,13 @@ look (Sun Valley theme).
 
 OpenMBB is a **general read / diagnostics tool** for the Gen2 MBB console:
 connect, read everything the bike will tell you (identity, BMS, motor
-controller, stats, error log), and analyze it offline. **Writing is optional and
-off by default** — the Writes tab doubles as a *reference of what's adjustable*
+controller, stats, error log), and analyze it offline. The analysis ends in a
+graded **verdict** on the battery — healthy, worth a look, walk away, or
+**cannot tell** — and that last one is a real answer: it grades only what a
+single capture can judge with no second bike to compare against, and names every
+check it could not answer rather than letting silence read as a pass. **Writing
+is optional and off by default** — the Writes tab doubles as a *reference of
+what's adjustable*
 (each whitelisted setting shown with its effect and risk), and any change is
 gated behind login + a master unlock + a per-write confirm. The gearing
 calculator is just one of the optional analysis helpers, not the focus.
@@ -84,9 +89,10 @@ openmbb --selftest  # headless transport/safety tests
 openmbb --smoketest # build the GUI once, sim-connect, and exit
 ```
 
-Requires **Python 3.12+** (older 3.9–3.11 will likely work but are untested; CI
-runs 3.12); `pyserial` and `sv-ttk` install automatically (if
-`sv-ttk` is ever unavailable the app falls back to a built-in dark theme). Fonts
+Requires **Python 3.9+** (that is what the package metadata enforces; CI runs
+3.12, so 3.9–3.11 are supported but untested); `pyserial` and `sv-ttk` install
+automatically (if `sv-ttk` is ever unavailable the app falls back to a built-in
+theme in whichever mode you have selected, light or dark). Fonts
 and the file-manager "open folder" action work cross-platform. To **update**:
 `git pull`, then re-run `pip install -e .` if dependencies changed.
 
@@ -96,7 +102,8 @@ and the file-manager "open folder" action work cross-platform. To **update**:
 ### Build the binaries yourself
 
 ```
-pip install .[dev]                    # adds PyInstaller + Pillow
+pip install ".[dev]"                  # adds PyInstaller + Pillow (quote it — zsh
+                                      # expands the brackets otherwise)
 python packaging/build.py             # -> dist/openmbb(.exe)  — portable, any OS
 ```
 
@@ -159,36 +166,69 @@ whole tool with no bike or cable. The staged flow below unlocks one step at a ti
    read the app shows a **blocking "Reading — please wait" window** that locks the
    rest of the UI until it finishes, then offers **Continue** (the console is
    single-threaded — nothing else can run mid-dump). One failed command no longer
-   discards the pass, and Login unlocks only once the essential reads + a parsed
-   `set` succeed. The session's power state is stamped (`session_meta.txt`); an
-   on-charger baseline is flagged because isolation/SOC context isn't valid off
-   the charger. *You can stop here — reads are the whole point of day one.*
+   discards the pass, but **Writes** unlocks only once the essential reads
+   (`version`, `status`, `stats`) plus a parsed `set` succeed: that parsed dump is
+   the backup on disk, and nothing is written without one (the login in step 2 is
+   the other half of that gate). **Login** itself opens on Connect alone — it only
+   reads. The session's power state is stamped (`session_meta.txt`); a baseline
+   pulled **on the charger** is flagged, because an isolation reading taken there
+   is falsely low and the SOC context is a charging one, not the bike's resting
+   one. *You can stop here — reads are the whole point of day one.*
 2. **Login** — explicit. **On rev 41 the tunables (`spfront`/`sprear`/regen/…)
    are login-gated: `set` at level 0 shows identity only.** The password box is
    pre-filled with the last one that worked (or a community-known one — `tpsreport`,
-   `wideopenthrottle`); press **Login**, or type a different one (masked in the logs,
-   never saved to disk). Success is confirmed by the read-only `login` **level
-   query** (`Login Level: N`), not by guessing at the reply wording. On success the
-   post-login `set` is saved as the authoritative pre-change backup and the tunables
-   appear.
+   `wideopenthrottle`); press **Login**, or type a different one (masked in
+   everything written to the session folder). If a password you typed works and
+   isn't community-known, the app *offers* to remember it — say yes and it is
+   stored in clear text in `~/.openmbb/config.json` and tried automatically next
+   time; clear saved ones via **Tools → Settings → Login**. Success is confirmed
+   by the read-only `login` **level query** (`Login Level: N`), not by guessing at
+   the reply wording. On success the post-login `set` is saved as the authoritative
+   pre-change backup and the tunables appear.
 3. **Writes** — locked behind login + master unlock toggle + per-write confirm.
    Rows appear only for settings that are BOTH on the whitelist AND present in
    the live dump. Click a row's New value cell to type a value, then Write. Every
-   write: journal the intent *before it hits the wire* → re-read current → confirm
-   old→new with effect/risk → auto-backup full settings → send → read-back verify →
-   journal to disk. A changed row shows **↺ Reset** to restore the last-read value;
-   a read-back mismatch points you to it.
+   write: re-read current → confirm old→new with effect/risk → auto-backup full
+   settings → journal the intent *before it hits the wire* → send → read-back
+   verify → journal the result. A changed row shows **↺ Reset** to restore the
+   last-read value; a read-back mismatch points you to it.
 
 The **Analyze** tab is always available (no bike needed) and interprets a saved
 session folder — or the current one:
 
-- **Health** — SOC vs pack voltage, cell balance, capacity, temps, charge
-  cycles, and the effective gearing ratio, each flagged ok / watch / alert.
-- **Rides** — per-ride distance, SOC%/km, and temps, read **straight off the
-  bike**: `eventlogdump` prints the full event log as decoded text (including
-  per-sample riding entries — SOC, pack/motor temp, voltage, rpm, odometer), which
-  OpenMBB parses directly. No Zero app, no `.bin` files, no external decoder. Pull
-  it with **Pull ride log from bike**, or **Load ride log (.txt)** for a log you
+- **Health** — one row per reading in the capture: SOC vs pack voltage, cell
+  balance and spread, pack capacity, charge cycles, odometer, lifetime
+  efficiency, lifetime peak temps, isolation resistance and the effective
+  gearing ratio. Rows with a threshold — and any live console warning — are
+  flagged ok / watch / alert; the rest are informational. Click a row for what
+  it is and what a healthy reading looks like.
+- **Condition** — what the ride and charge *samples* say about the pack, as
+  against Health's single current readings. Needs the event log in the session
+  folder (`eventlogdump`): after a **Pull full database** without it, most rows
+  read **Not determined** — a question this capture couldn't answer, never a
+  pass. (**Load ride log (.txt)** feeds Rides and Charts only.) A one-line
+  **verdict** grades, worst-wins, only what one capture can judge with no second
+  bike to compare against: the weakest cell against its own pack average under
+  load, absolute cell voltage under load, resting cell spread, and any live
+  isolation or warning Health flagged. Charge capacity — charge accepted between
+  103 and 113 V, a comparable index rather than the pack's total, and the one
+  capacity figure a firmware SOC rescale can't move — and the BMS discharge
+  allowance are **measured, not graded**; logged faults are counted, not graded.
+  It also flags a **Statistics RESET** (every "lifetime" figure on Health dates
+  from there, not from the bike's build date), shows the bike's MBB / BMS / dash
+  clocks against the capturing machine's clock — more than ten minutes out and
+  the Rides timestamps are shifted to match — and drops cell readings a firmware
+  change left undecodable rather than believing them.
+- **Rides** — per-ride start time, distance, SOC used, SOC per unit distance,
+  peak pack/motor temperature and peak rpm, read **straight off the bike**:
+  `eventlogdump` prints the full event log as decoded text (including per-sample
+  riding entries — SOC, pack/motor temp, voltage, rpm, odometer), which OpenMBB
+  parses directly. No Zero app, no `.bin` files, no external decoder. Distances
+  and temperatures follow the units set in **Tools → Settings**, so the column
+  reads SOC%/km or SOC%/mi accordingly. Where the bike's own clock is more than
+  ten minutes off the machine that captured the session, the start times are
+  shifted onto the capture's clock and the totals line says so. Pull it with
+  **Pull ride log from bike**, or **Load ride log (.txt)** for a log you
   already have.
 - **Charts** — dependency-free plots of the ride-log series, plus `Trend:` metrics
   across your saved **real-hardware** pulls (pack capacity, charge cycles, temps,
@@ -198,7 +238,9 @@ session folder — or the current one:
   them; the over-time trends live on the Charts tab.
 
 The analysis parsers are deliberately tolerant: fields the capture doesn't
-include show `n/a` rather than failing.
+include show `n/a` rather than failing. The **Condition** tab goes the other
+way and names what it could not measure: a check this capture can't answer is
+listed as **not determined**, never scored as a pass.
 
 ## Safety model
 
@@ -216,13 +258,17 @@ accident:
   **type `confirm`** first. There is no such dialog on the read commands. Bare
   `eeprom` (the read-only "EEPROM usage" summary) and `obd` are ordinary reads;
   `eeprom` with any argument is treated as destructive.
-- **What IS refused outright (no override):** any command containing a **control
-  character** (so a pasted `status⏎settingsrst` can't smuggle a second line onto
-  the wire), and **every** `set <name> <value>` write from the raw box — writes
-  go *only* through the gated Writes-tab flow (`Transport.write_setting`), which
-  re-validates against the whitelist. The two-token `set <name>` single-setting
-  *view* is refused too (its no-value behavior is unverified on rev 41 — it could
-  prompt-to-write), so read values from the full `set` dump instead.
+- **What IS refused outright, with no override:** any command containing a
+  **control character**, non-ASCII, or a second line (so a pasted
+  `status⏎settingsrst` can't smuggle another command onto the wire). That refusal
+  is unconditional — there is no dialog that gets past it.
+- **What is refused *pending an informed confirm*:** every `set <name> <value>`
+  write from the raw box, and the two-token `set <name>` single-setting *view*
+  (its no-value behaviour is unverified on rev 41 — it could prompt-to-write), so
+  read values from the full `set` dump instead. These stop at the **type
+  `confirm`** dialog rather than a hard wall: typing it deliberately sends the
+  command. The guided path is the safe one — writes through the Writes tab go via
+  `Transport.write_setting`, which re-validates against the whitelist.
 - **Verified on ONE bike.** The blocklist, whitelist, parsers and per-command
   recovery notes were checked against a single **2017 Zero FXS at MBB rev 41**.
   On any other model or firmware they are *untested* — a "confirm" you type there
@@ -230,7 +276,15 @@ accident:
   can't confirm your bike is a verified FXS rev 41.
 - A typed password is masked in **everything** written to disk for the whole
   session (not just the one command), so a late console echo can't leak it.
-- Regen/thermal guards are shown **read-only** in the Writes tab.
+- **Regen/thermal guards are blocklisted, not writable through the guided flow.**
+  `sevnoregspeed`, `sevmaxregv`, `sevnoregfull`, `motstage1`/`motstage2`,
+  `ctrlstage1`/`ctrlstage2` and `sevmaxdischgcur` sit on the blocklist rather than
+  the write whitelist, so the Writes tab never shows a row for one (rows come only
+  from settings that are on the whitelist AND in your live dump) and
+  `Transport.write_setting` refuses them outright. **Help → Command reference** is
+  where each guard, what it protects, and the cost of changing it are written
+  down. Typed into the raw Console, `set <guard> <value>` is treated like any
+  other blocklisted command: the **type `confirm`** dialog, not a hard wall.
 - Validators: coast regen of exactly 0 is refused (fishtail risk);
   `noregenstopped No` warns; range limits on every numeric.
 - A mid-session **reboot** (boot banner) or a **silent** console is detected and
@@ -251,9 +305,13 @@ src/openmbb/
   sessions.py    load saved session folders for analysis
   report.py      saved session -> JSON-ready report (the headless path)
   health.py      health snapshot (typed metrics + ok/watch/alert status)
+  condition.py   pack condition from the ride/charge SAMPLES + the verdict + clocks
   rides.py       ride-log summaries + effective gearing from the odometer
   gearing.py     gearing math (teeth -> ratio -> speedo settings)
   compare.py     settings diff + capacity / gearing trends across sessions
+  charts.py      series extraction for the dependency-free plots
+  config.py      saved preferences (units, theme, save location, logins)
+  dialogs.py     themed message boxes, centred on the parent window
 tests/           pytest suite (safety/transport/config/analysis + GUI flow)
 ```
 
@@ -281,15 +339,51 @@ motorcycle, no serial port, no GUI. Useful for looking at a capture on another
 machine, diffing two of your own, or letting someone else look at yours.
 
 ```bash
-openmbb sessions                       # list saved session folders
-openmbb analyze <session-folder>       # the health report as text
+openmbb sessions                       # list saved session folders, newest first
+openmbb sessions --logdir <path>       # list under a different save base
+openmbb sessions --json                # the same list, structured
+openmbb analyze <session-folder>       # the full report as text
 openmbb analyze <folder> --json        # the same report, structured
 openmbb analyze <folder> --units F     # temperatures in Fahrenheit
-openmbb analyze <folder> --fail-on-alert   # exit 1 if any metric is at alert
+openmbb analyze <folder> --fail-on-alert   # exit 1 if any HEALTH metric is at alert
 ```
 
-`--fail-on-alert` is there so this can drive a script or a scheduled check
-rather than only a pair of eyes.
+The text report is five blocks — **Health, Rides, Clocks, Condition, Verdict**,
+in that order. Rides needs an event log in the capture and Clocks needs a `stats`
+read; the other three always print, and say what they could not determine.
+Abbreviated from a real rev-41 capture:
+
+```
+== Clocks ==
+  MBB (writes the event log): 08/19/2026 15:58:01
+  BMS:                        08/19/2026 15:58:03 (epoch 1787180283)
+  Dash:                       16:08
+  This capture was taken at:  2026-08-19 16:05:13 (the capturing machine's clock)
+  -> the bike's MBB clock is 7 m behind
+
+== Condition (pack) ==
+  log covers 06/24/2026 21:59:31 -> 08/13/2026 18:03:28  (1231 ride, 1476 charge samples)
+  charge accepted 103-113 V: median 17.83 Ah over 43 sessions
+  weakest cell under load: 3165 mV at 136 A, 85% SOC, 30 C
+  discharge allowance: median 85% · worst 22% at 59 C / 27% SOC
+  could not determine: whether the statistics were ever reset: none found, but
+    this log only reaches back to 06/24/2026, so a reset before that would not appear
+
+== Verdict ==
+  Nothing in this capture looks wrong with the pack
+    [ok     ] Weakest cell vs pack     median 63.6 mV below the pack average under
+                                       load, over 678 loaded samples
+    [ok     ] Lowest cell under load   3165 mV, from 678 riding samples
+    [ok     ] Cell spread at rest      2 mV (read at 96 % state of charge)
+```
+
+**Exit codes.** `0` on success, and always unless you pass `--fail-on-alert`.
+`1` only with `--fail-on-alert`, and only when a **health** metric is at alert —
+narrower than it sounds, because that count comes off the health rows alone, so a
+`concern` verdict raised by a Condition check still exits `0`. `2` for a path
+that isn't a directory, or a directory holding neither an `NNN_<cmd>.txt` capture
+nor a settings dump. `--fail-on-alert` is there so this can drive a script or a
+scheduled check rather than only a pair of eyes.
 
 **On the JSON.** Each health metric is
 `{label, value, unit, display, status, note}`. `value` is the datum — a number
@@ -302,13 +396,25 @@ needs no string parsing:
   "note": "highest EVER recorded, not the current temperature; ..." }
 ```
 
-`display` is the only field that follows `--units`; `value` and `unit` stay in
-canonical Celsius, because every threshold in the health module compares in
-Celsius. Read `value`/`unit` programmatically and `display` for humans.
+`value` and `unit` stay in canonical Celsius whatever `--units` says, because
+every threshold in the health module compares in Celsius. `display` **and**
+`note` follow `--units` — the note carries the thresholds, so it renders in the
+same scale as the number above it. Read `value`/`unit` programmatically and
+`display`/`note` for humans; the top-level `"units"` names the scale they were
+rendered in. Every other temperature in the JSON is Celsius and its key says so
+(`max_pack_temp_c`, `at_pack_temp_c`). `--units` defaults to `C` and does **not**
+read the temperature setting saved by the GUI.
+
+The top level carries `session`, `units`, `counts`, `health`, `rides`,
+`ride_source`, `ride_log_truncated`, `clocks`, `condition` and `verdict`.
+`condition` and `verdict` are always present — when a capture holds no event log
+their `undetermined` list and an `unknown` level are the answer, rather than the
+keys being absent.
 
 Ride telemetry is included when the session contains an event-log capture
 (`eventlogdump`, or the legacy `dumplogs`). A baseline pull deliberately skips
-the heavy event log, so `"rides": null` there is expected rather than a failure.
+the heavy event log, so `"rides": null` there is expected rather than a failure —
+and the Condition block will say which checks it could not answer as a result.
 
 ## First real session checklist
 
@@ -331,9 +437,18 @@ openmbb --smoketest       # frozen-GUI/pyserial smoke test
 
 Everything runs against the built-in **simulator** — you can develop and test the
 whole app with no bike attached. Issues and pull requests are welcome; please run
-`pytest` + `--selftest` before opening a PR. If you have a captured `set`/`help`
-dump from a **different Gen2 model or firmware**, that's especially valuable — the
-safety lists are only ground-truthed against a 2017 FXS rev 41 today.
+`pytest` + `--selftest` before opening a PR, though CI now runs the full suite on
+Windows and Linux for every pull request and every push to `main`
+([tests.yml](.github/workflows/tests.yml)), so you will get a second opinion
+either way.
+
+**A capture from a different bike is the most valuable thing you can contribute.**
+A `set`/`help` dump from another Gen2 model or firmware ground-truths the safety
+lists, which are checked against a single 2017 FXS rev 41 today. A full capture
+including the event log is worth more still: the Condition tab's verdict grades
+only what one capture can judge without a second bike to compare against, and two
+of its measurements stay descriptive rather than graded until another pack has
+been measured.
 
 ## Security
 
