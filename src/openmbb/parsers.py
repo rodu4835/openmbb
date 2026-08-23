@@ -149,6 +149,25 @@ def find(kv, *needles, **kw):
     return None
 
 
+def _unit_number(text, unit_re):
+    """The number attached to a unit, or None if its digit run looks split.
+
+    A reading is refused when another digit sits immediately before the matched
+    run with only whitespace between them: that is one number broken in two, and
+    taking the tail silently divides it. "6249 km" arriving as "62 49 km" would
+    otherwise read 49.
+    """
+    m = re.search(r"(-?\d+(?:\.\d+)?)\s*(?:" + unit_re + r")", text)
+    if not m:
+        return None
+    head = text[:m.start(1)]
+    if head and head.rstrip() and head != head.rstrip():
+        # whitespace immediately before the number - check what precedes it
+        if head.rstrip()[-1].isdigit():
+            return None
+    return _finite(float(m.group(1)))
+
+
 def parse_odometer(text):
     """Return (motor_rev, km) from a stats/dash block.
 
@@ -173,13 +192,9 @@ def parse_odometer(text):
             continue
         if (motor_rev is None and "rev" in low
                 and "firm" not in low and "revision" not in low):
-            m = re.search(r"(-?\d+(?:\.\d+)?)\s*(?:motor\s*)?rev", low)
-            if m:
-                motor_rev = float(m.group(1))
+            motor_rev = _unit_number(low, r"(?:motor\s*)?rev")
         if km is None and "km/h" not in low and "wh" not in low:
-            m = re.search(r"(-?\d+(?:\.\d+)?)\s*km\b", low)   # the km-bound number
-            if m:
-                km = float(m.group(1))
+            km = _unit_number(low, r"km\b")        # the km-bound number
     return motor_rev, km
 
 
@@ -215,12 +230,24 @@ def top_speed_mph(text):
 _CELL_IDX_RE = re.compile(r"\(\s*cell\s*(\d+)\s*\)", re.I)
 
 
+# No Gen2 pack has this many cells - the reference bike is 28 in series. A
+# number above it is a decode artifact rather than a cell, and returning it makes
+# "which cell is weakest" answerable with something that is not a cell.
+_MAX_PLAUSIBLE_CELL = 999
+
+
 def _cell_index(text, needle):
-    """The cell number the BMS attributes a extreme reading to, or None."""
+    """The cell number the BMS attributes an extreme reading to, or None."""
     for line in (text or "").splitlines():
         if needle in line.lower():
             m = _CELL_IDX_RE.search(line)
-            return int(m.group(1)) if m else None
+            if not m:
+                return None
+            try:
+                idx = int(m.group(1))
+            except ValueError:          # a digit run longer than int() will take
+                return None
+            return idx if 0 < idx <= _MAX_PLAUSIBLE_CELL else None
     return None
 
 
@@ -375,8 +402,21 @@ def real_temps(values):
     Reach for this rather than filtering by hand: the sentinel is not obviously
     a sentinel when you meet it, and an unguarded mean reads as a pack that is
     much colder than it is.
+
+    Tolerant of what it is handed, like everything else here: None, a string, a
+    number, or a sequence carrying non-numbers all yield a list rather than a
+    TypeError. No current caller can produce those, and the promise this module
+    makes is not conditional on that staying true.
     """
-    return [t for t in values if t is not None and t > TEMP_FLOOR_C]
+    if values is None or isinstance(values, (str, bytes)):
+        return []
+    try:
+        items = list(values)
+    except TypeError:
+        return []
+    return [t for t in items
+            if isinstance(t, (int, float)) and not isinstance(t, bool)
+            and t == t and t > TEMP_FLOOR_C]
 
 
 def _pack_temp(line):
@@ -593,7 +633,12 @@ def _state_val(line):
     something a rider needs, and keeping them would bury the state they qualify.
     """
     _k, _sep, val = line.partition(":")
-    return re.split(r"\s+-\s+Raw\b", val, maxsplit=1)[0].strip()
+    state = re.split(r"\s+-\s+Raw\b", val, maxsplit=1)[0].strip()
+    # "" is a present key holding no answer, which reads as data downstream -
+    # `{"kickstand": ""}` says the interlock WAS read and came back blank. The
+    # num()-backed rails in the same block have always given None for this, and
+    # None is the honest shape: the line was there and had nothing in it.
+    return state or None
 
 
 # --- a module-connect failure, and the three fields in it that are not data --

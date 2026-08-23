@@ -30,7 +30,7 @@ import pytest
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
-from openmbb import parsers
+from openmbb import parsers, sessions
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
@@ -262,3 +262,70 @@ def test_our_own_truncation_banner_is_not_an_event_log():
     # ending without a prompt is the NORMAL exit
     assert "Riding" in parsers.event_log_text(
         _FakeSession({"eventlogdump": real + banner}))
+
+
+# --- the five fuzz-only root causes, closed ---------------------------------
+#
+# None of these has been seen from a real bike. They are closed because the
+# contract this module states is about ANY input, and because each produces a
+# value that is not detectably wrong downstream.
+
+def test_a_valueless_interlock_is_absent_rather_than_blank():
+    # `{"kickstand": ""}` is a present key holding no answer, which reads as
+    # data. The num()-backed rails in the same block have always given None.
+    got = parsers.parse_inputs("  - Kickstand Switch Pos      :\n"
+                               "  - Kill Switch Pos           :  Run\n")
+    assert got.get("kickstand") is None
+    assert got.get("kill_switch") == "Run"      # a real value still reads
+
+
+def test_a_cell_index_no_pack_could_have_is_refused():
+    # "which cell is weakest" must not be answerable with something that is not
+    # a cell. The reference pack is 28 in series.
+    assert parsers._cell_index("Lowest Cell ( Cell 25 )", "lowest cell") == 25
+    assert parsers._cell_index("Lowest Cell ( Cell 0 )", "lowest cell") is None
+    assert parsers._cell_index("Lowest Cell ( Cell " + "9" * 23 + " )",
+                               "lowest cell") is None
+
+
+def test_a_number_split_in_two_is_refused_rather_than_halved():
+    # drop one byte in the stream and "6249 km" arrives as "62 49 km"; taking
+    # the run adjacent to the unit reads 49 - a hundred times off, and entirely
+    # plausible as an odometer, which is what makes it worth refusing
+    assert parsers.parse_odometer("Odometer : 6249 km") == (None, 6249.0)
+    assert parsers.parse_odometer("Odometer : 62 49 km") == (None, None)
+    # the real multi-line shape still reads
+    assert parsers.parse_odometer(
+        "Odometer      : 33956225 motor rev\n"
+        "              : 15489 km") == (33956225.0, 15489.0)
+
+
+def test_real_temps_tolerates_whatever_it_is_handed():
+    # no current caller can produce these; the promise is not conditional on
+    # that staying true
+    for junk in (None, "27C", 42, b"x"):
+        assert parsers.real_temps(junk) == []
+    assert parsers.real_temps([27.0, -100.0, None, "x", True]) == [27.0]
+    assert parsers.real_temps((24, 25)) == [24, 25]
+
+
+def test_the_real_captures_are_unchanged_by_all_of_it():
+    # every guard above must be inert on the corpus it was not written for
+    import os
+    base = os.path.join(os.path.expanduser("~"), "Documents", "OpenMBB",
+                        "openmbb-sessions")
+    if not os.path.isdir(base):
+        pytest.skip("reference captures not present")
+    seen = 0
+    for name in sorted(os.listdir(base)):
+        folder = os.path.join(base, name)
+        if not os.path.isdir(folder):
+            continue
+        st = parsers.parse_stats(sessions.load_session(folder).cmd("stats"))
+        if st.get("odo_km") is None:
+            continue
+        seen += 1
+        assert st["odo_km"] > 1000, (name, st["odo_km"])
+        assert st["odo_motor_rev"] > 1e6, (name, st["odo_motor_rev"])
+        assert st["top_speed_mph"] == 90.0, (name, st["top_speed_mph"])
+    assert seen >= 1, "expected at least one capture with an odometer"

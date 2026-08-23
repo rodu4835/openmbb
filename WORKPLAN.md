@@ -349,22 +349,33 @@ that ceiling is worth more than anything that polishes what sits behind it.
   (deliberately the string `"48 (993 banka)"`) a defect - the same class of mistake the
   parsers were making.
 
-- [ ] **The five remaining parser root causes.** *(All fuzz-reachable only; none has been
-  seen from a real bike. Listed in descending plausibility.)*
-  - `_state_val` returns `""`, so a valueless interlock reads as an answer -
-    `parse_inputs` yields `{"kickstand": ""}`, a present key holding no answer, while the
-    `num()`-backed rails in the same block correctly give `None`.
-  - The `-100 C` sentinel passes through on ride/charge samples: `parse_bms` drops it via
-    `real_temps()`, `_mode_samples` does not, on any of its four temperature fields.
-    **Latent** - all five event logs in the real captures were scanned and zero riding or
-    charging lines carry `-100`.
-  - Unbounded `int()`/`float()` raising `ValueError`: `_cell_index`,
-    `parse_limit_events` (`[\d.]+` captures `1.2.3`), `_runtime_seconds`.
-  - `parse_odometer`/`top_speed_mph` anchor on the digit **tail** when a stray character
-    splits a run (`6249 km` -> `49.0`). A single inserted space does it; zero such
-    anomalies exist in the real corpus.
-  - `real_temps` raises `TypeError` on None or a non-numeric sequence - argument shapes no
-    current caller can produce. Weakest of the set.
+- [x] **The five remaining parser root causes.** *(all closed; each reproduced first,
+  each mutation-checked 4/4, and every one verified inert on the real captures.)* All were
+  fuzz-reachable only, and all produced a value that is **not detectably wrong
+  downstream** - which is why they were worth closing rather than leaving filed.
+  - `_state_val` returned `""`, so `{"kickstand": ""}` was a present key holding no
+    answer. `None` now, matching the `num()`-backed rails in the same block.
+  - `_cell_index` accepted any integer, so "which cell is weakest" could be answered with
+    a 23-digit number. Bounded, and a digit run longer than `int()` will take returns
+    `None` rather than raising.
+  - `parse_odometer`/`top_speed_mph` read the **tail** of a split digit run: drop one byte
+    and "6249 km" arrives as "62 49 km", reading 49. A hundred times off and entirely
+    plausible as an odometer, which is exactly what made it worth refusing. A number with
+    another digit run immediately before it is now refused.
+  - `real_temps` raised `TypeError` on None, a string or a number. It tolerates whatever
+    it is handed now; no caller can produce those and the promise is not conditional on
+    that staying true.
+  - The `-100 C` sentinel on ride/charge samples is left **deliberately open** and is now
+    the only one outstanding - see below.
+
+- [ ] **The `-100 C` sentinel on ride and charge samples.** `parse_bms` drops it via
+  `real_temps()`; `_mode_samples` does not, on any of its four temperature fields.
+  **Latent, not active:** all five event logs in the real captures were scanned and zero
+  riding or charging lines carry `-100`. Same shape as the `real_temps` guard itself -
+  correct, and inert until a consumer meets the input. Left open rather than closed
+  because the fix wants a decision about what a sample with an unpopulated sensor
+  *means* (drop the field, drop the sample, or keep it and let the consumer filter),
+  and nothing in the corpus forces the answer.
 ## Open questions, not tasks
 
 - **Does the console's −7 h clock rendering follow US daylight saving?** All captures so
