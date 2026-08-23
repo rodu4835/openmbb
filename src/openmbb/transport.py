@@ -175,6 +175,25 @@ class SessionLogger:
             f.write(self._mask(content))
         return path
 
+    def journal_consent(self, cmd, consent):
+        """Record that a human authorized a heavy read, and how.
+
+        A heavy read can make the BMS open the drivetrain contactor, which writes
+        a PERMANENT error-log entry this app cannot clear. The dialog that
+        obtained consent is gone minutes later; the capture is what remains, so
+        the capture is what has to be able to answer "did a human agree to this?"
+
+        Written to the same journal as the setting writes: both answer the same
+        question - what did a human authorize? - and one file is one place to
+        look. Masked like everything else on disk, because the consent string is
+        free text and a session secret could be echoed into it.
+        """
+        line = "%s | %s | HEAVY READ CONSENTED | %s\n" % (
+            _dt.datetime.now().isoformat(timespec="seconds"),
+            cmd, self._mask(str(consent).strip()))
+        with self._lock, open(self.journal_path, "a", encoding="utf-8") as f:
+            f.write(line)
+
     def journal_write(self, name, old, new, ok):
         # ok=None -> PENDING (intent journaled BEFORE the write reaches the wire)
         status = "PENDING" if ok is None else ("VERIFIED" if ok else "UNVERIFIED")
@@ -324,6 +343,13 @@ class Transport:
 
         head = (str(cmd).strip().split() or [""])[0].lower()
         is_dump = head in LONG_COMMANDS
+
+        # BEFORE the first byte, so a capture that ends in a contactor trip - or
+        # in a port that dies mid-read - still carries the record of who agreed
+        # to the read. Journalling it after the response would lose exactly the
+        # cases the record exists for. Same order as journal_write's PENDING.
+        if head in HEAVY_COMMANDS:
+            self.logger.journal_consent(cmd, heavy_consent)
 
         with self.lock:
             if self.last_truncated:

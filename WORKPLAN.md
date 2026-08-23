@@ -165,6 +165,24 @@ means less than it appears — this project's least favourite kind.
   (336 s of 464) at 2.05 s/test — structural (real 0.1 s drains per command even on
   SimPort), tolerable, documented here so nobody rediscovers it.
 
+### 9. Journal a write at the transport, not only in the GUI
+
+Found while fixing item 1. `journal_write` is called only from `gui.py`, so a
+write driven through `transport.write_setting` by a script or a REPL reaches the
+wire with **no record at all** — the same shape the contactor gate had before
+`7479947` moved it down. The enforcement is already in the right place (value
+validation, blocklist, and the name-must-exist-in-the-live-dump check all live in
+the transport); only the *record* is still GUI-side.
+
+Not a broken promise, which is why it was filed rather than folded into item 1:
+the README passage describing "journal the intent before it hits the wire" is
+explicitly walking through the GUI's write flow, not `write_setting`'s contract.
+
+- **Change:** move the PENDING/VERIFIED journalling into `Transport.write_setting`
+  (where `journal_consent` now sits), and have `gui.py` stop doing it itself so
+  one write cannot produce two records. **Mutation:** journal only in the GUI →
+  a headless-write test finds an empty journal.
+
 ---
 
 ## At a bike — the data-acquisition plan

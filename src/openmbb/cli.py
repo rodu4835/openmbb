@@ -69,8 +69,31 @@ def selftest():
     tr.exec_command("logout")     # back to read-only for the write-flow checks below
 
     print("dump with progress:")
+    # The contactor gate lives in the transport so that it holds for every
+    # caller - the GUI, a script, a REPL, this selftest. Prove it FIRES before
+    # proving the read works: the gate is the safety property and the read is
+    # only a capability. These two checks are here because their absence is
+    # exactly what let this selftest sit broken - when the gate landed, nothing
+    # exercised it, so nothing noticed that the selftest itself was the caller
+    # that had not been updated.
+    try:
+        tr.exec_command("dumpall")
+        check("heavy read refused without consent", False)
+    except BlockedCommandError:
+        check("heavy read refused without consent", True)
+    # `confirmed` is the blocklist's flag, not this one. Conflating the two is
+    # how the raw-console box would have reached the wire (transport docstring).
+    try:
+        tr.exec_command("dumpall", confirmed=True)
+        check("confirmed=True does not satisfy the contactor gate", False)
+    except BlockedCommandError:
+        check("confirmed=True does not satisfy the contactor gate", True)
     seen = []
+    # Consent is given here rather than waived, and the sentence is true: the
+    # port is a SimPort, so there is no bike, no BMS and no contactor to open.
+    # This string is what gets journalled into the session before the first byte.
     big = tr.exec_command("dumpall", idle_timeout=3.0, max_time=60.0,
+                          heavy_consent="selftest: simulator only, no bike attached",
                           progress_cb=lambda n: seen.append(n))
     check("dumpall > 100 KB (got %d KB)" % (len(big) // 1024), len(big) > 100_000)
     check("progress callback fired (%d times)" % len(seen), len(seen) > 3)
@@ -122,6 +145,13 @@ def selftest():
 
     print("session files:")
     check("raw log exists", os.path.isfile(logger.raw_path))
+    # The capture has to be able to answer "did a human agree to the heavy read?"
+    # long after the dialog is gone - that is the whole point of the gate.
+    _j = ""
+    if os.path.isfile(logger.journal_path):
+        with open(logger.journal_path, encoding="utf-8") as _f:
+            _j = _f.read()
+    check("heavy-read consent journalled", "HEAVY READ CONSENTED" in _j)
     check("per-command files saved (%d)" % len(os.listdir(logger.dir)),
           len(os.listdir(logger.dir)) > 10)
 
