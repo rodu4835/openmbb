@@ -293,10 +293,24 @@ that ceiling is worth more than anything that polishes what sits behind it.
   just bitten by *firmware* record layouts changing underneath us; our own format should
   state what it is.
 
-- [ ] **More redacted fixtures from real captures.** Every parser defect found this week
-  came from real hardware output, and the one committed fixture already contained all four
-  shapes — nobody had asked it the right questions.
+- [x] **More redacted fixtures from real captures.** *(shipped: nine new fixtures and
+  `tests/test_fixture_parsing.py`.)* The lesson from the first one was not "get more
+  fixtures" - it was that a fixture nobody interrogates proves nothing, since the committed
+  console fixture already held all four PII shapes before anyone looked. So each new
+  fixture is paired with the specific question a guard elsewhere exists to answer.
 
+  Covered for the first time: the `chargers` block carrying the real `0.-09 A` garbled
+  token the number guards were written for; `errorlogdump` with the module-connect triple
+  that is refused on arithmetic; `obd`, the only parser that grades presence and absence;
+  `inputs`/`outputs` with the raw-ADC tail `_state_val` strips; `runtime`; `bms` with its
+  -100 sentinels, cell attribution and stated thermal limits; `sevcon`; `dash`.
+
+  Every one was run through `redact.Redactor` and re-scanned with `find_pii_shapes` before
+  being written - three identifiers replaced - and the release gate re-scans them on every
+  run. The property tests seed from this directory, so the generated corpus grew from ~430
+  to 616 real console lines at the same time. 20 tests, mutation-checked 7/7, including the
+  other-bike case asked of real output: delete `Pack Temps` from the real block and the
+  maximum must come back `None` rather than the lowest sensor.
 - [x] **Property-based tests on the parsers.** *(shipped: the measurement, five root-cause
   fixes, and `tests/test_parser_properties.py`.)* The contract under test is the module's
   own docstring - *"every parser here is label-fuzzy and degrades to None rather than

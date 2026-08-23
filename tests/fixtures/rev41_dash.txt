@@ -1,0 +1,26 @@
+# OpenMBB test fixture - REDACTED real output from a 2017 FXS.
+# the third independently-set clock
+# Identifiers are replaced with same-width placeholders; this file
+# is re-scanned by tests/test_release_gate.py on every run.
+
+*************************************************************
+*                        Dash Info                          *
+*************************************************************
+
+  - Status Data               :  0x 00 00 10 08 06 22 00 00
+  - Status Bits               :  0x0000
+  - Adj Button                :  No
+  - Sel Button                :  No
+  - Reset Trip 1              :  No
+  - Reset Trip 2              :  No
+  - Reset Avg WattHours       :  No
+  - Reset Range               :  No
+
+  - Clock (24H)               :  16:08
+  - Odo Data                  :  0x 88 35 01 00 00 00 00 00
+  - Odometer                  :  007924.0 Km
+  - Odometer Raw              :  079240 Km*10
+
+  - Time since Dash CAN RX    :   208 ms
+  - Time since Dash Status RX :   218 ms
+  - Time since Dash Odo RX    :   232 ms

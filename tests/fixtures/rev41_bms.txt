@@ -1,0 +1,91 @@
+# OpenMBB test fixture - REDACTED real output from a 2017 FXS.
+# the pack block: sensor list with -100 sentinels, cell attribution, the thermal limits, and two serials that must redact
+# Identifiers are replaced with same-width placeholders; this file
+# is re-scanned by tests/test_release_gate.py on every run.
+
+****************************************
+*               BMS Data               *
+****************************************
+
+*************  BMS #0  ***************
+  - BMS Board Rev             :  03
+  - BMS Firmware Rev          :  48 (993 banka)
+  - BMS Firmware PN           :  75-08037
+  - BMS Serial Number         : REDACTEDSN0XX
+  - Battery Serial Number     : REDMOD0X
+  - CAN Rx in last second     :  132 
+
+  - Pack SOC                  :  96%
+  - Fuel Gauge                :  96%
+  - Age of SOC Data           :  59 ms
+
+  - Model Year                : 2017
+  - Pack Capacity             :  52 AH
+  - Pack Capacity Remaining   :  37 AH
+  - Total Energy Used         : 177 KWH
+  - Number Of Bricks          :   2
+
+  - Pack Discharge Current    :   0 A
+  - Pack Sum Voltage          :  114.221 V
+  - Sag-Adj Pack Sum Voltage  :  114.233 V
+  - Bank Voltages             :     1    2    3    4    5    6    7    8    9   10   11   12   13   14   15   16   17   18   19   20   21   22   23   24   25   26   27   28 
+                              :  4079 4080 4079 4079 4079 4079 4079 4080 4080 4079 4079 4079 4080 4080 4080 4080 4079 4080 4080 4080 4080 4080 4080 4080 4078 4079 4079 4078 
+  - Lowest Cell Voltage       :  4078 mV ( Cell 25 )
+  - Highest Cell Voltage      :  4080 mV ( Cell 2 )
+  - Pack Balance              :  2 mV
+  - Lowest Cell mV            :  4078 mV
+  - Age of Bank Voltage Data  :  289 ms
+
+  - Isolation Resistance      :  32766 KOhms (0x7FFE) 
+  - Least Isolated Cell       :  16 
+  - Instant Iso Resistance    :  -25 KOhms (0xFFFFFFE7)
+  - Instant Least Iso Cell    :  17
+
+                              :      0     1     2     3     4     5     6     7 
+  - Pack Temps                :    27C   27C   27C   28C -100C -100C -100C -100C 
+  - Lowest Present Pack Temp  :  27 C
+  - Max Pack Temp This Ride   :  28 C
+  - Min Pack Temp This Ride   :  27 C
+  - Age of BMS Temp Data      :  139 ms
+
+  - Min Discharge Temp        :  -25 C
+  - Max Charge Temp           :  50 C
+  - Min Charge Temp           :  0 C
+  - Max Charge C-Rate         :  1.0
+  - Min Discharge C-Rate      : 10.0
+  - Discharge Scale Value     :   255/255
+
+  - Num Charge Cycles         :  243
+
+  - BMS Total Bike Run Time   :  00:00:27
+  - BMS Clock                 :  08/19/2026 15:58:03 ( 1787180283, 0x6A8634FB )
+  - Age of BMS Time Data      :  252 ms
+
+  - Age of BMS Status Data    :  265 ms
+  - Discrete Throttle En      :  Enabled
+
+  CAN Status
+  - Charger Attached          :   No
+  - Batt Unbalanced           :   No
+  - Batt Low                  :   No
+  - Batt Full                 :  Yes
+  - Batt Critically Low       :   No
+  - Batt Temp High            :   No
+  - Batt Temp Critically High :   No
+  - Batt Temp Low             :   No
+  - Contactor Closed          :  Yes
+  - Isolation Fault           :   No
+  - BMS Internal Fault        :   No
+  - Cell Too High For Charge  :   No
+  - Cell Too Low For Charge   :   No
+  - Charge Halt               :   No
+  - BMS Internal Disable      :   No
+  - Long term Storage active :   No
+
+  CAN Commands
+  - Close Contactor           :   No
+  - Connect Module            :  Yes
+  - Key On                    :  Yes
+  - Charger Connected         :   No
+  - Expected Charger Current  :  N/A
+  - Time Since Cmds Last Sent : 1127 ms

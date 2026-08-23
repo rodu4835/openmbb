@@ -1,0 +1,38 @@
+# OpenMBB test fixture - REDACTED real output from a 2017 FXS.
+# interlock states with the raw ADC tail _state_val strips
+# Identifiers are replaced with same-width placeholders; this file
+# is re-scanned by tests/test_release_gate.py on every run.
+
+*************************************************************
+*                      All Measurements                     *
+*************************************************************
+
+  - Key On                    :       Yes  - Raw : 1 (1 at last read)
+
+  - Pack Voltage              : 112167 mV  - (   3889 ADC)
+  - 3.3V Supply               :   3256 mV  - (   2223 ADC)
+  - 5V Supply                 :   4922 mV  - (   3361 ADC)
+  - Board ID                  :    354 mV  - (    479 ADC)
+
+  - Battery Thr En            :   Enabled  - Raw :  2762 mV (   2439 ADC)
+
+  - Kill Switch Pos           :       Run  - Raw :  2911 mV (   3975 ADC)
+  - Kickstand Switch Pos      :      Down  - Raw :  2999 mV (   4095 ADC)
+  - Start Switch Pos          :      Open  - Raw :     9 mV (     13 ADC)
+  - Medium Speed Switch Pos   :       Off
+  - Low Speed Switch Pos      :       Off
+  - Brake Switch              :       Off
+  - ABS Light Input           :        On
+  - Loopback Detect           :    Closed
+  - OB Charger 0 Attached     :        No
+  - Ext Charger 0 Attached    :        No
+  - Ext Charger 1 Attached    :        No
+  - Tipover Sensor Vector     :  -14, -65, -242 - 250/256 G
+  - Tipover Sensor Roll Angle     :  -14
+  - Tipover Sensor Pitch Angle    :  3
+
+  - Board Temp                :      46 C  - (   1342 ADC)
+  - Ambient Temp              :      23 C  - (   2127 ADC)
+  - Bluetooth Status          :  0 (Not connected)
+  - Bluetooth TX RX Status    :  1 (RF Tx/Rx data)
+  - Bluetooth RTS             :  0

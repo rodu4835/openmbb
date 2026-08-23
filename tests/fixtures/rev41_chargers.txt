@@ -1,0 +1,12 @@
+# OpenMBB test fixture - REDACTED real output from a 2017 FXS.
+# carries the garbled '0.-09 A' token the number guards exist for
+# Identifiers are replaced with same-width placeholders; this file
+# is re-scanned by tests/test_release_gate.py on every run.
+
+****************************************
+*             Charger Data             *
+****************************************
+
+
+  - Total Estimated Charger Current    :   0.000 A (filtered:   0.000 A)
+  - Total Reported Battery Current     :  -1 A    (filtered:   0.-09 A)

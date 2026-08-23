@@ -1,0 +1,37 @@
+# OpenMBB test fixture - REDACTED real output from a 2017 FXS.
+# the warning-light block
+# Identifiers are replaced with same-width placeholders; this file
+# is re-scanned by tests/test_release_gate.py on every run.
+
+****************************************
+*             All Outputs              *
+****************************************
+
+  - System On                 :   On
+  - DC/DC Converter En        :   On
+
+  - Ext Sw 5V                 :   On
+
+  - Warning Light             :   On
+  - Temp Warning LED          :  Off
+  - Green Charge LED          :  Off
+  - Red Charge LED            :  Off
+  - Armed LED                 :  Off
+  - ABS LED                   :   On
+
+  - DC/DC Converter En        :   On
+
+  - ABS Power                 :   On
+  - ABS Disable               :  Off
+
+  - Onboard Charger Enable    :  Off
+  - External Charger Enable 0 :   On
+  - External Charger Enable 1 :   On
+
+  - Sevcon Controller En      :   On
+  - Sevcon Forward            :  Off
+
+  - Bluetooth Auto Discovery  :  0
+  - Bluetooth Reset_n         :  1
+  - Bluetooth Reset Defaults  :  0
+  - Bluetooth CTS             :  0

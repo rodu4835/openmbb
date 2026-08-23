@@ -1,0 +1,15 @@
+# OpenMBB test fixture - REDACTED real output from a 2017 FXS.
+# the fault-code block - the only parser that grades presence/absence
+# Identifiers are replaced with same-width placeholders; this file
+# is re-scanned by tests/test_release_gate.py on every run.
+
+****************************************
+*               OBD Data               *
+****************************************
+
+ - MIL On                      0
+ - active dtcs                 00
+ - pending dtcs                00
+ - cvn                         1acd3d8b
+ - monitor status              00000000
+ - dtc buffer

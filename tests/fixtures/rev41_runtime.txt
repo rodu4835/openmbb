@@ -1,0 +1,10 @@
+# OpenMBB test fixture - REDACTED real output from a 2017 FXS.
+# the d:h:m:s counters _runtime_seconds parses
+# Identifiers are replaced with same-width placeholders; this file
+# is re-scanned by tests/test_release_gate.py on every run.
+
+****************************************
+*                Run Time              *
+****************************************
+  - Total run time            :  00001:01:10:36
+  - Total charger time        :  00012:21:23:39

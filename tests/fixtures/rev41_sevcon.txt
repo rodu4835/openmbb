@@ -1,0 +1,72 @@
+# OpenMBB test fixture - REDACTED real output from a 2017 FXS.
+# controller block; carries a sevcon serial that must redact
+# Identifiers are replaced with same-width placeholders; this file
+# is re-scanned by tests/test_release_gate.py on every run.
+
+****************************************
+*             Sevcon Data              *
+****************************************
+
+  Received PDOs
+  - Motor speed               :     0 RPM
+  - Age of motor speed data   :    87 ms
+
+  - Throttle Input Voltage    :   511 mV
+  - Age of throttle data      :   108 ms
+
+  - Motor Temp                :    35 C
+  - Max Motor Temp This Ride  :    36 C
+  - Age of motor temp data    :   140 ms
+
+  - Controller Temp           :    27 C
+  - Max Ctrl Temp This Ride   :    27 C
+  - Age of ctrl temp data     :   173 ms
+
+  - Battery Voltage           :   113.250 V
+  - Battery Current           :     0.000 A
+  - Capacitor Voltage         :   114.000 V
+  - Contactor Coil Voltage    :   116.000 V
+  - Age of cap voltage data       :   230 ms
+
+  - Iq Target                 :     0 Amps
+  - Motor Torque              :     0 ft-lbs ( 0 Nm )
+  - Motor Power               :     0 Watts
+  - Motor Ud                  :     0 dn
+  - Motor Uq                  :     0 dn
+  - Motor voltage tan x 1000  :     0 
+  - Age of current data       :   310 ms
+
+  - Digital Inputs 1-8        :  0x00
+
+
+  Transmitted PDOs
+  --Drive Control--
+  - Max Batt Chg Current      :   -52 A
+  - Max Batt Dishg Current    :   520 A
+  - Time Since DrvCtrl Sent   :   354 ms
+
+  SDOs
+  - Access Level              :        4 
+  - Motor Temp Control Mode   :     0x01 
+  - Odometer Km               :  18821.3 
+  - Odometer Miles            :  11689.8 
+
+  - Key on Hours              :  1561 
+  - Key on Minutes            :    52 
+  - Traction on Hours         :   179 
+  - Traction on Minutes       :    46 
+
+  - Max Eco Speed             :    89 MPH ( 143 KPH ) ( 5445 RPM )
+  - Max Eco Torque            :   100 %
+  - Max Eco Regen Coast Tq    :     5 %
+  - Max Eco Regen Brake Tq    :     7 %
+
+  - Sevcon DCF Rev            : 153
+  - Sevcon Firmware Rev       : SN0066.23
+  - Sevcon Hardware Rev       : 0x010d0005
+  - Sevcon Serial num         : REDSEV0XXX
+
+  - In Operational Mode       : Yes
+
+  Active Sevcon Faults
+  - Number of Faults          :    0

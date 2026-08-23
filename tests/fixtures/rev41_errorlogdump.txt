@@ -1,0 +1,17 @@
+# OpenMBB test fixture - REDACTED real output from a 2017 FXS.
+# module-connect entries with the refused modv/maxv/minv triple
+# Identifiers are replaced with same-width placeholders; this file
+# is re-scanned by tests/test_release_gate.py on every run.
+
+*****************************************************************
+*  Error Log 
+*****************************************************************
+0x00000400-000005FF, Num: 3, WP: 0x00000505, RP: 0x0000055D
+*****************************************************************
+Printing 3 of 3 log entries..
+
+ Entry    Time of Log            Event                      Conditions
++--------+----------------------+--------------------------+----------------------------------
+ 00001     08/13/2026 09:11:24   Cannot Connect Module 00! modv=0mV, maxv=0mV, minv=4294967295mV, raw0:101407mV, raw1:0mV, cur0:0A, cur1:0A, diff_allowed: 1575mV
+ 00002     08/13/2026 09:11:26   Cannot Connect Module 00! modv=0mV, maxv=0mV, minv=4294967295mV, raw0:101415mV, raw1:0mV, cur0:0A, cur1:0A, diff_allowed: 1575mV
+ 00003     08/13/2026 09:11:29   Cannot Connect Module 00! modv=0mV, maxv=0mV, minv=4294967295mV, raw0:101422mV, raw1:0mV, cur0:0A, cur1:0A, diff_allowed: 1575mV
