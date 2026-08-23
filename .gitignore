@@ -8,3 +8,9 @@ venv/
 openmbb-sessions/
 packaging/Output/
 out/
+# hypothesis caches the inputs that broke a property test. Unlike .pytest_cache
+# it does not write its own .gitignore, and its contents are DERIVED FROM
+# WHATEVER THE STRATEGIES WERE FED - so on a machine holding real captures it
+# must not become committable. The PII gate scans tracked files; this keeps the
+# database from ever being one.
+.hypothesis/

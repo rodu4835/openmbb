@@ -297,9 +297,83 @@ that ceiling is worth more than anything that polishes what sits behind it.
   came from real hardware output, and the one committed fixture already contained all four
   shapes — nobody had asked it the right questions.
 
-- [ ] **Property-based tests on the parsers.** Generate malformed console output and
-  assert the invariant that actually matters: never raise, never invent a value. Cheap
-  insurance given how many field-shape assumptions turned out wrong.
+- [~] **Property-based tests on the parsers.** **MEASURED, NOT YET FIXED — and the
+  measurement is the part worth reading.** Generate malformed console output and assert the
+  invariant that actually matters: never raise, never invent a value.
+
+  **Shipped so far:** `hypothesis>=6` in the dev extras, and `.hypothesis/` in
+  `.gitignore`. The dependency is test-only and is not imported from anything under `src/`,
+  so it never enters the PyInstaller binary and `THIRD_PARTY_LICENSES.txt` is unaffected.
+  The gitignore entry is not housekeeping: unlike `.pytest_cache` hypothesis writes no
+  `.gitignore` of its own, and its database is *derived from whatever the strategies were
+  fed*, so on a machine holding real captures it must never become committable.
+
+  **No parser has been changed and no test has been written.** What exists is the
+  measurement, because fixing 27 findings one at a time would produce churn instead of
+  guards. The contract under test is this module's own docstring — *"every parser here is
+  label-fuzzy and degrades to None rather than raising"* — split into never-raise,
+  never-invent and type-shape. 27 violations survived adversarial review; they collapse to
+  about ten root causes. Ordered by whether a real bike can produce the input:
+
+  1. **`parse_obd` reports the warning lamp OFF on a line that says it is ON.**
+     `parse_obd("MIL ON : 1")` returns `mil_on: False`. The line is *detected*
+     case-insensitively but *extracted* case-sensitively, so any other casing takes the
+     `partition` branch, finds nothing, and `bool(None)` collapses to a definite False.
+     Separately `parse_obd("Active DTCs : 0A")` reads `0A` as a count of zero. This
+     function's own docstring calls fault codes "one of the few things a capture can say
+     flatly", and it currently says *no fault* flatly, on a fault. Needs no corruption at
+     all — only a firmware that cases the label differently.
+  2. **`all_nums` lacks the garbled-decimal guard `num` documents.** `num("0.-51 A")`
+     correctly returns None; `all_nums("0.-51 A")` returns `[0.0, -51.0]`. The
+     hand-rolled number regexes in `_ride_field`, `_pack_temp`, `_batt_temp`,
+     `_curr_limit_pct` and `decode_module_connect_failure` each re-implement extraction
+     without it too. **Six such tokens exist in the real captures** — though every one sits
+     on a `chargers` line that no `all_nums` call site currently reads, so the token is
+     attested and the consequence is not.
+  3. **`find()` reports a neighbouring label's value when the primary label is absent.**
+     Measured against the committed fixture by deleting one line: `pack_max_temp_c` goes
+     25 C -> 23 C by matching `Lowest Present Pack Temp`, and `pack_v` goes 116.002 ->
+     1.0 off a `Bank Voltages` column header. The first is the bad one — the pack's
+     *lowest* sensor reported as its *maximum*, on the metric that grades a hot pack, so
+     the error runs in the unsafe direction. Every colliding label is real; the trigger is
+     the primary label being absent, which is precisely the other-bike case these parsers
+     advertise tolerating.
+  4. **`event_log_text` accepts OpenMBB's own `### TRUNCATED` banner as an event log**,
+     shadowing a real log sitting in the fallback command. `is_console_refusal` catches the
+     console declining but not the tool's own marker. The `dumplogs` defect one banner over.
+  5. **`_state_val` returns `""`, so a valueless interlock reads as an answer** —
+     `parse_inputs` yields `{"kickstand": ""}`, a present key holding no answer, while the
+     `num()`-backed rails in the same block correctly give None.
+  6. **The `-100 C` sentinel passes through on ride/charge samples.** `parse_bms` drops it
+     via `real_temps()`; `_mode_samples` does not, on any of its four temperature fields.
+     **Latent, not active:** all five event logs in the real captures were scanned and
+     **zero** riding or charging lines carry `-100`. Same shape as the `real_temps` guard
+     itself — inert until a consumer meets the input.
+  7. **Non-finite floats.** A 309+ digit run makes `num` return `inf`, which raises
+     `OverflowError` downstream in `health.fmt_temp` (Fahrenheit only) and in
+     `condition.derate_profile`. Pure fuzz — the longest real digit run measured is ten
+     characters — but the contract says *any* input, and one non-finite check in
+     `num`/`all_nums` closes most of the crash family at once.
+  8. Unbounded `int()`/`float()` raising `ValueError`: `_cell_index`, `parse_limit_events`
+     (`[\d.]+` captures `1.2.3`), `_runtime_seconds`. All fuzz-only.
+  9. `parse_odometer`/`top_speed_mph` anchor on the digit **tail** when a stray character
+     splits a run (`6249 km` -> 49.0). A single inserted space does it; no unicode needed.
+     Zero such anomalies exist in the real corpus.
+  10. `real_temps` raises `TypeError` on None or a non-numeric sequence — argument shapes
+      no current caller can produce. Weakest of the set.
+
+  **Two claims are recorded as UNCONFIRMED and must be re-tested before anyone acts on
+  them:** `soc_pct` colliding with `Age of SOC Data`, and `capacity_ah` colliding with
+  `Pack Capacity Remaining`. Both were reported, and neither reproduced on re-run — most
+  likely a faulty line-removal helper rather than a wrong finding, but that is a guess and
+  it is not evidence.
+
+  **Next:** re-test those two, fix by root cause rather than one finding at a time, then
+  write the properties. Seed the strategies from `tests/fixtures/` and **never** from
+  `~/Documents/OpenMBB/openmbb-sessions/` — the real captures do not exist on CI, so
+  seeding from them would make the tests quietly weaker on every runner than on the machine
+  they were written on. *Cost:* the guards are small; the discipline is in mutation-checking
+  each one.
 
 ## Open questions, not tasks
 
