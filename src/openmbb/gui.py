@@ -4858,6 +4858,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 _row("Log window", "%s → %s  ·  %d ride / %d charge samples"
                      % (cov["first"], cov["last"], cov["ride_samples"],
                         cov["charge_samples"]), "measured")
+            # An unmeasured stretch is not a clean one. Records written before a
+            # firmware change do not survive being re-read by a newer one, and
+            # the guard that refuses them was silent until now.
+            _wc = cov.get("ride_samples_with_cell")
+            if _wc is not None and cov.get("ride_samples") and _wc < cov["ride_samples"]:
+                _row("Cell readings available",
+                     "%d of %d ride records · the other %d carry a value no cell "
+                     "can hold, so what the pack did across them is UNMEASURED "
+                     "here, not clean"
+                     % (_wc, cov["ride_samples"], cov["ride_samples"] - _wc),
+                     "attention")
             cap = a["charge_capacity"]
             if cap:
                 _row("Charge capacity",

@@ -85,6 +85,38 @@ def _seq(path):
     return int(m.group(1)) if m else -1
 
 
+_BASELINE_STAMP_RE = re.compile(r"_(\d{8}_\d{6})\.txt$")
+
+
+def _newest_baseline(folder):
+    """The most recent settings baseline in a folder, or None.
+
+    Ordered by the timestamp EMBEDDED IN THE NAME, not by the name. A plain
+    lexical sort compared the whole filename, and "postlogin" beats a bare
+    timestamp because "p" > "2" - so an earlier post-login dump always won over a
+    later plain baseline. Reachable by pulling, logging in, then pulling again,
+    and both July captures already hold both kinds of file.
+
+    This text is what the write gate re-reads and re-parses as the backup a
+    write's undo depends on, so picking the wrong one is not cosmetic.
+
+    A file with no parseable stamp sorts oldest rather than being dropped: it is
+    still a baseline, and losing it entirely would be worse than ranking it low.
+    On a tie the post-login dump wins, because it is the fuller of the two - it
+    is the one that has the login-gated settings in it.
+    """
+    found = []
+    for path in glob.glob(os.path.join(folder, "settings_baseline*.txt")):
+        m = _BASELINE_STAMP_RE.search(os.path.basename(path))
+        stamp = m.group(1) if m else ""
+        postlogin = "postlogin" in os.path.basename(path).lower()
+        found.append((stamp, postlogin, path))
+    if not found:
+        return None
+    found.sort()
+    return found[-1][2]
+
+
 def load_session(folder):
     """Load one session folder into a Session (latest response per command)."""
     commands = {}
@@ -102,9 +134,9 @@ def load_session(folder):
                 captured_at[cmd] = "%s %s" % (day, stamp)
     # prefer the clean baseline settings dump if one was captured
     settings_text = ""
-    baselines = sorted(glob.glob(os.path.join(folder, "settings_baseline*.txt")))
+    baselines = _newest_baseline(folder)
     if baselines:
-        with open(baselines[-1], encoding="utf-8", errors="replace") as f:
+        with open(baselines, encoding="utf-8", errors="replace") as f:
             settings_text = f.read()
     elif "set" in commands:
         settings_text = commands["set"]

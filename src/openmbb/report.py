@@ -443,6 +443,7 @@ def _condition_lines(c, units="C"):
         out.append("  log covers %s -> %s  (%d ride, %d charge samples)"
                    % (cov["first"], cov["last"], cov["ride_samples"],
                       cov["charge_samples"]))
+    out += _coverage_limit_lines(cov)
     cap = c.get("charge_capacity")
     if cap:
         out.append("  charge accepted %g-%g V: median %g Ah over %d sessions"
@@ -487,6 +488,34 @@ def _condition_lines(c, units="C"):
     for u in c.get("undetermined") or []:
         out.append("  could not determine: %s" % u)
     return out
+
+
+def _coverage_limit_lines(cov):
+    """How much of the ride log could answer the cell question at all.
+
+    Records written before a firmware change do not survive being re-read by the
+    newer firmware: the two trailing fields come back as stale bytes, and the
+    guard in `_mode_samples` refuses them. That refusal is right, and until now
+    it was also SILENT - the report advertised 1137 ride samples while every cell
+    answer rested on 635 of them, and said nothing about the other 502.
+
+    An unmeasured stretch is not a clean one, and the difference has to be on the
+    page rather than in the returned dict.
+    """
+    total = cov.get("ride_samples") or 0
+    with_cell = cov.get("ride_samples_with_cell")
+    if not total or with_cell is None or with_cell >= total:
+        return []
+    missing = total - with_cell
+    return [
+        "  cell voltage readable on %d of %d ride records \u2014 the other %d carry "
+        "a value no cell can hold" % (with_cell, total, missing),
+        "    (records written before a firmware change, re-read by a newer one). "
+        "Every cell answer below is",
+        "    measured over those %d only; what the pack did across the rest of "
+        "this window is UNMEASURED" % with_cell,
+        "    here, not clean.",
+    ]
 
 
 def _charging_lines(ch, units="C"):

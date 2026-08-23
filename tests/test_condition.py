@@ -1004,3 +1004,85 @@ def test_a_real_log_still_wins_over_a_refusal_sitting_beside_it(tmp_path):
     s = sessions.load_session(str(folder))
     assert len(parsers.event_log_text(s)) > 500
     assert library.summarize(str(folder))["has_event_log"] is True
+
+
+# --- the coverage limit, and which baseline is the backup --------------------
+
+def test_an_unmeasured_stretch_of_the_ride_log_is_stated_not_swallowed(tmp_path):
+    """condition.assess has always computed how much of the ride log can answer
+    the cell question, and its own comment calls it "a coverage limit, not a
+    pass". Nothing outside the tests read it.
+
+    On the reference bike's July captures the report advertised 1137 ride
+    samples while every cell answer rested on 635 of them, and the other 502 -
+    records written before a firmware change, re-read by a newer one - were
+    never mentioned. That is this project's own rule broken by a rendering gap,
+    with the right number already in the dict.
+    """
+    good = " 00001  06/24/2026 08:%02d:00  Riding  PackTemp: h 30C, PackSOC: %d%%, " \
+           "Vpack:110.000V, BattAmps: 120, Odo: %dkm, MinCell: 3700mV"
+    # 8241 mV is 0x2031, the ASCII " 1" - the stale-record fabrication
+    stale = " 00001  06/24/2026 09:%02d:00  Riding  PackTemp: h 30C, PackSOC: %d%%, " \
+            "Vpack:110.000V, BattAmps: 120, Odo: %dkm, MinCell: 8241mV"
+    log = "\n".join([good % (i, 90 - i, 6000 + i) for i in range(10)]
+                    + [stale % (i, 80 - i, 6100 + i) for i in range(20)])
+
+    a = condition.assess(log)
+    cov = a["coverage"]
+    assert cov["ride_samples"] == 30
+    assert cov["ride_samples_with_cell"] == 10      # the guard refused 20
+
+    s = sessions.Session(str(tmp_path), {"eventlogdump": log}, "")
+    text = report.format_report(report.analyze_session(s))
+    assert "cell voltage readable on 10 of 30 ride records" in text
+    assert "the other 20 carry a value no cell can hold" in text
+    # the load-bearing phrase: an unmeasured stretch is not a clean one
+    assert "UNMEASURED" in text and "not clean" in text
+
+
+def test_a_capture_with_every_record_readable_says_nothing_extra(tmp_path):
+    good = " 00001  06/24/2026 08:%02d:00  Riding  PackTemp: h 30C, PackSOC: %d%%, " \
+           "Vpack:110.000V, BattAmps: 120, Odo: %dkm, MinCell: 3700mV"
+    log = "\n".join(good % (i, 90 - i, 6000 + i) for i in range(12))
+    a = condition.assess(log)
+    assert a["coverage"]["ride_samples_with_cell"] == a["coverage"]["ride_samples"]
+    s = sessions.Session(str(tmp_path), {"eventlogdump": log}, "")
+    text = report.format_report(report.analyze_session(s))
+    assert "cell voltage readable on" not in text
+    assert "UNMEASURED" not in text
+
+
+def test_the_settings_backup_is_the_latest_one_not_the_last_alphabetically(tmp_path):
+    """`sorted(...)[-1]` compared whole filenames, and "postlogin" beats a bare
+    timestamp because "p" > "2" - so an EARLIER post-login dump always won over
+    a LATER plain baseline. Reachable by pulling, logging in, pulling again.
+
+    This text is what the write gate re-reads as the backup a write's undo
+    depends on, so choosing the wrong one is not cosmetic.
+    """
+    (tmp_path / "settings_baseline_20260819_170000.txt").write_text(
+        "later plain\n", encoding="utf-8")
+    (tmp_path / "settings_baseline_postlogin_20260819_160000.txt").write_text(
+        "earlier postlogin\n", encoding="utf-8")
+    picked = sessions._newest_baseline(str(tmp_path))
+    assert picked.endswith("settings_baseline_20260819_170000.txt"), picked
+    assert "later plain" in sessions.load_session(str(tmp_path)).settings_text
+
+
+def test_on_the_same_timestamp_the_fuller_postlogin_dump_wins(tmp_path):
+    # a tie is the one case where the post-login dump is the better answer: it
+    # is the one with the login-gated settings in it
+    for name, body in (("settings_baseline_20260819_160000.txt", "plain\n"),
+                       ("settings_baseline_postlogin_20260819_160000.txt",
+                        "postlogin\n")):
+        (tmp_path / name).write_text(body, encoding="utf-8")
+    assert "postlogin" in sessions.load_session(str(tmp_path)).settings_text
+
+
+def test_a_baseline_with_no_readable_stamp_is_ranked_low_not_dropped(tmp_path):
+    (tmp_path / "settings_baseline_handedited.txt").write_text(
+        "no stamp\n", encoding="utf-8")
+    assert sessions._newest_baseline(str(tmp_path)) is not None
+    (tmp_path / "settings_baseline_20260819_160000.txt").write_text(
+        "stamped\n", encoding="utf-8")
+    assert "stamped" in sessions.load_session(str(tmp_path)).settings_text
