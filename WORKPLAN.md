@@ -25,67 +25,57 @@ that data or protect what exists.
 
 ## Now — the implementation queue
 
-### 1. Fix `--selftest`: it crashes at HEAD ⚠ *blocks the release*
+### 1. ~~Fix `--selftest`~~ — **shipped `8fa44c4`**
 
-Commit `7479947` moved the contactor gate into `transport.exec_command`
-(`heavy_consent` required for `HEAVY_COMMANDS`) and updated every caller — except
-`cli.py:72`, where the selftest's own `dumpall` check now raises an uncaught
-`BlockedCommandError`. The run dies at "dump with progress:", never reaching the
-write-flow, validator, session-file, or **frozen-pyserial** checks — and that last one
-exists precisely because a missing pyserial otherwise shows only as an empty COM-port
-list *at the bike*. The selftest is the pre-bike-day check, and it is broken.
+Fixed, plus the cause underneath it: nothing in the selftest ever exercised the
+heavy gate, so the caller that had not been updated broke a check nobody was
+checking. It exercises it now, first and before the read it guards.
 
-Root lesson: the selftest has no test. Its only coverage is that `--selftest` appears in
-`--help` output.
+It also turned up a promise the gate was not keeping — `heavy_consent` was
+documented as "journalled into the session before the first byte goes out" and
+was journalled nowhere. `SessionLogger.journal_consent` now writes it, before the
+wire, masked. That was load-bearing for *At a bike* step A.2, which asks you to
+confirm the consent string reached the journal; it would have failed there.
 
-- **Change:** pass `heavy_consent="selftest: simulator only"` at `cli.py:72`. Then add
-  `tests/test_cli_selftest.py`: run `openmbb --selftest` as a subprocess, assert exit 0
-  **and** that the output contains `SELFTEST PASSED` and the section headers after the
-  crash point (`write flow:`, `frozen deps:`), so a future mid-run death cannot hide.
-- **Mutation:** remove the `heavy_consent` argument → the new test fails.
-- Unreleased, so no user has the broken build; nothing runs at a bike until this lands.
+### 2. ~~Capture-format stamp~~ — **shipped** (this commit)
 
-### 2. Capture-format stamp — design settled, ~1–2 h *(fold into the release)*
+`capture_format: 1` is line 2 of every new `session_meta.txt`; `CAPTURE_FORMAT`
+and `capture_format()` live in `sessions.py` with the six bump triggers written
+where the constant is; `load_session` refuses a format it cannot read *at the
+loader*, so nothing can analyze what it could not load. Absent means 1, proven
+against all three real captures — written by v0.10.1, v0.19.1 and v0.21.0, three
+app versions and one format, which is the distinction the stamp exists to make.
 
-The investigation completed; the plan never absorbed it. The stamp **does nothing
-today** (every capture in existence is format 1) — it is forward-only insurance, priced
-accordingly, and the design is final:
+Both incidental defects went with it: `redact` refused to vouch for a folder it
+could not recognize as a capture (its clean bill only ever scanned for
+*motorcycle* identifiers, so on any other folder it reported clean over names and
+addresses it never looked for), and `has_settings` now means settings that
+**parsed** rather than a filename that matched — `openmbb analyze` was printing a
+report and exiting 0 over a capture whose headers were all unreadable, and to a
+script driving `--fail-on-alert`, exit 0 means "all good".
 
-- `capture_format: 1` as line 2 of `session_meta.txt`. Bare integer, no minor — the
-  reader has exactly one decision (read or refuse), and a second version-shaped string
-  nobody compares would sit three lines above `app_version`, which is already one.
-  Verified: the value round-trips `redact` unchanged.
-- Constant `CAPTURE_FORMAT = 1` at the top of `sessions.py`, beside the loader that
-  enforces it (the `SUMMARY_VERSION` pattern). The comment carries the bump rule — bump
-  **only** when an old reader would produce a *wrong* answer rather than a *missing* one,
-  which is exactly six things: whose clock `# time:` records; the folder-name stamp
-  shape; `NNN_` latest-wins semantics; which `settings_baseline*` is authoritative; the
-  `_sim`/`_listen` tags; what `# command:` means as a dict key. A new file, key, or
-  sidecar is **not** a bump. Raising the constant obliges, in the same commit, either
-  the branch that reads the old format or the sentence that refuses it.
-- Reader (`load_session`): absent → format 1 (every existing capture, proven against all
-  three real ones). Known integer → read. Newer integer or malformed/empty value →
-  **refuse loudly** with wording that says which version and which program is older — a
-  folder claiming a version we cannot read is a could-not-run case, and those never read
-  as a pass. Read with a line-anchored `^[ \t]*capture_format:(.*)$` then strip; a bare
-  key with an empty value is malformed, not absent.
-- **Mutations:** absent-stamp folder refused → back-compat test fails; newer-stamp folder
-  read anyway → refusal test fails.
+**Two follow-ups it deliberately left open:**
 
-Two incidental defects from the same investigation, same commit or adjacent:
-
-- `redact.redact_session` will vouch for a folder that is not a capture (no
-  `# command:` files at all → `verified_clean: True` over nothing). Refuse instead.
-- `openmbb analyze`'s has-data guard (`cli.py` ~208) accepts `has_settings` matched by
-  *filename*, so a capture whose command headers are all unreadable still prints a
-  report and exits 0. Guard on parsed content.
-- Record as a known limitation (decide later, don't fix blind): a second pull into a
-  live folder overwrites `session_meta.txt` wholesale, so the meta describes the last
-  pull while the files describe both.
+- **The library drops a capture it cannot read instead of showing it.**
+  `library.scan` catches every exception and skips the folder, so a future-format
+  capture would silently vanish from the session library rather than say why —
+  "your capture is gone" instead of "this copy of OpenMBB is too old to read it".
+  The row state already exists (`read_failed` → `"unreadable"`, *"tried, failed -
+  never a quiet pass"*); it wants `scan` to distinguish `CaptureFormatError` from
+  junk and pass a reason through `_lib_row_values`. Left for a separate commit
+  because it can only trigger against a capture from a **future** release, which
+  cannot exist yet — so it costs nothing to land after v0.24.0.
+- **A second pull into a live session folder overwrites `session_meta.txt`
+  wholesale** (`save_named` opens `"w"`), so the meta describes the last pull
+  while the `NNN_` files describe both. Recorded, not fixed: the right answer
+  (append a second stamp block, or refuse, or leave it) wants a decision about
+  what one folder holding two pulls *is*, and nothing forces that answer yet.
 
 ### 3. Cut the release — v0.24.0
 
-After items 1–2. In it: the fault counts anchored to real log entries and clearings no
+Ready now — items 1 and 2 are in. In it: the restored pre-bike-day selftest and
+the consent record (`8fa44c4`), the capture-format stamp and the two vouching
+refusals, the fault counts anchored to real log entries and clearings no
 longer dating faults (`da499fb`), the unmeasured-stretch disclosure and baseline-sort
 fix (`d49fa37`), the write-chain and contactor gates in code (`7479947`), the version
 age stamp and `## Privacy` (`56ae56f`), the parser tolerance work (`e734f23`,

@@ -143,3 +143,72 @@ def test_a_missing_folder_raises_rather_than_writing_anything(tmp_path):
     with pytest.raises(NotADirectoryError):
         redact.redact_session(str(tmp_path / "nope"), str(tmp_path / "out"))
     assert not os.path.exists(str(tmp_path / "out"))
+
+
+def test_redact_refuses_to_vouch_for_a_folder_that_is_not_a_capture(tmp_path):
+    """An empty folder was already refused ("nothing here to vouch for"), but a
+    folder holding any readable text passed and came back verified_clean.
+
+    The assurance here is narrow on purpose - it scans for a VIN, an MBB serial,
+    a Sevcon serial. Pointed at some other folder it finds none of them and
+    reports clean, which a person reasonably reads as "safe to post" over files
+    carrying names and addresses it never looked for.
+    """
+    src = tmp_path / "not-a-capture"
+    src.mkdir()
+    (src / "holiday.txt").write_text("nothing to do with a motorcycle\n",
+                                     encoding="utf-8")
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError) as excinfo:
+        redact.redact_session(str(src), str(out))
+    assert "does not look like an OpenMBB capture" in str(excinfo.value)
+    # and it refused before building anything
+    assert not out.exists()
+
+
+def test_redact_still_exports_a_real_capture(tmp_path):
+    """The guard must recognize the thing it is meant to pass, or it is just a
+    refusal. Same fixture the rest of this file uses."""
+    src = tmp_path / "src"
+    _write_capture(src)
+    rep = redact.redact_session(str(src), str(tmp_path / "bundle"))
+    assert rep["verified_clean"] is True
+    assert rep["files"] > 0
+
+
+def test_a_capture_written_entirely_in_utf16_is_still_recognized(tmp_path):
+    """The guard that refuses a folder which is not a capture has to SEE a
+    capture written the way Windows actually writes one.
+
+    PowerShell redirection produces UTF-16LE. Read as UTF-8 the `# command:`
+    header is mojibake, so a recognizer that only decoded UTF-8 would refuse a
+    real capture as "not a capture" - worse than the hole it closes, and
+    invisible to every other test here because they all write UTF-8.
+    """
+    cap = tmp_path / "utf16cap"
+    cap.mkdir()
+    # A real capture folder carries session_meta.txt beside the command files,
+    # and that detail is load-bearing here: one readable file is what makes the
+    # recognizer report "there is text in this folder". Without it, a recognizer
+    # that cannot decode UTF-16 sees an EMPTY folder and stays quiet, the export
+    # succeeds, and this test passes while proving nothing.
+    (cap / "session_meta.txt").write_text(
+        "OpenMBB session metadata\ncapture_format: 1\n"
+        "time: 2026-08-19T16:10:11\n", encoding="utf-8")
+    (cap / "001_bms.txt").write_bytes(
+        "# command: bms\n\n  - Pack SOC : 61%\n".encode("utf-16"))
+    (cap / "002_stats.txt").write_bytes(
+        ("# command: stats\n\n  - Bike VIN : %s\n" % _VIN).encode("utf-16"))
+    rep = redact.redact_session(str(cap), str(tmp_path / "out"))
+    assert rep["verified_clean"] is True
+    assert rep["identifiers_replaced"] == 1
+
+
+def test_an_empty_folder_keeps_its_own_sharper_refusal(tmp_path):
+    """The not-a-capture guard must not preempt this one. "Nothing here to vouch
+    for" is the more useful answer for an empty folder and a review finding put
+    it there; the newer guard speaks only when there IS text and none of it is a
+    capture."""
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(RuntimeError, match="nothing here to vouch for"):
+        redact.redact_session(str(tmp_path / "empty"), str(tmp_path / "out"))

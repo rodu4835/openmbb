@@ -1849,6 +1849,29 @@ def test_session_meta_flags_charging(app):
     assert "CHARGING" in app.txt_out.get("1.0", "end")
 
 
+def test_a_new_capture_states_the_format_it_was_written_in(app):
+    """The reader half is in tests/test_capture_format.py; this is the writer.
+
+    A capture that cannot say what it is leaves a future reader to guess, and
+    guessing is what the 2026-06-13 firmware reflash punished when 1,051 ride
+    records were re-read under a layout nobody had recorded a change to.
+    """
+    from openmbb import sessions
+
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._write_session_meta("  - Mode                   : Stopped")
+    meta = os.path.join(app.logger.dir, "session_meta.txt")
+    text = open(meta, encoding="utf-8").read()
+    assert "capture_format: %d" % sessions.CAPTURE_FORMAT in text
+    # second line, above `time:` - the reader has one decision to make and the
+    # stamp should not be buried under keys that mean other things
+    assert text.splitlines()[1].startswith("capture_format:")
+    # and what this build writes, this build reads
+    assert sessions.capture_format(app.logger.dir) == sessions.CAPTURE_FORMAT
+    assert sessions.load_session(app.logger.dir) is not None
+
+
 # --- Phase D: GUI state machine & write-flow integrity ----------------------
 
 def test_pump_survives_callback_exception(app):

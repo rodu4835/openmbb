@@ -149,6 +149,46 @@ def _same_or_inside(a, b):
         return False
 
 
+def _capture_shape(folder):
+    """(saw_text, saw_command_header) across the files in `folder`.
+
+    The `# command:` header is what SessionLogger writes and what
+    sessions.load_session reads back, so it is the same definition of "a
+    capture" the rest of the tool uses.
+
+    Decoded with this module's own BOM-aware decoder rather than as UTF-8: a
+    capture written by PowerShell redirection is UTF-16LE, and a recognizer that
+    could not see its header would refuse a real capture - worse than the hole
+    it is closing.
+
+    `saw_text` is reported separately so the caller can stay quiet for a folder
+    with no readable text at all. Those already have sharper refusals further
+    down ("nothing here to vouch for", "could not be read as text"), and both
+    were put there by review findings.
+    """
+    saw_text = False
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return False, False
+    for name in names:
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        except OSError:
+            continue
+        body, _enc = _decode_text(raw)
+        if body is None:
+            continue
+        saw_text = True
+        if body.lstrip("\ufeff").startswith("# command:"):
+            return True, True
+    return saw_text, False
+
+
 def redact_session(src_dir, dst_dir, overwrite=False):
     """Write a share-safe copy of a session folder. Returns a report.
 
@@ -158,6 +198,22 @@ def redact_session(src_dir, dst_dir, overwrite=False):
     """
     if not os.path.isdir(src_dir):
         raise NotADirectoryError(src_dir)
+    # An empty folder was already refused ("nothing here to vouch for"), but a
+    # folder holding any readable text passed and came back verified_clean over
+    # files nobody had established were a capture. The assurance this module
+    # gives is narrow on purpose: it scans for MOTORCYCLE identifiers - a VIN, an
+    # MBB or Sevcon serial. Pointed at some other folder it would find none of
+    # them and report clean, which a person reasonably reads as "safe to post"
+    # while the files carry names, addresses and account numbers it never looked
+    # for. So it refuses to vouch for anything it cannot first recognize.
+    _saw_text, _saw_capture = _capture_shape(src_dir)
+    if _saw_text and not _saw_capture:
+        raise ValueError(
+            "%s does not look like an OpenMBB capture - no file in it carries a "
+            "'# command:' header. This export only knows how to look for "
+            "motorcycle identifiers, so calling another kind of folder "
+            "'verified clean' would vouch for identifiers it never scanned for."
+            % src_dir)
     # With --overwrite, the rmtree below runs BEFORE the source is listed. Aimed
     # at the source itself that destroyed the capture and then reported a
     # verified-clean export of zero files; aimed at the parent it took the

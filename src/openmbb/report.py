@@ -78,7 +78,16 @@ def analyze_session(session, temp_units="C"):
             "name": session.name,
             "path": session.dir,
             "commands": sorted(session.commands),
-            "has_settings": bool((session.settings_text or "").strip()),
+            # A settings file being PRESENT is not the same as it holding
+            # settings. `openmbb analyze` reads this to decide whether the
+            # folder held a capture at all, and a settings_baseline_*.txt of
+            # garbage - a truncated pull, a half-written file - satisfied it on
+            # the strength of its FILENAME, so analyze printed a report over
+            # nothing and exited 0. For a script driving --fail-on-alert, exit 0
+            # means "all good". A check that could not run must never read as a
+            # pass, so this now says what its name claims: settings we parsed.
+            "has_settings": bool(
+                transport.parse_settings_dump(session.settings_text or "")[0]),
         },
         "units": temp_units,
         "counts": _count_by_status(metrics),

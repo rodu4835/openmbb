@@ -226,6 +226,7 @@ def cmd_analyze(args):
     import os
 
     from . import report as report_mod
+    from . import sessions as sessions_mod
 
     # load_session globs a directory: a wrong path yields an empty Session rather
     # than raising, so a bad argument would otherwise print an empty report and
@@ -233,7 +234,14 @@ def cmd_analyze(args):
     if not os.path.isdir(args.folder):
         print("No such session folder: %s" % args.folder, file=sys.stderr)
         return 2
-    rep = report_mod.analyze_folder(args.folder, args.units)
+    # A folder stating a format we cannot read is a could-not-run case, and exit
+    # 1 belongs to --fail-on-alert ("this bike has an alert"). Exiting 1 here
+    # would tell a script something about the motorcycle that we never learned.
+    try:
+        rep = report_mod.analyze_folder(args.folder, args.units)
+    except sessions_mod.CaptureFormatError as e:
+        print("Cannot analyze %s: %s" % (args.folder, e), file=sys.stderr)
+        return 2
     if not rep["session"]["commands"] and not rep["session"]["has_settings"]:
         print("Nothing to analyze in %s — no recognizable command captures found.\n"
               "Expected a session folder written by OpenMBB (NNN_<cmd>.txt files)."

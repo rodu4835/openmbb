@@ -3808,6 +3808,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 mode = mm.group(1).strip()
             rev = _parse_fw_rev(self.version_text)
             meta = ["OpenMBB session metadata",
+                    # Second line, and an integer with no minor part: the reader
+                    # has exactly one decision to make (read it or refuse it),
+                    # and a second version-shaped string nobody compares would
+                    # sit three lines above app_version, which is already one.
+                    "capture_format: %d" % sessions.CAPTURE_FORMAT,
                     "time: %s" % _dt.datetime.now().isoformat(timespec="seconds"),
                     "app_version: %s" % __version__,
                     "firmware_rev: %s" % (rev if rev is not None else "?"),

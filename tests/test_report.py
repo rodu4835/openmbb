@@ -369,3 +369,35 @@ def test_the_headless_report_honours_a_miles_request(tmp_path):
     assert rep["consumption"]["wh_per_km"] == pytest.approx(
         report.analyze_session(s)["consumption"]["wh_per_km"])
     assert "km" in str(rep["rides"]["totals"].keys())
+
+
+def test_cli_analyze_refuses_a_capture_whose_headers_will_not_read(tmp_path):
+    """`has_settings` was true on the strength of a FILENAME, so a folder whose
+    command headers are all unreadable printed a report and exited 0 - and to a
+    script driving --fail-on-alert, exit 0 means "all good"."""
+    d = tmp_path / "badheaders"
+    d.mkdir()
+    (d / "settings_baseline_20260819_170000.txt").write_text(
+        "garbage, not a settings dump\n", encoding="utf-8")
+    (d / "001_bms.txt").write_text("no command header either\n", encoding="utf-8")
+    r = _cli("analyze", str(d))
+    assert r.returncode == 2
+    assert "Nothing to analyze" in r.stderr
+
+
+def test_cli_analyze_refuses_a_capture_from_a_newer_openmbb(tmp_path):
+    """Exit 2, not 1: --fail-on-alert uses 1 to mean "this bike has an alert", so
+    a capture that could not be READ must never leave through that door - a
+    script would record a finding about a motorcycle nobody measured."""
+    d = tmp_path / "future"
+    d.mkdir()
+    (d / "001_bms.txt").write_text(
+        "# command: bms\n# time: 16:04:49.000\n\nPack Voltage : 113.000V\n",
+        encoding="utf-8")
+    (d / "session_meta.txt").write_text(
+        "OpenMBB session metadata\ncapture_format: 2\n"
+        "time: 2027-01-01T00:00:00\n", encoding="utf-8")
+    r = _cli("analyze", str(d))
+    assert r.returncode == 2
+    assert "Traceback" not in r.stderr
+    assert "format 2" in r.stderr and "format 1" in r.stderr

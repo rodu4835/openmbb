@@ -10,6 +10,76 @@ import os
 import re
 
 
+#: The capture format this build writes, and the highest it can read.
+#:
+#: Bump ONLY when an older reader would produce a WRONG answer rather than a
+#: MISSING one. That is a far higher bar than "the folder changed": a new file, a
+#: new key, a new sidecar are all things an old reader simply ignores, and none
+#: of them is a bump. Exactly six things can make an old reader wrong, because
+#: six pieces of meaning here are carried by position or convention rather than
+#: by a label that an old reader could fail to find:
+#:
+#:   1. whose clock `# time:` records (the capturing MACHINE's, not the bike's)
+#:   2. the folder-name stamp shape, which is how captures are ordered
+#:   3. `NNN_` latest-wins, when one command was run more than once
+#:   4. which `settings_baseline*` is authoritative (see `_newest_baseline`)
+#:   5. the `_sim` / `_listen` name tags, which mark data that is NOT from a bike
+#:   6. what `# command:` means as a dict key
+#:
+#: Raising this obliges you, in the same commit, to write either the branch that
+#: reads the old format or the sentence that refuses it.
+CAPTURE_FORMAT = 1
+
+_CAPTURE_FORMAT_RE = re.compile(r"^[ \t]*capture_format:(.*)$", re.M)
+
+
+class CaptureFormatError(Exception):
+    """A capture this build must not pretend to understand."""
+
+
+def capture_format(folder):
+    """The format `folder` claims to be, as an int.
+
+    A folder that makes no claim is format 1. Every capture written before the
+    stamp existed is one, there is no other honest reading of silence, and it is
+    true of all three real captures.
+
+    Raises CaptureFormatError for a claim this build cannot honour: a format
+    newer than it knows, or a value that is not an integer. A key that is present
+    with an unreadable value is MALFORMED, not absent - something meant to state
+    a version and failed - and quietly reading that as 1 would be exactly the
+    false pass the stamp exists to prevent.
+    """
+    try:
+        with open(os.path.join(folder, "session_meta.txt"),
+                  encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return CAPTURE_FORMAT          # no meta file at all: a format-1 capture
+    m = _CAPTURE_FORMAT_RE.search(text)
+    if m is None:
+        return CAPTURE_FORMAT          # meta file, but from before the stamp
+    raw = m.group(1).strip()
+    try:
+        claimed = int(raw)
+        if claimed < 1:
+            # int() takes "0" and "-1" and neither is > CAPTURE_FORMAT, so this
+            # would otherwise read as a fine format-0 capture. There has never
+            # been a format below 1.
+            raise ValueError(raw)
+    except ValueError:
+        raise CaptureFormatError(
+            "%s says capture_format: %r, which is not a version number. The "
+            "file is damaged or was not written by OpenMBB; reading it as a "
+            "format-1 capture would be a guess." % (folder, raw))
+    if claimed > CAPTURE_FORMAT:
+        raise CaptureFormatError(
+            "this capture is format %d and this OpenMBB reads up to format %d - "
+            "it was written by a NEWER OpenMBB than this one. Update OpenMBB "
+            "rather than trust a partial read of it." % (claimed, CAPTURE_FORMAT))
+    return claimed
+
+
 class Session:
     def __init__(self, folder, commands, settings_text, captured_at=None):
         self.dir = folder
@@ -118,7 +188,14 @@ def _newest_baseline(folder):
 
 
 def load_session(folder):
-    """Load one session folder into a Session (latest response per command)."""
+    """Load one session folder into a Session (latest response per command).
+
+    Raises CaptureFormatError if the folder states a format this build cannot
+    read. Refusing at the loader rather than at each surface is deliberate:
+    nothing can analyze what it could not load, so there is no path by which a
+    capture we do not understand reaches a verdict.
+    """
+    capture_format(folder)          # refuses before anything is believed
     commands = {}
     captured_at = {}
     day = _session_date(folder)
