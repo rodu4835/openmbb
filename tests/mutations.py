@@ -16,7 +16,10 @@ WHAT AN ENTRY IS
     (label, path, old, new, test)
 
 `old` is replaced by `new` in `path` (repo-relative), `test` is then run, and it
-MUST FAIL. Anything else is reported: a test that stays green under its own
+MUST FAIL. Both may be tuples of equal length when re-creating the defect takes
+more than one edit - moving a call from before a write to after it, say, which is
+the difference between testing that a record EXISTS and testing that it is
+written in time to survive the failure it exists for. Anything else is reported: a test that stays green under its own
 mutation is not testing what its name says, and is a finding in its own right -
 that is how the UTF-16 recognizer entry below was caught being vacuous.
 
@@ -69,13 +72,21 @@ MUTATIONS = [
      "    pass",
      "tests/test_cli_selftest.py::test_the_selftest_exercises_the_gate_that_broke_it"),
 
+    # Two edits: lift the call out from before the wire and put it back after
+    # port.write(). The test drives a port whose write() raises, so this measures
+    # the ORDER of the record rather than its mere presence - deleting the call
+    # would prove only that the test notices it missing.
     ("consent: journal it after the wire instead of before",
      "src/openmbb/transport.py",
-     '''        if head in HEAVY_COMMANDS:
+     ('''        if head in HEAVY_COMMANDS:
             self.logger.journal_consent(cmd, heavy_consent)
 
         with self.lock:''',
-     "        with self.lock:",
+      "            self.port.write(wire)"),
+     ("        with self.lock:",
+      '''            self.port.write(wire)
+            if head in HEAVY_COMMANDS:
+                self.logger.journal_consent(cmd, heavy_consent)'''),
      "tests/test_cli_selftest.py::test_the_consent_is_recorded_before_the_first_byte"),
 
     ("consent: journal it before the gate, so a refusal leaves a record",
@@ -240,15 +251,24 @@ def main(argv):
     try:
         for label, path, old, new, test in picked:
             src = originals[path]
-            n = src.count(old)
-            if n != 1:
-                # The source moved out from under the entry. That is not a pass
-                # and not a failure - it is an entry that no longer means
-                # anything, and saying so beats silently skipping it.
-                broken.append((label, "anchor matched %d times" % n))
+            edits = (list(zip(old, new)) if isinstance(old, tuple)
+                     else [(old, new)])
+            stale = None
+            mutated = src
+            for o, nw in edits:
+                n = mutated.count(o)
+                if n != 1:
+                    # The source moved out from under the entry. That is not a
+                    # pass and not a failure - it is an entry that no longer
+                    # means anything, and saying so beats skipping it quietly.
+                    stale = "anchor matched %d times" % n
+                    break
+                mutated = mutated.replace(o, nw)
+            if stale:
+                broken.append((label, stale))
                 print("STALE     %s" % label)
                 continue
-            _write(path, src.replace(old, new))
+            _write(path, mutated)
             try:
                 r = subprocess.run(
                     [sys.executable, "-m", "pytest", test, "-q", "--no-header"],
