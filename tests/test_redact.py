@@ -212,3 +212,27 @@ def test_an_empty_folder_keeps_its_own_sharper_refusal(tmp_path):
     (tmp_path / "empty").mkdir()
     with pytest.raises(RuntimeError, match="nothing here to vouch for"):
         redact.redact_session(str(tmp_path / "empty"), str(tmp_path / "out"))
+
+
+def test_a_listen_capture_can_still_be_shared(tmp_path):
+    """A listen session runs no commands - Transport.listen() only drains - so
+    it carries no `# command:` header anywhere, and the not-a-capture guard
+    shipped in v0.24.0 refused it.
+
+    That refusal is the safe direction and still the wrong answer: a listen
+    capture is the "my cable does not work, here is what the bike said"
+    artifact, which is the forum-help case this module was built for. Refusing
+    it pushes somebody toward posting the raw log instead, which is worse than
+    anything the guard was protecting against.
+    """
+    cap = tmp_path / "2026-08-23_120000_COM4_listen"
+    cap.mkdir()
+    (cap / "session_raw.log").write_text(
+        "[12:00:00.001] RX 'Zero Motorcycles MBB\r\n'\n"
+        "[12:00:00.100] RX '  - Bike VIN : %s\r\n'\n" % _VIN,
+        encoding="utf-8")
+    rep = redact.redact_session(str(cap), str(tmp_path / "bundle"))
+    assert rep["verified_clean"] is True
+    assert rep["identifiers_replaced"] == 1
+    out = (tmp_path / "bundle" / "session_raw.log").read_text(encoding="utf-8")
+    assert _VIN not in out

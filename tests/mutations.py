@@ -195,6 +195,14 @@ MUTATIONS = [
         saw_text = True''',
      "tests/test_redact.py::test_a_capture_written_entirely_in_utf16_is_still_recognized"),
 
+    ("redact: stop recognizing a listen capture (no commands, raw log only)",
+     "src/openmbb/redact.py",
+     '''        if _RAW_LOG_LINE_RE.search(body):
+            return True, True''',
+     '''        if False:
+            return True, True''',
+     "tests/test_redact.py::test_a_listen_capture_can_still_be_shared"),
+
     ("redact: preempt the empty-folder refusal with the vaguer one",
      "src/openmbb/redact.py",
      "    if _saw_text and not _saw_capture:",

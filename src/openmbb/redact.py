@@ -149,6 +149,13 @@ def _same_or_inside(a, b):
         return False
 
 
+#: A `session_raw.log` line, as SessionLogger.raw writes it and nothing else does:
+#: `[12:00:00.001] RX 'Zero Motorcycles MBB\r\n'`. This is the signature of a
+#: LISTEN capture, which runs no commands at all and so carries no `# command:`
+#: header anywhere - the shape v0.24.0 refused.
+_RAW_LOG_LINE_RE = re.compile(r"^\[\d\d:\d\d:\d\d\.\d{3}\] (?:RX|TX) ", re.M)
+
+
 def _capture_shape(folder):
     """(saw_text, saw_command_header) across the files in `folder`.
 
@@ -186,6 +193,11 @@ def _capture_shape(folder):
         saw_text = True
         if body.lstrip("\ufeff").startswith("# command:"):
             return True, True
+        # A listen session runs no commands - Transport.listen() only drains -
+        # so it has no header to find. Its raw log is still OpenMBB's own
+        # output, and sharing one is the case this module exists for.
+        if _RAW_LOG_LINE_RE.search(body):
+            return True, True
     return saw_text, False
 
 
@@ -209,11 +221,11 @@ def redact_session(src_dir, dst_dir, overwrite=False):
     _saw_text, _saw_capture = _capture_shape(src_dir)
     if _saw_text and not _saw_capture:
         raise ValueError(
-            "%s does not look like an OpenMBB capture - no file in it carries a "
-            "'# command:' header. This export only knows how to look for "
-            "motorcycle identifiers, so calling another kind of folder "
-            "'verified clean' would vouch for identifiers it never scanned for."
-            % src_dir)
+            "%s does not look like an OpenMBB capture - nothing in it carries a "
+            "'# command:' header or a session_raw.log line. This export only "
+            "knows how to look for motorcycle identifiers, so calling another "
+            "kind of folder 'verified clean' would vouch for identifiers it "
+            "never scanned for." % src_dir)
     # With --overwrite, the rmtree below runs BEFORE the source is listed. Aimed
     # at the source itself that destroyed the capture and then reported a
     # verified-clean export of zero files; aimed at the parent it took the
