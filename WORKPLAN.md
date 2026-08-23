@@ -83,22 +83,28 @@ age stamp and `## Privacy` (`56ae56f`), the parser tolerance work (`e734f23`,
 sentinel/BattTemp (`f4a6e84`), module-connect refusal (`e888f5f`). Same sequence as
 v0.23.x: push → CI green → tag → verify assets.
 
-### 4. Encode the mutation-check discipline as a repo artifact
+### 4. ~~Encode the mutation-check discipline as a repo artifact~~ — **shipped**
 
-Sixteen commits say "mutation-checked N/N" — **52+ named mutations** — and every one was
-run from a scratchpad script that no longer exists. The practice that provides this
-project's evidence standard has no artifact: a future refactor that quietly weakens a
-guard is caught by nothing, and the deferred `gui.py` split is precisely the refactor
-that would need these re-run.
+`tests/mutations.py` — a manifest of `(label, file, old, new, must_fail_test)`
+entries plus a runner. Not part of the default suite (it rewrites files under
+`src/`), and it refuses to run against a dirty working tree so that
+`git checkout -- .` is always a complete recovery if it is interrupted between
+the write and the restore.
 
-- **Change:** `tests/mutations.py` — a manifest of entries
-  `(label, file, old_string, new_string, must_fail_test)` (the exact shape every
-  scratchpad script already used; the 16 commit bodies are the source to reconstruct
-  from), plus a runner: apply one mutation, run the named test, assert it fails,
-  restore. Not part of the default suite (it edits source); a separate opt-in command
-  documented in the file header, run before releases and after refactors.
-- **Mutation of the mutation runner:** point one manifest entry at a test that passes
-  regardless → the runner must report it as NOT CAUGHT.
+    python tests/mutations.py            # all entries
+    python tests/mutations.py redact     # entries whose label matches
+
+It reports three outcomes, not two. **CAUGHT** is the pass. **MISSED** means a
+test stayed green while its own fix was removed — a finding, not a pass, and the
+reason the entry exists at all. **STALE** means the anchor no longer matches the
+source: the entry has stopped meaning anything and says so instead of being
+silently skipped, which is how a manifest rots.
+
+**Seeded with the 17 mutations from `8fa44c4` and `a199424`**, each verified at
+the commit that introduced it. The ~52 named in earlier commit bodies are prose
+and are NOT transcribed on faith — an entry nobody has watched fail is worth less
+than no entry, so they get added as they are re-established. That backfill is
+incremental and needs no ceremony.
 
 ### 5. The report/GUI mirror — stop composing the same fact twice
 
