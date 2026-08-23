@@ -297,84 +297,74 @@ that ceiling is worth more than anything that polishes what sits behind it.
   came from real hardware output, and the one committed fixture already contained all four
   shapes — nobody had asked it the right questions.
 
-- [~] **Property-based tests on the parsers.** **MEASURED, NOT YET FIXED — and the
-  measurement is the part worth reading.** Generate malformed console output and assert the
-  invariant that actually matters: never raise, never invent a value.
+- [x] **Property-based tests on the parsers.** *(shipped: the measurement, five root-cause
+  fixes, and `tests/test_parser_properties.py`.)* The contract under test is the module's
+  own docstring - *"every parser here is label-fuzzy and degrades to None rather than
+  raising"* - split into three properties: **never raise**, **never invent**, and
+  **type-shape does not depend on the input being well-formed**. Strategies are seeded from
+  `tests/fixtures/` and never from the real captures, which do not exist on CI - seeding
+  from them would make the tests quietly weaker on every runner than on the machine they
+  were written on.
 
-  **Shipped so far:** `hypothesis>=6` in the dev extras, and `.hypothesis/` in
-  `.gitignore`. The dependency is test-only and is not imported from anything under `src/`,
-  so it never enters the PyInstaller binary and `THIRD_PARTY_LICENSES.txt` is unaffected.
-  The gitignore entry is not housekeeping: unlike `.pytest_cache` hypothesis writes no
-  `.gitignore` of its own, and its database is *derived from whatever the strategies were
-  fed*, so on a machine holding real captures it must never become committable.
+  **Fixed, by root cause, each reproduced before being touched and each mutation-checked
+  (7/7):**
 
-  **No parser has been changed and no test has been written.** What exists is the
-  measurement, because fixing 27 findings one at a time would produce churn instead of
-  guards. The contract under test is this module's own docstring — *"every parser here is
-  label-fuzzy and degrades to None rather than raising"* — split into never-raise,
-  never-invent and type-shape. 27 violations survived adversarial review; they collapse to
-  about ten root causes. Ordered by whether a real bike can produce the input:
+  1. **`parse_obd` reported the warning lamp OFF on a line saying it was ON.** Detected
+     case-insensitively, extracted case-sensitively, so `MIL ON : 1` fell past the
+     exact-case branch, partitioned the un-lowered line on a lowercase needle, found
+     nothing, and `bool(None)` collapsed to a definite `False`. Extraction is
+     case-insensitive now, and an unreadable value is **`None`, not `False`** - a check
+     that could not run may never read as a pass.
+  2. **`all_nums` lacked the garbled-decimal guard `num` documents.** `0.-51` - a token the
+     firmware really emits, six of them in the real captures - came back as `[0.0, -51.0]`,
+     two readings invented from one unreadable field. It now refuses the **whole** token
+     rather than its head: keeping the `-51` would be a hundred times off, which is worse
+     than the wrong zero because it looks plausible. Neighbours on the same line survive.
+  3. **`find()` answered from a neighbouring label when the primary one was absent.**
+     Delete `Pack Temps` and `pack_max_temp_c` read 23 C off `Lowest Present Pack Temp` -
+     the pack's **lowest** sensor reported as its **maximum**, on the metric that grades a
+     hot pack, so the error ran in the unsafe direction. The fix is NOT strictness:
+     label-fuzziness is the advertised contract and is what lets these parsers meet a bike
+     nobody has seen. `find()` gained an `exclude` for qualifiers that **invert** an
+     answer's meaning rather than merely widening it. It now returns `None`.
+  4. **`event_log_text` accepted OpenMBB's own `### TRUNCATED` banner as an event log**,
+     shadowing a real log in the fallback command. A genuinely truncated log is still a log
+     and stays readable - on real firmware a dump ending without a prompt is the NORMAL
+     exit - so only a reply that is *nothing but* the banner is refused.
+  7. **Non-finite floats.** A 309-digit run overflows to `inf`, which then raises
+     `OverflowError` in the Fahrenheit conversion and the derate profile. Pure fuzz - the
+     longest real digit run is ten characters - but the promise is about *any* input, and
+     one `_finite()` guard shared by `num` and `all_nums` closes the family.
 
-  1. **`parse_obd` reports the warning lamp OFF on a line that says it is ON.**
-     `parse_obd("MIL ON : 1")` returns `mil_on: False`. The line is *detected*
-     case-insensitively but *extracted* case-sensitively, so any other casing takes the
-     `partition` branch, finds nothing, and `bool(None)` collapses to a definite False.
-     Separately `parse_obd("Active DTCs : 0A")` reads `0A` as a count of zero. This
-     function's own docstring calls fault codes "one of the few things a capture can say
-     flatly", and it currently says *no fault* flatly, on a fault. Needs no corruption at
-     all — only a firmware that cases the label differently.
-  2. **`all_nums` lacks the garbled-decimal guard `num` documents.** `num("0.-51 A")`
-     correctly returns None; `all_nums("0.-51 A")` returns `[0.0, -51.0]`. The
-     hand-rolled number regexes in `_ride_field`, `_pack_temp`, `_batt_temp`,
-     `_curr_limit_pct` and `decode_module_connect_failure` each re-implement extraction
-     without it too. **Six such tokens exist in the real captures** — though every one sits
-     on a `chargers` line that no `all_nums` call site currently reads, so the token is
-     attested and the consequence is not.
-  3. **`find()` reports a neighbouring label's value when the primary label is absent.**
-     Measured against the committed fixture by deleting one line: `pack_max_temp_c` goes
-     25 C -> 23 C by matching `Lowest Present Pack Temp`, and `pack_v` goes 116.002 ->
-     1.0 off a `Bank Voltages` column header. The first is the bad one — the pack's
-     *lowest* sensor reported as its *maximum*, on the metric that grades a hot pack, so
-     the error runs in the unsafe direction. Every colliding label is real; the trigger is
-     the primary label being absent, which is precisely the other-bike case these parsers
-     advertise tolerating.
-  4. **`event_log_text` accepts OpenMBB's own `### TRUNCATED` banner as an event log**,
-     shadowing a real log sitting in the fallback command. `is_console_refusal` catches the
-     console declining but not the tool's own marker. The `dumplogs` defect one banner over.
-  5. **`_state_val` returns `""`, so a valueless interlock reads as an answer** —
-     `parse_inputs` yields `{"kickstand": ""}`, a present key holding no answer, while the
-     `num()`-backed rails in the same block correctly give None.
-  6. **The `-100 C` sentinel passes through on ride/charge samples.** `parse_bms` drops it
-     via `real_temps()`; `_mode_samples` does not, on any of its four temperature fields.
-     **Latent, not active:** all five event logs in the real captures were scanned and
-     **zero** riding or charging lines carry `-100`. Same shape as the `real_temps` guard
-     itself — inert until a consumer meets the input.
-  7. **Non-finite floats.** A 309+ digit run makes `num` return `inf`, which raises
-     `OverflowError` downstream in `health.fmt_temp` (Fahrenheit only) and in
-     `condition.derate_profile`. Pure fuzz — the longest real digit run measured is ten
-     characters — but the contract says *any* input, and one non-finite check in
-     `num`/`all_nums` closes most of the crash family at once.
-  8. Unbounded `int()`/`float()` raising `ValueError`: `_cell_index`, `parse_limit_events`
-     (`[\d.]+` captures `1.2.3`), `_runtime_seconds`. All fuzz-only.
-  9. `parse_odometer`/`top_speed_mph` anchor on the digit **tail** when a stray character
-     splits a run (`6249 km` -> 49.0). A single inserted space does it; no unicode needed.
-     Zero such anomalies exist in the real corpus.
-  10. `real_temps` raises `TypeError` on None or a non-numeric sequence — argument shapes
-      no current caller can produce. Weakest of the set.
+  **The two UNCONFIRMED claims are now settled: neither reproduces, and the reason is
+  visible.** `soc_pct` and `capacity_ah` do fall through to a neighbouring label when the
+  primary is removed - `Total SOC` and `Total Capacity` - but both neighbours carry the
+  same value, so the answer stays correct. That is the *same mechanism* as root cause 3
+  with a harmless outcome, which is the useful way to hold it: one root cause, three
+  instances, two benign and one dangerous.
 
-  **Two claims are recorded as UNCONFIRMED and must be re-tested before anyone acts on
-  them:** `soc_pct` colliding with `Age of SOC Data`, and `capacity_ah` colliding with
-  `Pack Capacity Remaining`. Both were reported, and neither reproduced on re-run — most
-  likely a faulty line-removal helper rather than a wrong finding, but that is a guess and
-  it is not evidence.
+  **One property found a defect the examples had already filed** (the `inf` case), which is
+  the point of having both. One property was itself **wrong** and was corrected rather than
+  the parser: it guessed a field's type from its key's spelling and called `bms_fw_rev`
+  (deliberately the string `"48 (993 banka)"`) a defect - the same class of mistake the
+  parsers were making.
 
-  **Next:** re-test those two, fix by root cause rather than one finding at a time, then
-  write the properties. Seed the strategies from `tests/fixtures/` and **never** from
-  `~/Documents/OpenMBB/openmbb-sessions/` — the real captures do not exist on CI, so
-  seeding from them would make the tests quietly weaker on every runner than on the machine
-  they were written on. *Cost:* the guards are small; the discipline is in mutation-checking
-  each one.
-
+- [ ] **The five remaining parser root causes.** *(All fuzz-reachable only; none has been
+  seen from a real bike. Listed in descending plausibility.)*
+  - `_state_val` returns `""`, so a valueless interlock reads as an answer -
+    `parse_inputs` yields `{"kickstand": ""}`, a present key holding no answer, while the
+    `num()`-backed rails in the same block correctly give `None`.
+  - The `-100 C` sentinel passes through on ride/charge samples: `parse_bms` drops it via
+    `real_temps()`, `_mode_samples` does not, on any of its four temperature fields.
+    **Latent** - all five event logs in the real captures were scanned and zero riding or
+    charging lines carry `-100`.
+  - Unbounded `int()`/`float()` raising `ValueError`: `_cell_index`,
+    `parse_limit_events` (`[\d.]+` captures `1.2.3`), `_runtime_seconds`.
+  - `parse_odometer`/`top_speed_mph` anchor on the digit **tail** when a stray character
+    splits a run (`6249 km` -> `49.0`). A single inserted space does it; zero such
+    anomalies exist in the real corpus.
+  - `real_temps` raises `TypeError` on None or a non-numeric sequence - argument shapes no
+    current caller can produce. Weakest of the set.
 ## Open questions, not tasks
 
 - **Does the console's −7 h clock rendering follow US daylight saving?** All captures so

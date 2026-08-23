@@ -31,12 +31,55 @@ def num(s):
     end = m.end()
     if end + 1 < len(s) and s[end] == "." and s[end + 1] in "-+0123456789":
         return None
-    return float(m.group(0))
+    return _finite(float(m.group(0)))
+
+
+def _finite(x):
+    """A float, or None if it is not a real reading.
+
+    A long enough digit run overflows to inf - 309 characters does it - and inf
+    then raises OverflowError downstream in the Fahrenheit conversion and in the
+    derate profile. No console prints a 309-digit number, but the promise this
+    module makes is about ANY input, and a value that cannot be compared or
+    converted is not a reading. NaN is refused for the same reason.
+    """
+    if x != x or x in (float("inf"), float("-inf")):
+        return None
+    return x
 
 
 def all_nums(s):
-    """Every number in a string, as floats."""
-    return [float(x) for x in _NUM.findall(str(s))] if s is not None else []
+    """Every number in a string, as floats. Garbled decimals are dropped.
+
+    `num` has always refused the malformed token the firmware really emits -
+    "0.-51 A", which should be "-0.51" - because reading it as 0.0 turns a real
+    negative into a wrong zero. `all_nums` did not share that guard and returned
+    [0.0, -51.0], inventing TWO readings out of one unreadable token. Six such
+    tokens are present in the real captures.
+
+    Same rule as `num`, applied per match: a number immediately followed by "."
+    and then a sign or digit is a garbled decimal, not a number.
+    """
+    if s is None:
+        return []
+    s = str(s)
+    out, skip_to = [], -1
+    for m in _NUM.finditer(s):
+        if m.start() < skip_to:
+            continue          # the tail of a garbled token already refused
+        end = m.end()
+        if end + 1 < len(s) and s[end] == "." and s[end + 1] in "-+0123456789":
+            # Refuse the WHOLE token, not just its head. "0.-51" means -0.51, so
+            # keeping the -51 would invent a reading a hundred times off - worse
+            # than the 0.0 the missing guard used to produce, because it looks
+            # plausible.
+            tail = _NUM.search(s, end + 1)
+            skip_to = tail.end() if tail else end + 1
+            continue
+        val = _finite(float(m.group(0)))
+        if val is not None:
+            out.append(val)
+    return out
 
 
 def first_val(*vals):
@@ -80,9 +123,27 @@ def parse_kv(text):
 _WORD_START = "(?<![a-z0-9])"
 
 
-def find(kv, *needles):
-    """Value of the first key in which every needle starts a word (lowercase)."""
+def find(kv, *needles, **kw):
+    """Value of the first key in which every needle starts a word (lowercase).
+
+    `exclude` names words that must NOT appear in the key. Label-fuzziness is
+    this module's advertised contract - it is what lets these parsers meet a
+    firmware nobody has seen - so `find` stays deliberately loose. But a
+    qualifier can invert the meaning of the answer rather than merely widen it,
+    and those the caller must rule out.
+
+    The case that showed it: `find(kv, "pack", "temp")` reaches for the sensor
+    list `Pack Temps`. Remove that line, as another firmware might, and the same
+    call matches `Lowest Present Pack Temp` - reporting the pack's LOWEST sensor
+    as its MAXIMUM, on the metric that grades a hot pack. The error ran in the
+    unsafe direction, and the trigger was exactly the other-bike case this
+    fuzziness exists to tolerate.
+    """
+    exclude = tuple(kw.pop("exclude", ()) or ())
+    assert not kw, "unexpected kwargs: %s" % sorted(kw)
     for k, v in kv.items():
+        if any(re.search(_WORD_START + re.escape(x), k) for x in exclude):
+            continue
         if all(re.search(_WORD_START + re.escape(n), k) for n in needles):
             return v
     return None
@@ -166,10 +227,14 @@ def _cell_index(text, needle):
 def parse_bms(text):
     """Normalize `bms` output. All fields optional."""
     kv = parse_kv(text)
-    def g(*n):
-        return find(kv, *n)
+    def g(*n, **kw):
+        return find(kv, *n, **kw)
     # only the real-sensor pack temps, not the -100C unused-sensor placeholders
-    temps = real_temps(all_nums(g("pack", "temp")))
+    # `Pack Temps` is the sensor LIST. A superlative in the label means the
+    # bike is answering a different question - `Lowest Present Pack Temp` is one
+    # number, and taking max() of it reports the coldest sensor as the hottest.
+    temps = real_temps(all_nums(
+        g("pack", "temp", exclude=("lowest", "highest", "min", "max", "age"))))
     cap_raw = first_val(g("capacity"), g("pack", "capacity"))
     caps = all_nums(cap_raw)
     # rev 41 gives the remaining charge its OWN label ("Pack Capacity Remaining
@@ -218,8 +283,8 @@ def parse_bms(text):
 def parse_stats(text):
     """Normalize `stats` output. All fields optional."""
     kv = parse_kv(text)
-    def g(*n):
-        return find(kv, *n)
+    def g(*n, **kw):
+        return find(kv, *n, **kw)
     motor_rev, km = parse_odometer(text)
     return {
         "fw_rev": g("firmware", "rev"),
@@ -250,8 +315,8 @@ def warning_lines(text):
 def parse_status(text):
     """Normalize `status` output. All fields optional."""
     kv = parse_kv(text)
-    def g(*n):
-        return find(kv, *n)
+    def g(*n, **kw):
+        return find(kv, *n, **kw)
     cap_raw = g("capacity")
     caps = all_nums(cap_raw)
     return {
@@ -408,8 +473,23 @@ _CONSOLE_REFUSAL_RE = re.compile(
     r"is an invalid command|invalid command\b|type \"help\" for a list", re.I)
 
 
+# OpenMBB's own marker, written by the transport when a read ended with no
+# console prompt. It is not the bike's words, and a reply consisting only of it
+# carries no records at all.
+_OWN_TRUNCATION_RE = re.compile(r"^#{2,}\s*TRUNCATED", re.I | re.M)
+
+
 def is_console_refusal(text):
-    """True if a captured reply is the console declining, not answering.
+    """True if a captured reply carries no command output to read.
+
+    Two shapes qualify. The console DECLINING - "Sorry, 'dumplogs' is an invalid
+    command" - and OpenMBB's own "### TRUNCATED" banner standing alone, which
+    means a read produced a marker and nothing else.
+
+    A genuinely truncated log is a different thing and stays readable: on real
+    firmware a dump ending without a prompt is the NORMAL exit, and those replies
+    carry a megabyte of records above the banner. Only a reply that is nothing
+    BUT the banner is refused, which is why the size test comes first.
 
     Checked against the whole reply rather than the first line, because the
     header the capture writes sits above it.
@@ -417,7 +497,8 @@ def is_console_refusal(text):
     body = (text or "").strip()
     if not body or len(body) > 400:      # a real log is orders of magnitude bigger
         return False
-    return bool(_CONSOLE_REFUSAL_RE.search(body))
+    return bool(_CONSOLE_REFUSAL_RE.search(body)
+                or _OWN_TRUNCATION_RE.search(body))
 
 
 def event_log_text(session, commands=("eventlogdump", "dumplogs")):
@@ -672,8 +753,18 @@ def parse_obd(text):
     for line in (text or "").splitlines():
         low = line.lower()
         if "mil on" in low:
-            out["mil_on"] = bool(num(line.split("MIL On")[-1] if "MIL On" in line
-                                     else line.partition("mil on")[2]))
+            # Detected case-insensitively and, until this was measured, EXTRACTED
+            # case-sensitively - so "MIL ON : 1" fell past the exact-case branch,
+            # partitioned the UN-lowered line on a lowercase needle, found
+            # nothing, and bool(None) collapsed to a definite False. The warning
+            # lamp read OFF on a line that said it was ON, which is precisely the
+            # failure this function's docstring claims fault codes are immune to.
+            #
+            # None now means "the line was there and its value could not be
+            # read". That is a different thing from False and must stay so: a
+            # check that could not run may never read as a pass.
+            val = num(low.partition("mil on")[2])
+            out["mil_on"] = None if val is None else bool(val)
         elif "active dtc" in low:
             out["active_dtcs"] = num(line.rsplit(None, 1)[-1])
         elif "pending dtc" in low:
