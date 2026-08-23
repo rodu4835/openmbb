@@ -72,21 +72,19 @@ MUTATIONS = [
      "    pass",
      "tests/test_cli_selftest.py::test_the_selftest_exercises_the_gate_that_broke_it"),
 
-    # Two edits: lift the call out from before the wire and put it back after
-    # port.write(). The test drives a port whose write() raises, so this measures
-    # the ORDER of the record rather than its mere presence - deleting the call
-    # would prove only that the test notices it missing.
+    # A real move, not a deletion: the test drives a port whose write() raises,
+    # so this measures the ORDER of the record rather than its mere presence.
+    # Deleting the call would prove only that the test notices it missing.
     ("consent: journal it after the wire instead of before",
      "src/openmbb/transport.py",
-     ('''        if head in HEAVY_COMMANDS:
-            self.logger.journal_consent(cmd, heavy_consent)
-
-        with self.lock:''',
-      "            self.port.write(wire)"),
-     ("        with self.lock:",
-      '''            self.port.write(wire)
+     '''            if head in HEAVY_COMMANDS:
+                self.logger.journal_consent(cmd, heavy_consent)
+            self.logger.raw("TX", wire)     # logger masks any registered secrets
+            self.port.write(wire)''',
+     '''            self.logger.raw("TX", wire)     # logger masks any registered secrets
+            self.port.write(wire)
             if head in HEAVY_COMMANDS:
-                self.logger.journal_consent(cmd, heavy_consent)'''),
+                self.logger.journal_consent(cmd, heavy_consent)''',
      "tests/test_cli_selftest.py::test_the_consent_is_recorded_before_the_first_byte"),
 
     ("consent: journal it before the gate, so a refusal leaves a record",
@@ -109,10 +107,10 @@ MUTATIONS = [
 
     ("consent: journal every command, burying the two that matter",
      "src/openmbb/transport.py",
-     '''        if head in HEAVY_COMMANDS:
-            self.logger.journal_consent(cmd, heavy_consent)''',
-     '''        if True:
-            self.logger.journal_consent(cmd, heavy_consent)''',
+     '''            if head in HEAVY_COMMANDS:
+                self.logger.journal_consent(cmd, heavy_consent)''',
+     '''            if True:
+                self.logger.journal_consent(cmd, heavy_consent)''',
      "tests/test_cli_selftest.py::test_an_ordinary_read_is_not_journalled"),
 
     # a199424 - the capture format stamp, and three ways of vouching blind

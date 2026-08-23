@@ -344,13 +344,6 @@ class Transport:
         head = (str(cmd).strip().split() or [""])[0].lower()
         is_dump = head in LONG_COMMANDS
 
-        # BEFORE the first byte, so a capture that ends in a contactor trip - or
-        # in a port that dies mid-read - still carries the record of who agreed
-        # to the read. Journalling it after the response would lose exactly the
-        # cases the record exists for. Same order as journal_write's PENDING.
-        if head in HEAVY_COMMANDS:
-            self.logger.journal_consent(cmd, heavy_consent)
-
         with self.lock:
             if self.last_truncated:
                 self.last_truncated = False
@@ -359,6 +352,18 @@ class Transport:
             # the guard above proved cmd is 7-bit ASCII, so encode strictly (no
             # lossy 'replace' that could put '?' bytes on the wire)
             wire = cmd.encode("ascii") + NEWLINE
+            # BEFORE the first byte, so a capture that ends in a contactor trip -
+            # or in a port that dies mid-read - still carries the record of who
+            # agreed to the read. Journalling it after the response would lose
+            # exactly the cases the record exists for.
+            #
+            # It sits here rather than above the lock because the drain and
+            # _resync only READ: nothing has gone out yet, so the promise holds,
+            # and this is in fact tighter. A file write ahead of the 0.3 s
+            # pre-write drain was enough to make a truncation test fail on a
+            # loaded CI runner while passing 12/12 locally.
+            if head in HEAVY_COMMANDS:
+                self.logger.journal_consent(cmd, heavy_consent)
             self.logger.raw("TX", wire)     # logger masks any registered secrets
             self.port.write(wire)
             buf = b""
