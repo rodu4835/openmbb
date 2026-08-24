@@ -3159,3 +3159,29 @@ def test_a_backup_that_no_longer_parses_does_not_count(app, tmp_path):
     app._write_value("spfront", "20")
     app.update()
     assert sent == []
+
+
+def test_the_share_safe_export_says_why_it_refused(app, monkeypatch, tmp_path):
+    """redact_session's refusals are ValueError; the handler caught only
+    RuntimeError and OSError, so the refusal escaped to sys.stderr - which in
+    the frozen windowed build goes nowhere at all. The menu item appeared to do
+    nothing: no bundle, no dialog, no explanation.
+
+    This is the export path, so a silent failure is the worst shape available:
+    somebody who believes a share-safe copy was written may go looking for one
+    and share the ORIGINAL capture instead.
+    """
+    import tkinter.filedialog as fd
+
+    src = tmp_path / "not-a-capture"
+    src.mkdir()
+    (src / "holiday.txt").write_text("nothing to do with a motorcycle\n",
+                                     encoding="utf-8")
+    monkeypatch.setattr(fd, "askdirectory", lambda *a, **k: str(src))
+
+    app._errors.clear()
+    app._export_share_safe()
+
+    assert app._errors, "the export refused without saying anything"
+    assert "does not look like an OpenMBB capture" in str(app._errors[-1])
+    assert not (tmp_path / "not-a-capture-shared").exists()

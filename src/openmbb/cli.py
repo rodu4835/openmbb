@@ -298,6 +298,15 @@ def cmd_redact(args):
         print("%s already exists — pass --overwrite to replace it" % dst,
               file=sys.stderr)
         return 2
+    except ValueError as e:
+        # The three refusals that say "I will not do this with these arguments":
+        # exporting into the capture itself, naming the export after an
+        # identifier, and a source folder that is not a capture. Exit 2 is this
+        # file's "I cannot do this"; exit 1 below means the DATA was bad, which
+        # is a different thing to tell a script. Without this branch the refusal
+        # left as a raw traceback.
+        print("%s" % e, file=sys.stderr)
+        return 2
     except RuntimeError as e:                      # verification failed
         print("%s" % e, file=sys.stderr)
         return 1

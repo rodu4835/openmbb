@@ -188,9 +188,15 @@ class SessionLogger:
         look. Masked like everything else on disk, because the consent string is
         free text and a session secret could be echoed into it.
         """
+        # BOTH halves are masked. A heavy read can carry arguments - the raw
+        # box supports `eventlogdump 5` - so the command is as capable of
+        # holding a registered secret as the consent sentence is, and the same
+        # bytes are already masked in session_raw.log. This file is copied
+        # verbatim into share-safe bundles, where a password is not a PII shape
+        # and so is not caught on the way out either.
         line = "%s | %s | HEAVY READ CONSENTED | %s\n" % (
             _dt.datetime.now().isoformat(timespec="seconds"),
-            cmd, self._mask(str(consent).strip()))
+            self._mask(str(cmd).strip()), self._mask(str(consent).strip()))
         with self._lock, open(self.journal_path, "a", encoding="utf-8") as f:
             f.write(line)
 

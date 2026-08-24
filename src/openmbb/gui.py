@@ -1350,6 +1350,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     "an identifier the exporter does not recognise means the "
                     "redaction rules need widening before anything is shared." % e)
                 return
+            except ValueError as e:
+                # A refusal about the REQUEST rather than the data: the chosen
+                # source is not a capture, or the destination would sit inside
+                # the capture or carry an identifier in its name. Uncaught, this
+                # reached sys.stderr - which in the frozen windowed build goes
+                # nowhere, so the menu item appeared to do nothing at all.
+                messagebox.showerror(
+                    APP_NAME, "Nothing was written.\n\n%s" % e)
+                return
             except OSError as e:
                 messagebox.showerror(APP_NAME, "Could not write the copy:\n\n%s" % e)
                 return

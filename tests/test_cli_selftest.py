@@ -130,3 +130,21 @@ def test_an_ordinary_read_is_not_journalled(tmp_path):
     tr = _transport(tmp_path)
     tr.exec_command("bms")
     assert _journal(tr) == ""
+
+
+def test_the_consent_record_masks_the_command_not_only_the_consent(tmp_path):
+    """A heavy read can carry arguments - the raw box supports `eventlogdump 5`
+    - so the command is as able to hold a registered secret as the consent
+    sentence is. It was written in the clear while the identical bytes were
+    masked in session_raw.log, and redact copies this journal into "verified
+    clean" bundles, where a password is not a PII shape and is not caught.
+    """
+    tr = _transport(tmp_path, DeadPort())
+    tr.logger.add_redaction("tpsreport")
+    with pytest.raises(OSError):
+        tr.exec_command("eventlogdump tpsreport",
+                        heavy_consent="owner agreed, bike parked")
+    text = _journal(tr)
+    assert "HEAVY READ CONSENTED" in text
+    assert "tpsreport" not in text
+    assert "****" in text

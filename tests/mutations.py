@@ -16,7 +16,11 @@ WHAT AN ENTRY IS
     (label, path, old, new, test)
 
 `old` is replaced by `new` in `path` (repo-relative), `test` is then run, and it
-MUST FAIL. Both may be tuples of equal length when re-creating the defect takes
+MUST FAIL - specifically with pytest exit 1, meaning tests ran and failed. Any
+other exit (a renamed test id, a collection error) means the check DID NOT RUN,
+which is reported as ERROR rather than counted as a catch. Every named test is
+also run on the clean tree first and must pass there, since a test that was
+already failing would otherwise be indistinguishable from a perfect catch. Both may be tuples of equal length when re-creating the defect takes
 more than one edit - moving a call from before a write to after it, say, which is
 the difference between testing that a record EXISTS and testing that it is
 written in time to survive the failure it exists for. Anything else is reported: a test that stays green under its own
@@ -208,19 +212,79 @@ MUTATIONS = [
      "    if _saw_text and not _saw_capture:",
      "    if not _saw_capture:",
      "tests/test_redact.py::test_an_empty_folder_keeps_its_own_sharper_refusal"),
+
+    # a646b7c + the v0.24.1 bundle - the sharing path's refusals
+    ("redact/cli: stop catching the refusal, so it escapes as a traceback",
+     "src/openmbb/cli.py",
+     '''    except ValueError as e:''',
+     '''    except ZeroDivisionError as e:''',
+     "tests/test_redact.py::test_cli_redact_refuses_a_non_capture_with_a_message_not_a_traceback"),
+
+    ("redact/gui: stop catching the refusal, so the export silently does nothing",
+     "src/openmbb/gui.py",
+     '''            except ValueError as e:
+                # A refusal about the REQUEST rather than the data: the chosen''',
+     '''            except ZeroDivisionError as e:
+                # A refusal about the REQUEST rather than the data: the chosen''',
+     "tests/test_gui_flow.py::test_the_share_safe_export_says_why_it_refused"),
+
+    ("consent: stop masking the command, only the consent sentence",
+     "src/openmbb/transport.py",
+     "            self._mask(str(cmd).strip()), self._mask(str(consent).strip()))",
+     "            str(cmd).strip(), self._mask(str(consent).strip()))",
+     "tests/test_cli_selftest.py::test_the_consent_record_masks_the_command_not_only_the_consent"),
 ]
 
 
 # --- the runner --------------------------------------------------------------
 
+#: How each file was actually written, so a restore puts it back the same way.
+_NEWLINES = {}
+
+#: pytest's exit codes, named. 0 = all passed, 1 = tests ran and some failed.
+#: Everything else (2 interrupted, 3 internal error, 4 usage/"no tests ran",
+#: 5 none collected) means the check DID NOT RUN, which is never an outcome.
+_PYTEST_PASSED = 0
+_PYTEST_FAILED = 1
+
+
 def _read(rel):
+    """The file with LF endings, remembering the endings it arrived with.
+
+    Anchors in the manifest are written LF, so matching happens in LF. But a
+    restore that forced CRLF back onto a file that arrived LF would leave a
+    dirty tree on any LF checkout - this is a public repo whose CI runs Linux -
+    and a dirty tree is precisely the recovery the guard at the top promises.
+    """
     with open(os.path.join(REPO, rel), encoding="utf-8", newline="") as f:
-        return f.read().replace(CRLF, LF)
+        raw = f.read()
+    _NEWLINES[rel] = CRLF if CRLF in raw else LF
+    return raw.replace(CRLF, LF)
 
 
 def _write(rel, text):
+    nl = _NEWLINES.get(rel, LF)
     with open(os.path.join(REPO, rel), "w", encoding="utf-8", newline="") as f:
-        f.write(text.replace(LF, CRLF))
+        f.write(text if nl == LF else text.replace(LF, nl))
+
+
+def _edits(label, old, new):
+    """The (old, new) pairs for one entry, validated before anything is written.
+
+    zip() is silent about a mismatch: unequal tuples truncate to the shorter one
+    and apply HALF a mutation, and a tuple paired with a string zips edits
+    against single characters. Either produces a run that reports confidently on
+    something other than what the entry describes.
+    """
+    if isinstance(old, tuple) != isinstance(new, tuple):
+        raise ValueError(
+            "%s: old and new must both be tuples, or neither" % label)
+    if isinstance(old, tuple):
+        if len(old) != len(new):
+            raise ValueError("%s: %d anchor(s) but %d replacement(s)"
+                             % (label, len(old), len(new)))
+        return list(zip(old, new))
+    return [(old, new)]
 
 
 def _tree_is_clean():
@@ -253,12 +317,45 @@ def main(argv):
     for _l, path, _o, _n, _t in picked:
         originals.setdefault(path, _read(path))
 
-    caught, missed, broken = 0, [], []
+    # Validate every entry BEFORE touching a file, so a malformed manifest
+    # cannot leave a half-applied mutation behind.
     try:
-        for label, path, old, new, test in picked:
+        plan = [(label, path, _edits(label, old, new), test)
+                for label, path, old, new, test in picked]
+    except ValueError as e:
+        print("malformed manifest entry: %s" % e)
+        return 2
+
+    # Every named test must PASS on the clean tree first. An entry whose test is
+    # misspelled, renamed, or already failing is otherwise indistinguishable
+    # from a perfect catch - and "the check could not run" must never read as
+    # one, least of all here.
+    ids = sorted({test for _l, _p, _e, test in plan})
+    print("prechecking %d test id(s) on the clean tree..." % len(ids))
+    unrunnable = {}
+    for test in ids:
+        r = subprocess.run(
+            [sys.executable, "-m", "pytest", test, "-q", "--no-header"],
+            cwd=REPO, capture_output=True, text=True, timeout=1800)
+        if r.returncode != _PYTEST_PASSED:
+            why = ("no such test (pytest exit 4)" if r.returncode == 4
+                   else "already failing" if r.returncode == _PYTEST_FAILED
+                   else "pytest exit %d" % r.returncode)
+            unrunnable[test] = why
+            print("  UNRUNNABLE  %s  (%s)" % (test, why))
+    if unrunnable:
+        print("")
+        print("%d test id(s) cannot serve as evidence; fix or re-anchor them "
+              "before trusting any result below." % len(unrunnable))
+
+    caught, missed, broken, errored = 0, [], [], []
+    try:
+        for label, path, edits, test in plan:
+            if test in unrunnable:
+                errored.append((label, unrunnable[test]))
+                print("ERROR     %s" % label)
+                continue
             src = originals[path]
-            edits = (list(zip(old, new)) if isinstance(old, tuple)
-                     else [(old, new)])
             stale = None
             mutated = src
             for o, nw in edits:
@@ -281,30 +378,41 @@ def main(argv):
                     cwd=REPO, capture_output=True, text=True, timeout=1800)
             finally:
                 _write(path, originals[path])
-            if r.returncode != 0:
+            if r.returncode == _PYTEST_FAILED:
                 caught += 1
                 print("CAUGHT    %s" % label)
-            else:
+            elif r.returncode == _PYTEST_PASSED:
                 missed.append(label)
                 print("MISSED !  %s" % label)
                 print("          %s stayed green under its own mutation" % test)
+            else:
+                # Collection error, interrupt, usage error: the test did not
+                # run, so nothing was demonstrated either way.
+                errored.append((label, "pytest exit %d under mutation"
+                                % r.returncode))
+                print("ERROR     %s  (pytest exit %d)" % (label, r.returncode))
     finally:
         for path, text in originals.items():
             _write(path, text)
 
     print("")
-    print("%d/%d caught" % (caught, len(picked)))
+    print("%d/%d caught" % (caught, len(plan)))
     if broken:
         print("%d stale entr%s (the code moved; re-anchor or delete):"
               % (len(broken), "y" if len(broken) == 1 else "ies"))
         for label, why in broken:
+            print("  - %s (%s)" % (label, why))
+    if errored:
+        print("%d entr%s proved nothing (the test did not run):"
+              % (len(errored), "y" if len(errored) == 1 else "ies"))
+        for label, why in errored:
             print("  - %s (%s)" % (label, why))
     if missed:
         print("%d test%s did not notice its own fix being removed:"
               % (len(missed), "" if len(missed) == 1 else "s"))
         for label in missed:
             print("  - %s" % label)
-    return 0 if (caught == len(picked) and not broken) else 1
+    return 0 if (caught == len(plan) and not broken and not errored) else 1
 
 
 if __name__ == "__main__":

@@ -236,3 +236,27 @@ def test_a_listen_capture_can_still_be_shared(tmp_path):
     assert rep["identifiers_replaced"] == 1
     out = (tmp_path / "bundle" / "session_raw.log").read_text(encoding="utf-8")
     assert _VIN not in out
+
+
+def test_cli_redact_refuses_a_non_capture_with_a_message_not_a_traceback(tmp_path):
+    """redact_session's refusals are ValueError, and cmd_redact caught only
+    FileExistsError and RuntimeError - so a wrong source folder killed the
+    command with a raw Python traceback.
+
+    Exit 2, not 1: this command uses 1 for "verification failed", which says the
+    DATA was bad. A refused REQUEST is a different thing to tell a script.
+    """
+    import subprocess
+    import sys
+    src = tmp_path / "not-a-capture"
+    src.mkdir()
+    (src / "holiday.txt").write_text("nothing to do with a motorcycle\n",
+                                     encoding="utf-8")
+    r = subprocess.run(
+        [sys.executable, "-m", "openmbb.cli", "redact", str(src),
+         "--out", str(tmp_path / "bundle")],
+        capture_output=True, text=True, timeout=300)
+    assert r.returncode == 2, (r.returncode, r.stderr[-500:])
+    assert "Traceback" not in r.stderr
+    assert "does not look like an OpenMBB capture" in r.stderr
+    assert not (tmp_path / "bundle").exists()
