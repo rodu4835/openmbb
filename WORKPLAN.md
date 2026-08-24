@@ -11,10 +11,14 @@ current: what to do next, what needs a motorcycle, and what was deliberately not
 Opus sessions. Queue items below are scaffolded for direct pickup — files, the change,
 the tests, and the mutation each test must catch.
 
-**State:** v0.23.1 released; **11 commits of user-visible work unreleased since** —
-including two live-defect fixes users should have. Suite 562 passed (~8 min), CI green
-both OSes. Three real captures, one bike, newest capture 2026-08-19 — which predates
-v0.23.0, so **no v0.23.x build has ever touched real hardware**.
+**State:** v0.24.0 released 2026-08-23 (tag `12f0b65`, public, three assets). One
+commit local and unpushed (`a646b7c`, the listen-capture fix) pending the v0.24.1
+bundle below. Suite 588 passed (~8 min); the skip count flickers 0–2 run to run —
+that is item 8, now with direct evidence. 18 mutation entries, 18/18 caught. Three
+real captures, one bike, newest 2026-08-19 — **no v0.23.x-or-later build has ever
+touched real hardware**. The whole sprint was adversarially reviewed on 2026-08-24
+(four lenses, 21 findings: 4 fix-now, 8 filed, 9 clean); everything below reflects
+that review.
 
 **The organising constraint, sharpened:** only one motorcycle has ever been measured, and
 the code has now largely caught up with what one bike's data can teach. The next unit of
@@ -37,7 +41,7 @@ was journalled nowhere. `SessionLogger.journal_consent` now writes it, before th
 wire, masked. That was load-bearing for *At a bike* step A.2, which asks you to
 confirm the consent string reached the journal; it would have failed there.
 
-### 2. ~~Capture-format stamp~~ — **shipped** (this commit)
+### 2. ~~Capture-format stamp~~ — **shipped** (`a199424`, listen fix `a646b7c`)
 
 `capture_format: 1` is line 2 of every new `session_meta.txt`; `CAPTURE_FORMAT`
 and `capture_format()` live in `sessions.py` with the six bump triggers written
@@ -71,17 +75,59 @@ script driving `--fail-on-alert`, exit 0 means "all good".
   (append a second stamp block, or refuse, or leave it) wants a decision about
   what one folder holding two pulls *is*, and nothing forces that answer yet.
 
-### 3. Cut the release — v0.24.0
+### 3. ~~Cut the release — v0.24.0~~ — **shipped** (tag `12f0b65`, public)
 
-Ready now — items 1 and 2 are in. In it: the restored pre-bike-day selftest and
-the consent record (`8fa44c4`), the capture-format stamp and the two vouching
-refusals, the fault counts anchored to real log entries and clearings no
-longer dating faults (`da499fb`), the unmeasured-stretch disclosure and baseline-sort
-fix (`d49fa37`), the write-chain and contactor gates in code (`7479947`), the version
-age stamp and `## Privacy` (`56ae56f`), the parser tolerance work (`e734f23`,
-`99b2c07`), fixtures (`ea9ac5c`), find/limits (`ac04b2d`), health/distance (`1028fc3`),
-sentinel/BattTemp (`f4a6e84`), module-connect refusal (`e888f5f`). Same sequence as
-v0.23.x: push → CI green → tag → verify assets.
+Tagged after CI went green on both OSes; three assets verified on the release.
+CI earned its keep on the way: the first attempt failed a timing-critical
+truncation test because the consent journal's file I/O sat ahead of the 0.3 s
+pre-write drain — passed 12/12 locally on a fast machine, failed on a loaded
+runner. The record moved inside the lock, immediately before `port.write()`
+(`bef9984`), which is *tighter* than the promise required.
+
+### 3a. v0.24.1 — the sharing path, hardened ← **NEXT, then push everything**
+
+The post-release review found two defects in the public binary and two in the
+mutation runner. All four are small; land them as one bundle, then push
+(`a646b7c` is already local), bump, tag v0.24.1 after CI.
+
+**(a) `redact`'s refusal escapes as a traceback (CLI) and as silence (GUI).**
+The not-a-capture guard raises `ValueError`; `cli.py:297-303` catches only
+`FileExistsError`/`RuntimeError` (raw traceback), `gui.py:1346-1355` only
+`RuntimeError`/`OSError` — in a frozen windowed build the menu item *does
+nothing at all*. Honest history: the two pre-sprint `ValueError` refusals
+(export-into-self, identifier-in-name) had the same hole; the sprint widened
+the trigger from pathological destinations to any wrong source folder.
+- Fix: catch `ValueError` at both sites — CLI exit 2 with the message, GUI
+  `showerror` with it. Tests: CLI on a non-capture folder → exit 2, stderr
+  carries "does not look like an OpenMBB capture", no traceback; GUI handler
+  under the existing messagebox-interception pattern. Mutations: drop each
+  new catch → its test fails.
+
+**(b) `journal_consent` masks the consent text but not the command.** The
+commit claimed "masked like everything else on disk"; an arg-carrying heavy
+command (`eventlogdump 5` is an anticipated raw-box shape) holding a
+registered secret reaches `writes_journal.txt` in the clear — and `redact`
+copies that journal into "verified clean" bundles, since a password is not a
+PII shape. Reproduced by the review.
+- Fix: `self._mask(str(cmd).strip())` in `journal_consent`. Test: register a
+  redaction, run a heavy command carrying it, assert `****` in the journal.
+  Mutation: drop the mask (manifest entry exists for the consent side —
+  extend it).
+
+**(c) The mutation runner counts ANY nonzero pytest exit as CAUGHT.** A
+misspelled or later-renamed test id ("no tests ran", exit 4) reads as a
+perfect catch — "a check that could not run must never read as a pass",
+violated inside the tool that enforces it. Reproduced.
+- Fix: precheck each entry on the clean tree (named test must PASS, exit 0,
+  else report ERROR not CAUGHT); after mutating, CAUGHT requires exit 1
+  specifically (tests ran and failed); anything else is ERROR. Self-check:
+  an entry naming a nonexistent test must report ERROR.
+
+**(d) Runner hardening, same commit:** validate multi-edit entries at load
+(both tuples, equal length — `zip` currently truncates or pairs characters);
+preserve each file's original newline style on restore (unconditional
+LF→CRLF dirties an LF checkout — this is a public repo with the whole
+platform matrix in CI).
 
 ### 4. ~~Encode the mutation-check discipline as a repo artifact~~ — **shipped**
 
@@ -106,23 +152,52 @@ and are NOT transcribed on faith — an entry nobody has watched fail is worth l
 than no entry, so they get added as they are re-established. That backfill is
 incremental and needs no ceremony.
 
-### 5. The report/GUI mirror — stop composing the same fact twice
+### 5. The report/GUI mirror — scaffolded, ready to implement
 
-Structure lens, ranked first for will-bite: the GUI Condition tab hand-composes ~15 of
-the same facts `report.py`'s `_*_lines` renderers compose independently
-(`format_report`'s own docstring: *"Mirrors what the Analyze tab shows"*). One latent
-divergence already exists (the taper caveat wording), and one past drift of this class
-was already fixed by sharing composition (`fault_span`/`fault_detail`). The old plan's
-claim that "the saved page and the Analyze tab cannot drift" oversold — the sharing that
-exists is page↔CLI; the tab is a separate hand-maintained surface.
+**The mirror, measured (2026-08-24):** 14 facts are composed on both surfaces
+(`report._condition_lines`/`_charging_lines`/`_consumption_lines` vs
+`gui._render_condition`). Two are genuinely shared already (`fault_span`,
+`fault_detail`, `module_failure_note` — the model to extend). The rest are
+duplicated, and the two that bite are not the numbers but the **predicates**
+and the **caveats**:
 
-- **Change:** extend the `fault_span` pattern — small shared composers in `condition.py`
-  / `report.py` that both surfaces call, starting with the facts that carry caveats
-  (taper, range extrapolation, coverage limit), since a drifted caveat is a broken
-  promise, not a cosmetic mismatch. Not a refactor of either surface; composition only.
-- **Test:** for each shared fact, one test asserting the tab row text and the report
-  line derive from the same composer output. **Mutation:** inline one composition back
-  into `gui.py` → fails.
+- **Confirmed semantic divergence — the taper caveat.** The report prints it
+  *conditionally* (`if not ch.get("taper_resolvable")`, report.py ~565), so a
+  log that ever resolved a taper would silence it correctly. The GUI prints it
+  *unconditionally* beside charge current. `taper_resolvable` is hardcoded
+  False today (condition.py:376), so both are currently truthful — the
+  divergence is latent and bites the day `assess` learns to see a taper.
+- **Duplicated predicate — the cell-floor row.** `floor and (not sag or
+  floor["source"] != "riding samples")` appears verbatim on both sides. Change
+  one and the surfaces disagree about *which rows exist*, not just wording.
+- **The UNMEASURED sentence is pinned on one side only.** The coverage-limit
+  mutation test asserts on report text; the tab's copy of the project's
+  highest-stakes sentence has no test and can drift or vanish unnoticed.
+
+**The design — composers, not a renderer.** The surfaces legitimately differ
+in shape (prose lines vs label/finding/tag rows); unifying layout is not the
+goal and would fight both. What must be single-sourced is the *decision* and
+the *sentence*. Add small pure functions in `condition.py` (no imports of
+report/gui), each returning `None` when the fact should not appear:
+
+1. `taper_note(ch)` → str|None — kills the confirmed divergence first.
+2. `coverage_note(cov)` → str|None carrying the UNMEASURED sentence; surfaces
+   do their own wrapping. Move the existing mutation test onto the composer so
+   it covers both surfaces at once.
+3. `show_cell_floor(a)` → bool — the duplicated predicate, moved once.
+4. `capacity_caveat()`, `range_caveat(rng)`, `full_hold_note(ch)` — the three
+   remaining load-bearing sentences ("index, not capacity", "upper bound on
+   what the gauge implies", "time at full ages a pack").
+
+Then the test that keeps it fixed: **one structural cross-surface test** that
+runs `assess()` on a synthetic log, renders both surfaces headlessly, and
+asserts the *set of facts shown* matches a single expected list. That is the
+test that catches "row exists on one surface only" forever.
+
+**Mutations:** inline any one composition back into a single surface → the
+cross-surface test fails; flip `taper_resolvable` handling on one side → the
+taper test fails. **Not in scope:** unifying number formatting (cosmetic;
+unify opportunistically), redesigning either surface. ~half a day.
 
 ### 6. Parse `sevcon` — a controller fault must surface in an inspection verdict
 
@@ -146,20 +221,30 @@ the transport*, and the truncation/`_resync` paths are unreachable in the sim by
 construction (`SimPort._respond` always appends a prompt). Clamping port, no-prompt dump
 port, paced port (3,840 B/s); transcript + normalised-folder goldens.
 
-### 8. Test-estate hygiene — the skips are lying, mildly
+### 8. Test-estate hygiene — the skips are lying *(promoted: now observed directly)*
 
-The suite's "skipped" tally is not the benign no-display skip it claims: on a machine
-*with* a display, a floating subset of GUI tests (varying run to run) skips with "no
-display available for Tk" because `build_gui` intermittently throws `TclError` after
-many app builds and the fixture mislabels every `TclError` as no-display. Green that
-means less than it appears — this project's least favourite kind.
+No longer a hypothesis from the review: across four consecutive full runs on
+the same machine the skip count went **1, 0, 1, 2** — same tests, same
+hardware. `build_gui` intermittently throws `TclError` after many app builds
+and the fixture mislabels every `TclError` as "no display available", so a
+floating subset of GUI coverage silently doesn't run, on every runner,
+varying run to run.
 
-- **Change:** the fixture distinguishes "Tk genuinely unavailable" (skip, honestly
-  labelled) from "TclError on the Nth build" (fail, or retry-once-then-fail); plus a
-  session-end check that on a display-bearing machine, zero tests skipped for display
-  reasons. Note for scheduling, not action: `test_gui_flow.py` is 72% of suite runtime
-  (336 s of 464) at 2.05 s/test — structural (real 0.1 s drains per command even on
-  SimPort), tolerable, documented here so nobody rediscovers it.
+- **Change:** the fixture distinguishes "Tk genuinely unavailable" (skip,
+  honestly labelled) from "TclError on the Nth build" (fail, or retry once
+  then fail); plus a session-end check that a display-bearing machine had
+  zero display-reason skips.
+- **Also in scope — the truncation margin, now quantified:** the review
+  measured `test_truncated_read_marks_incomplete`'s total remaining tolerance
+  at **~80–100 ms**; any single scheduler stall inside the drain window
+  steals the first chunk. `bef9984` removed the added I/O but not the
+  structural race (TimedPort's clock starts at construction). Wants the
+  port's clock to start at the first `read()` call, or the drain window
+  shortened for the test — either kills the flake class without touching
+  shipping code.
+- Note for scheduling: `test_gui_flow.py` is 72% of suite runtime (336 s of
+  464 s) at 2.05 s/test — structural, tolerable, documented so nobody
+  rediscovers it.
 
 ### 9. Journal a write at the transport, not only in the GUI
 
@@ -178,6 +263,47 @@ explicitly walking through the GUI's write flow, not `write_setting`'s contract.
   (where `journal_consent` now sits), and have `gui.py` stop doing it itself so
   one write cannot produce two records. **Mutation:** journal only in the GUI →
   a headless-write test finds an empty journal.
+
+### 10. One decoder for everything that reads a capture
+
+The sprint gave `redact` a BOM-aware decoder and the loaders none, so the two
+halves of the tool now disagree about what they can read (review, reproduced):
+a UTF-16 `session_meta.txt` whose stamp says `capture_format: 2` is read as
+**absent** → format 1 — a key present but invisible, the exact false pass the
+stamp exists to prevent; and a UTF-16 capture `redact` now recognizes as
+first-class yields **zero commands** in `analyze`, because `_header_command`
+decodes UTF-8 only.
+- **Change:** one shared BOM-sniffing read helper in `sessions.py`, used by
+  `_header_command`, `_header_time`, `_session_date`, `capture_format`, and
+  the baseline read. `redact._decode_text` is the model. Mutation: force the
+  helper back to UTF-8-only → a UTF-16 fixture capture loses its commands.
+
+### 11. A refused capture must be visible everywhere it is absent
+
+Three surfaces now silently omit what they cannot read: `library.scan` (filed
+under item 2), and both Charts trend loaders (`gui.py:5360`, `gui.py:5446` —
+`except Exception: pass`), which present "pack over time" with an undisclosed
+hole. The review reproduced it: one format-1 and one format-2 capture in the
+root → one trend row, zero user-visible anything. (The sprint commit's claim
+that GUI external-folder sites "already wrap it with a message box" was
+overstated — the dialogs do, the loops don't.)
+- **Change:** catch `CaptureFormatError` distinctly in all three loops, count
+  it, and surface one line ("1 capture not shown — written by a newer
+  OpenMBB"). Reachable only via future-format or damaged meta today, which is
+  why it is filed rather than in the v0.24.1 bundle.
+
+### 12. Sessions that never get a meta file never state their format
+
+The stamp writer lives on the full-pull path (`gui._write_session_meta`), so
+listen captures, connect-without-pull sessions, and selftest sessions carry no
+`session_meta.txt` at all — the insurance excludes exactly the capture shape
+`a646b7c` promoted to first-class. Absent-means-1 keeps them readable today;
+on the day the format bumps, an unstamped listen capture from the NEWER
+version would be read as format 1 by an older tool.
+- **Change:** `SessionLogger` writes the minimal stamp (`capture_format`,
+  `time`, `app_version`) when the session directory is created; the pull path
+  keeps enriching it with firmware/power-mode as now (which also intersects
+  item 9 — both are "move the record down to where every caller passes").
 
 ---
 
