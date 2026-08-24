@@ -12,6 +12,7 @@ encoder.
 """
 
 import datetime
+import textwrap
 
 from . import condition, health, parsers, rides, sessions, transport
 
@@ -318,14 +319,7 @@ def _consumption_lines(c, r, units="C", dist_units="km"):
                       r["to_soc_pct"]))
         out.append("    scaled to a full charge that is about %s"
                    % fmt_km(r["full_charge_km"], dist_units))
-        if r.get("is_extrapolation"):
-            out.append("    an UPPER BOUND on what the gauge implies, not a "
-                       "distance anyone has ridden: it assumes the SOC scale is")
-            out.append("    linear and that 0%% is reachable, and the lowest "
-                       "this log has ever seen is %g%%" % r["soc_floor_pct"])
-            if r.get("extrapolation_x"):
-                out.append("    scaled up %gx from what was actually ridden"
-                           % r["extrapolation_x"])
+        out += _wrap(condition.range_caveat(r), indent="    ", hang="    ")
         if r.get("implied_pack_wh"):
             out.append("    that ride implies a pack of about %d Wh, which is "
                        "worth holding against what the BMS reports"
@@ -458,12 +452,9 @@ def _condition_lines(c, units="C"):
         out.append("  charge accepted %g-%g V: median %g Ah over %d sessions"
                    % (cap["window_v"][0], cap["window_v"][1], cap["median_ah"],
                       cap["sessions"]))
-        out.append("    a comparable index, not the pack's capacity - it reads "
-                   "only pack voltage and current, so a firmware change that")
-        out.append("    relabels the SOC display cannot move it")
+        out += _wrap(condition.capacity_caveat(), indent="    ", hang="    ")
     floor = c.get("cell_floor")
-    if floor and (not c.get("cell_sag")
-                  or floor["source"] != "riding samples"):
+    if condition.show_cell_floor(c):
         out.append("  lowest cell under load: %g mV  (from %d %s)"
                    % (floor["min_cell_mv"], floor["samples"], floor["source"]))
     sag = c.get("cell_sag")
@@ -499,32 +490,25 @@ def _condition_lines(c, units="C"):
     return out
 
 
+def _wrap(sentence, indent="  ", hang="    "):
+    """One composed sentence, wrapped for the page.
+
+    The sentence comes from condition.py so that the tab cannot word it
+    differently; only the wrapping is this file's business.
+    """
+    return textwrap.wrap(sentence, width=78, initial_indent=indent,
+                         subsequent_indent=hang) if sentence else []
+
+
 def _coverage_limit_lines(cov):
     """How much of the ride log could answer the cell question at all.
 
-    Records written before a firmware change do not survive being re-read by the
-    newer firmware: the two trailing fields come back as stale bytes, and the
-    guard in `_mode_samples` refuses them. That refusal is right, and until now
-    it was also SILENT - the report advertised 1137 ride samples while every cell
-    answer rested on 635 of them, and said nothing about the other 502.
-
-    An unmeasured stretch is not a clean one, and the difference has to be on the
-    page rather than in the returned dict.
+    The sentence itself now lives in `condition.coverage_note`, because the
+    Condition tab carries the same one and "UNMEASURED here, not clean" is the
+    most load-bearing phrase this project prints. A copy of it that could drift
+    is a copy that could soften.
     """
-    total = cov.get("ride_samples") or 0
-    with_cell = cov.get("ride_samples_with_cell")
-    if not total or with_cell is None or with_cell >= total:
-        return []
-    missing = total - with_cell
-    return [
-        "  cell voltage readable on %d of %d ride records \u2014 the other %d carry "
-        "a value no cell can hold" % (with_cell, total, missing),
-        "    (records written before a firmware change, re-read by a newer one). "
-        "Every cell answer below is",
-        "    measured over those %d only; what the pack did across the rest of "
-        "this window is UNMEASURED" % with_cell,
-        "    here, not clean.",
-    ]
+    return _wrap(condition.coverage_note(cov))
 
 
 def _charging_lines(ch, units="C"):
@@ -553,8 +537,7 @@ def _charging_lines(ch, units="C"):
         out.append(line)
         out.append("    %d spells, median %g h, longest %g h"
                    % (ch["holds"], ch["held_full_median_h"], ch["held_full_max_h"]))
-        out.append("    time at full is the main driver of calendar ageing; "
-                   "unplugging when it finishes costs nothing")
+        out += _wrap(condition.full_hold_note(ch), indent="    ", hang="    ")
     if ch.get("hot_plugins"):
         out.append("  plugged in with the pack still hot (>= %s): %d of %d sessions"
                    % (health.fmt_temp(ch["hot_plugin_c"], units),
@@ -562,9 +545,5 @@ def _charging_lines(ch, units="C"):
     if ch.get("peak_amps_median") is not None:
         out.append("  charge current: median peak %g A, highest %g A"
                    % (ch["peak_amps_median"], ch["peak_amps_max"]))
-    if not ch.get("taper_resolvable"):
-        out.append("    the taper is NOT visible here: charging is sampled every "
-                   "~10 min at whole-amp resolution,")
-        out.append("    which is coarser than the constant-voltage knee it would "
-                   "take to see one")
+    out += _wrap(condition.taper_note(ch), indent="    ", hang="    ")
     return out

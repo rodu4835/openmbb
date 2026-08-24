@@ -1139,3 +1139,101 @@ def shift_timestamp(ts, offset_s, fmt="%m/%d/%Y %H:%M:%S"):
     if t is None or offset_s is None:
         return ts
     return (t + _dt.timedelta(seconds=offset_s)).strftime(fmt)
+
+
+# --- what both surfaces say, decided and worded once -------------------------
+#
+# The report and the Condition tab legitimately look different - prose lines
+# against label/finding rows - and unifying their LAYOUT would fight both. What
+# may not differ is whether a fact appears and what it claims. Everything below
+# returns None when the fact should not be shown, so a surface cannot keep the
+# sentence while losing the condition that earns it.
+#
+# A drifted number is visibly wrong. A drifted caveat is invisibly wrong, and a
+# caveat is the only thing between a measurement and somebody trusting it
+# further than it goes.
+
+
+def coverage_note(cov):
+    """How much of the ride log could answer the cell question at all.
+
+    Records written before a firmware change do not survive being re-read by a
+    newer one: the trailing fields come back as stale bytes and `_mode_samples`
+    refuses them. That refusal is right, and it was silent - the report
+    advertised 1137 ride samples while every cell answer rested on 635.
+
+    The load-bearing words are "UNMEASURED here, not clean". An unmeasured
+    stretch is not a clean one, and this is the sentence that says so on both
+    surfaces at once.
+    """
+    total = (cov or {}).get("ride_samples") or 0
+    with_cell = (cov or {}).get("ride_samples_with_cell")
+    if not total or with_cell is None or with_cell >= total:
+        return None
+    return (
+        "cell voltage readable on %d of %d ride records %s the other %d carry a "
+        "value no cell can hold (records written before a firmware change, "
+        "re-read by a newer one). Every cell answer here is measured over those "
+        "%d only; what the pack did across the rest of this window is "
+        "UNMEASURED here, not clean." % (with_cell, total, '—',
+                                         total - with_cell, with_cell))
+
+
+def show_cell_floor(a):
+    """Whether the unloaded-floor row earns its place beside the sag row.
+
+    Duplicated verbatim on both surfaces, which is worse than a duplicated
+    sentence: get them out of step and the two disagree about which rows EXIST,
+    not merely about how one reads.
+    """
+    floor, sag = (a or {}).get("cell_floor"), (a or {}).get("cell_sag")
+    return bool(floor) and (not sag or floor["source"] != "riding samples")
+
+
+def capacity_caveat():
+    """Why the charge index is not the pack's capacity.
+
+    The tab used to say this in four words and the report in two lines. The
+    fuller wording wins: it names the MECHANISM, which is what makes the number
+    survive a firmware reflash, and that is the whole reason to trust it.
+    """
+    return ("a comparable index, not the pack's capacity - it reads only pack "
+            "voltage and current, so a firmware change that relabels the SOC "
+            "display cannot move it")
+
+
+def range_caveat(rng):
+    """What the range figure rests on, when it rests on an extrapolation."""
+    if not rng or not rng.get("is_extrapolation"):
+        return None
+    note = ("an UPPER BOUND on what the gauge implies, not a distance anyone "
+            "has ridden: it assumes the SOC scale is linear and that 0%% is "
+            "reachable, and the lowest this log has ever seen is %g%%"
+            % rng["soc_floor_pct"])
+    if rng.get("extrapolation_x"):
+        note = ("scaled up %gx from what was actually ridden - " % rng["extrapolation_x"]) + note
+    return note
+
+
+def full_hold_note(ch):
+    """Time spent sitting at full, and why it is worth an owner's attention."""
+    if not ch or not ch.get("held_full_h"):
+        return None
+    return ("time at full is the main driver of calendar ageing; unplugging "
+            "when it finishes costs nothing")
+
+
+def taper_note(ch):
+    """Why no charge taper is reported.
+
+    The confirmed divergence this whole item started from. The report guarded
+    the sentence on `taper_resolvable`; the tab baked it into the charge-current
+    row unconditionally. Both read true today only because the field is a
+    hardcoded False - the day `assess` learns to resolve a taper, the tab would
+    have gone on insisting it cannot see one.
+    """
+    if not ch or ch.get("taper_resolvable"):
+        return None
+    return ("the taper is NOT visible here: charging is sampled every ~10 min "
+            "at whole-amp resolution, which is coarser than the "
+            "constant-voltage knee it would take to see one")

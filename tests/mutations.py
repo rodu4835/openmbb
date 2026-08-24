@@ -233,6 +233,31 @@ MUTATIONS = [
      "            self._mask(str(cmd).strip()), self._mask(str(consent).strip()))",
      "            str(cmd).strip(), self._mask(str(consent).strip()))",
      "tests/test_cli_selftest.py::test_the_consent_record_masks_the_command_not_only_the_consent"),
+
+    # item 5 - the two condition surfaces are composed once
+    ("mirror: the tab stops showing the coverage limit", "src/openmbb/gui.py",
+     "            _cov_note = condition_mod.coverage_note(cov)",
+     "            _cov_note = None",
+     'tests/test_gui_flow.py::test_the_coverage_limit_reaches_both_surfaces'),
+
+    ("mirror: the saved page stops showing the coverage limit",
+     "src/openmbb/report.py",
+     "    return _wrap(condition.coverage_note(cov))",
+     "    return []",
+     'tests/test_gui_flow.py::test_the_coverage_limit_reaches_both_surfaces'),
+
+    ("mirror: the tab stops showing the taper caveat", "src/openmbb/gui.py",
+     '''            _taper = condition_mod.taper_note(ch)
+            if _taper:
+                _row("Charge taper", _taper, "unknown")''',
+     "            pass",
+     'tests/test_gui_flow.py::test_the_two_condition_surfaces_show_the_same_set_of_facts'),
+
+    ("mirror: the tab re-derives the cell-floor predicate instead of sharing it",
+     "src/openmbb/gui.py",
+     "            if condition_mod.show_cell_floor(a):",
+     "            if floor:",
+     'tests/test_gui_flow.py::test_the_two_condition_surfaces_show_the_same_set_of_facts'),
 ]
 
 

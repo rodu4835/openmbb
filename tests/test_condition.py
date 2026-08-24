@@ -1032,12 +1032,22 @@ def test_an_unmeasured_stretch_of_the_ride_log_is_stated_not_swallowed(tmp_path)
     assert cov["ride_samples"] == 30
     assert cov["ride_samples_with_cell"] == 10      # the guard refused 20
 
+    # The sentence is composed once, in condition.py, because the Condition tab
+    # prints the same one - so assert it there, where no surface's line wrapping
+    # can reach it.
+    note = condition.coverage_note(cov)
+    assert "cell voltage readable on 10 of 30 ride records" in note
+    assert "the other 20 carry a value no cell can hold" in note
+    # the load-bearing phrase: an unmeasured stretch is not a clean one
+    assert "UNMEASURED here, not clean" in note
+
     s = sessions.Session(str(tmp_path), {"eventlogdump": log}, "")
     text = report.format_report(report.analyze_session(s))
-    assert "cell voltage readable on 10 of 30 ride records" in text
-    assert "the other 20 carry a value no cell can hold" in text
-    # the load-bearing phrase: an unmeasured stretch is not a clean one
-    assert "UNMEASURED" in text and "not clean" in text
+    # and the page carries that sentence, wrapped to the page width
+    flat = " ".join(text.split())
+    assert "cell voltage readable on 10 of 30 ride records" in flat
+    assert "the other 20 carry a value no cell can hold" in flat
+    assert "UNMEASURED here, not clean" in flat
 
 
 def test_a_capture_with_every_record_readable_says_nothing_extra(tmp_path):

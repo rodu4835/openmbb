@@ -4872,24 +4872,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 _row("Log window", "%s → %s  ·  %d ride / %d charge samples"
                      % (cov["first"], cov["last"], cov["ride_samples"],
                         cov["charge_samples"]), "measured")
-            # An unmeasured stretch is not a clean one. Records written before a
-            # firmware change do not survive being re-read by a newer one, and
-            # the guard that refuses them was silent until now.
-            _wc = cov.get("ride_samples_with_cell")
-            if _wc is not None and cov.get("ride_samples") and _wc < cov["ride_samples"]:
-                _row("Cell readings available",
-                     "%d of %d ride records · the other %d carry a value no cell "
-                     "can hold, so what the pack did across them is UNMEASURED "
-                     "here, not clean"
-                     % (_wc, cov["ride_samples"], cov["ride_samples"] - _wc),
-                     "attention")
+            # An unmeasured stretch is not a clean one. The sentence is
+            # composed in condition.py because the saved page prints the same
+            # one, and this is the phrase least able to afford a drift.
+            _cov_note = condition_mod.coverage_note(cov)
+            if _cov_note:
+                _row("Cell readings available", _cov_note, "attention")
             cap = a["charge_capacity"]
             if cap:
                 _row("Charge capacity",
-                     "median %g Ah across %g–%g V · %d sessions "
-                     "(an index, not the pack's capacity)"
+                     "median %g Ah across %g–%g V · %d sessions · %s"
                      % (cap["median_ah"], cap["window_v"][0], cap["window_v"][1],
-                        cap["sessions"]), "measured")
+                        cap["sessions"], condition_mod.capacity_caveat()),
+                     "measured")
             # what it costs to ride, and how far a charge goes. Measured from
             # the samples, NOT from the BMS's nominal capacity - which on this
             # platform is not what the gauge behaves like, and a range built on
@@ -4920,22 +4915,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         round(rng["km"] * dfac, 1), unit, rng["from_soc_pct"],
                         rng["to_soc_pct"]),
                      "attention" if rng.get("is_extrapolation") else "measured")
-                if rng.get("is_extrapolation"):
-                    _row("└ what that rests on",
-                         "scaled up %gx from what was ridden · an upper bound on "
-                         "what the GAUGE implies, not a distance anyone has ridden: "
-                         "it assumes the SOC scale is linear and that 0%% is "
-                         "reachable, and the lowest this log has seen is %g%%"
-                         % (rng.get("extrapolation_x") or 1, rng["soc_floor_pct"]),
-                         "unknown")
+                _rng_note = condition_mod.range_caveat(rng)
+                if _rng_note:
+                    _row("└ what that rests on", _rng_note, "unknown")
                 if rng.get("implied_pack_wh"):
                     _row("└ pack size that implies",
                          "about %d Wh, reached from energy and SOC together — "
                          "worth holding against what the BMS reports"
                          % rng["implied_pack_wh"], "measured")
             floor = a["cell_floor"]
-            if floor and (not a["cell_sag"]
-                          or floor["source"] != "riding samples"):
+            if condition_mod.show_cell_floor(a):
                 _row("Lowest cell, loaded",
                      "%g mV · from %d %s"
                      % (floor["min_cell_mv"], floor["samples"], floor["source"]),
@@ -4971,10 +4960,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                          else " · %.0f%% of the logged period"
                          % (ch["held_full_share"] * 100))
                 _row("Sat at FULL, plugged in",
-                     "%g h%s · %d spells, longest %g h · time at full ages a "
-                     "pack; unplugging when it finishes costs nothing"
+                     "%g h%s · %d spells, longest %g h · %s"
                      % (ch["held_full_h"], share, ch["holds"],
-                        ch["held_full_max_h"]), "attention")
+                        ch["held_full_max_h"],
+                        condition_mod.full_hold_note(ch)), "attention")
             if ch.get("hot_plugins"):
                 _row("Plugged in hot",
                      "%d of %d sessions began at %s or above · a pack is hottest "
@@ -4983,9 +4972,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                      "attention")
             if ch.get("peak_amps_median") is not None:
                 _row("Charge current",
-                     "median peak %g A · highest %g A · the taper is below this "
-                     "log's resolution (~10 min, whole amps)"
+                     "median peak %g A · highest %g A"
                      % (ch["peak_amps_median"], ch["peak_amps_max"]), "measured")
+            # Its own row now, on the same condition the saved page uses. The
+            # sentence used to be baked into the row above unconditionally,
+            # which read true only while `taper_resolvable` was a constant.
+            _taper = condition_mod.taper_note(ch)
+            if _taper:
+                _row("Charge taper", _taper, "unknown")
             for f in a["faults"]:
                 detail = condition_mod.fault_detail(f)
                 _row(f["name"], "%d logged · %s · counted, not graded%s"

@@ -3185,3 +3185,142 @@ def test_the_share_safe_export_says_why_it_refused(app, monkeypatch, tmp_path):
     assert app._errors, "the export refused without saying anything"
     assert "does not look like an OpenMBB capture" in str(app._errors[-1])
     assert not (tmp_path / "not-a-capture-shared").exists()
+
+
+# --- the two condition surfaces ---------------------------------------------
+
+def _mirror_log():
+    """One log carrying every fact both surfaces are supposed to compose:
+    readable ride records, unreadable ones (the coverage limit), and a charge
+    session that crosses the 103-113 V measuring window."""
+    import datetime as dt
+
+    good = (" %05d  06/24/2026 08:%02d:00  Riding  PackTemp: h 30C, "
+            "AmbTemp: 18C, PackSOC: %d%%, Vpack:110.000V, BattAmps: 120, "
+            "Odo: %dkm, MinCell: 3700mV")
+    # 8241 mV is 0x2031, the ASCII " 1" - a stale record from before a reflash
+    stale = (" %05d  06/24/2026 09:%02d:00  Riding  PackTemp: h 30C, "
+             "AmbTemp: 18C, PackSOC: %d%%, Vpack:110.000V, BattAmps: 120, "
+             "Odo: %dkm, MinCell: 8241mV")
+    lines = [good % (i + 1, i, 95 - i * 3, 6000 + i * 4) for i in range(12)]
+    lines += [stale % (i + 20, i, 60 - i, 6100 + i) for i in range(8)]
+
+    t = dt.datetime(2026, 6, 24, 22, 0, 0)
+    for i in range(19):
+        lines.append(
+            " %05d     %s   Charging   PackTemp: h 27C, AmbTemp: 16C, "
+            "PackSOC: %d%%, Vpack:%.3fV, BattAmps: %4d, Mods: 01"
+            % (i + 40, (t + dt.timedelta(seconds=i * 600)).strftime(
+                "%m/%d/%Y %H:%M:%S"), 20 + i * 4, 100.0 + i, -5))
+    return chr(10).join(lines)
+
+
+#: The saved page's sections that the Condition tab draws from. Consumption and
+#: range are printed under Rides there and rendered as Condition rows here -
+#: a LAYOUT difference, and a legitimate one. The surfaces were never meant to
+#: agree on where a fact lives, only on whether it is shown and what it claims.
+_TAB_SECTIONS = ("condition (pack)", "rides")
+
+
+def _condition_block(page):
+    """The parts of the saved page the Condition tab mirrors, lowercased.
+
+    Health is deliberately excluded: it has its own tab, and it carries its own
+    lowest-cell metric. Comparing against the WHOLE page matches that metric and
+    reads as the Condition tab having lost a row it never owned - which is
+    exactly the ghost this slice exists to stop.
+    """
+    out, inside = [], False
+    for line in page.splitlines():
+        head = line.strip()
+        if head.startswith("== "):
+            inside = any(name in head.lower() for name in _TAB_SECTIONS)
+            continue
+        if inside:
+            out.append(line)
+    return chr(10).join(out).lower()
+
+
+def test_the_two_condition_surfaces_show_the_same_set_of_facts(app):
+    """The saved page and the Condition tab compose the same facts
+    independently, and what bites is not the numbers but the PREDICATES and the
+    CAVEATS. A drifted number is visibly wrong; a drifted caveat is invisibly
+    wrong, and a caveat is the only thing between a measurement and somebody
+    trusting it further than it goes.
+
+    So this asserts the SET, not the wording: every fact a composer yields must
+    appear on BOTH surfaces, and every one it withholds on NEITHER. That is what
+    catches a row existing on one surface only - the failure that cannot be seen
+    by reading either surface on its own.
+    """
+    from openmbb import condition as cond
+    from openmbb import parsers as pmod
+    from openmbb import report as rmod
+    from openmbb import rides as ridesmod
+    from openmbb import sessions as smod
+
+    log = _mirror_log()
+    session = smod.Session("x", {"eventlogdump": log}, "")
+
+    page = _condition_block(rmod.format_report(rmod.analyze_session(session)))
+    app._analyze_set(session)
+    tab = " ".join(
+        " ".join(str(v) for v in (app.cond_tree.item(i)["values"] or []))
+        for i in app.cond_tree.get_children()).lower()
+    assert tab, "the Condition tab rendered no rows at all"
+
+    text = pmod.event_log_text(session)
+    a = cond.assess(text)
+    ch = a.get("charging") or {}
+    recs = pmod.parse_ride_log(text)
+    rng = ridesmod.range_estimate(recs) if recs else None
+
+    # (name, the composed value, a token that survives both surfaces' wrapping)
+    facts = [
+        ("coverage limit", cond.coverage_note(a.get("coverage")), "unmeasured"),
+        ("taper", cond.taper_note(ch), "constant-voltage knee"),
+        ("charge index", cond.capacity_caveat() if a.get("charge_capacity")
+         else None, "not the pack's capacity"),
+        ("time at full", cond.full_hold_note(ch), "calendar ageing"),
+        ("range extrapolation", cond.range_caveat(rng), "upper bound"),
+        ("unloaded cell floor",
+         "shown" if cond.show_cell_floor(a) else None, "lowest cell"),
+    ]
+
+    for name, composed, token in facts:
+        on_page = token in page
+        on_tab = token in tab
+        assert on_page == on_tab, (
+            "%s: the surfaces disagree about whether this fact is shown "
+            "(page=%s, tab=%s)" % (name, on_page, on_tab))
+        if composed:
+            assert on_page, (
+                "%s: the composer produced a sentence that NEITHER surface "
+                "showed" % name)
+        else:
+            assert not on_page, (
+                "%s: the composer withheld this fact and a surface showed it "
+                "anyway" % name)
+
+
+def test_the_coverage_limit_reaches_both_surfaces(app):
+    """The narrow version of the above, on the one sentence that matters most.
+
+    'UNMEASURED here, not clean' is the phrase that stops a stretch nobody could
+    measure reading as a clean one. It was pinned by a mutation test on the
+    saved page only; the tab's copy could have drifted or vanished unnoticed.
+    """
+    from openmbb import report as rmod
+    from openmbb import sessions as smod
+
+    session = smod.Session("x", {"eventlogdump": _mirror_log()}, "")
+    page = rmod.format_report(rmod.analyze_session(session))
+    app._analyze_set(session)
+    tab = " ".join(
+        " ".join(str(v) for v in (app.cond_tree.item(i)["values"] or []))
+        for i in app.cond_tree.get_children())
+
+    for surface, name in ((page, "the saved page"), (tab, "the Condition tab")):
+        assert "UNMEASURED" in surface, name
+        assert "not clean" in surface, name
+        assert "12 of 20 ride records" in surface, name
