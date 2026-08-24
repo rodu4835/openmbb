@@ -221,30 +221,39 @@ the transport*, and the truncation/`_resync` paths are unreachable in the sim by
 construction (`SimPort._respond` always appends a prompt). Clamping port, no-prompt dump
 port, paced port (3,840 B/s); transcript + normalised-folder goldens.
 
-### 8. Test-estate hygiene — the skips are lying *(promoted: now observed directly)*
+### 8. ~~Test-estate hygiene — the skips are lying~~ — **shipped** (`17bf5ff`)
 
-No longer a hypothesis from the review: across four consecutive full runs on
-the same machine the skip count went **1, 0, 1, 2** — same tests, same
-hardware. `build_gui` intermittently throws `TclError` after many app builds
-and the fixture mislabels every `TclError` as "no display available", so a
-floating subset of GUI coverage silently doesn't run, on every runner,
-varying run to run.
+The cause was never the display. Letting the real error surface named it in one
+run: `_tkinter.TclError: invalid command name "tcl_findLibrary"`, raised by a
+**bare `Tk()`** in test_theme's fixture after test_gui_flow had built and
+destroyed the application a hundred-odd times — a Tcl interpreter finalized by a
+previous test's variables being collected mid-build. Intermittent (forty
+build/destroy cycles in isolation do not reproduce it), which is exactly why it
+hid: an intermittent skip looks like a quiet machine.
 
-- **Change:** the fixture distinguishes "Tk genuinely unavailable" (skip,
-  honestly labelled) from "TclError on the Nth build" (fail, or retry once
-  then fail); plus a session-end check that a display-bearing machine had
-  zero display-reason skips.
-- **Also in scope — the truncation margin, now quantified:** the review
-  measured `test_truncated_read_marks_incomplete`'s total remaining tolerance
-  at **~80–100 ms**; any single scheduler stall inside the drain window
-  steals the first chunk. `bef9984` removed the added I/O but not the
-  structural race (TimedPort's clock starts at construction). Wants the
-  port's clock to start at the first `read()` call, or the drain window
-  shortened for the test — either kills the flake class without touching
-  shipping code.
-- Note for scheduling: `test_gui_flow.py` is 72% of suite runtime (336 s of
-  464 s) at 2.05 s/test — structural, tolerable, documented so nobody
-  rediscovers it.
+The display question is now asked once per session by a bare `Tk()`, which
+touches no application code and so can only fail for the reason being asked
+about. After that a `TclError` is a defect: one announced retry (the cause is
+known and a forced collect clears it), then a failure carrying both errors.
+`tests/conftest.py` holds it; a terminal-summary check guards against a raw
+`pytest.skip("no display...")` being reintroduced somewhere new.
+
+The truncation test was the same fault in another costume: `TimedPort` starts
+its clock at construction, so its 0.2 s chunks raced the ≤0.3 s pre-write drain
+that *discards* what it reads, leaving ~0.1 s of slack. `ArmedTimedPort` already
+existed for this and says so in its docstring — delays from the first **write**,
+so the flush sees an empty wire by construction. 15/15 consecutive runs.
+
+**605 passed, 0 skipped** — the first run where zero is structural rather than
+lucky.
+
+**What the mutation runner caught on the way, worth remembering:** two of the
+new tests could be silenced by the very fault they tested for. Turning
+`pytest.fail` into `pytest.skip` inside the helper did not make them red — it
+made them *skipped*, because `pytest.raises(fail.Exception)` does not match
+`Skipped`, so the skip escaped and swallowed the test. A test that asserts "no
+skip happens here" may not let a skip escape, or the skip is what reports the
+result. All three now catch it explicitly.
 
 ### 9. Journal a write at the transport, not only in the GUI
 
