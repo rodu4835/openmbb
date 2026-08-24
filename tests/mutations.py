@@ -270,12 +270,10 @@ MUTATIONS = [
 
     ("display: the retry is removed, so a known-recoverable build fails",
      "tests/conftest.py",
-     '''    except tk.TclError as first:
-        gc.collect()
+     '''        gc.collect()
         try:
             built = build()''',
-     '''    except tk.TclError as first:
-        gc.collect()
+     '''        gc.collect()
         try:
             raise first
             built = build()''',
