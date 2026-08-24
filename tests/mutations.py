@@ -103,10 +103,10 @@ MUTATIONS = [
                                            and heavy_consent.strip()):''',
      "tests/test_cli_selftest.py::test_a_refused_heavy_read_leaves_no_consent_record"),
 
-    ("consent: stop masking the record",
+    ("consent: stop masking the consent sentence",
      "src/openmbb/transport.py",
-     "            cmd, self._mask(str(consent).strip()))",
-     "            cmd, str(consent).strip())",
+     "            self._mask(str(cmd).strip()), self._mask(str(consent).strip()))",
+     "            self._mask(str(cmd).strip()), str(consent).strip())",
      "tests/test_cli_selftest.py::test_the_consent_record_is_masked_like_everything_else"),
 
     ("consent: journal every command, burying the two that matter",
