@@ -152,7 +152,7 @@ and are NOT transcribed on faith — an entry nobody has watched fail is worth l
 than no entry, so they get added as they are re-established. That backfill is
 incremental and needs no ceremony.
 
-### 5. The report/GUI mirror — scaffolded, ready to implement
+### 5. ~~The report/GUI mirror~~ — **shipped** (`813e2d5`)
 
 **The mirror, measured (2026-08-24):** 14 facts are composed on both surfaces
 (`report._condition_lines`/`_charging_lines`/`_consumption_lines` vs
