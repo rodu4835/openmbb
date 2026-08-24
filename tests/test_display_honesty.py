@@ -27,8 +27,18 @@ class _FakeTclError(Exception):
 
 def test_a_display_that_exists_never_skips():
     """`tk_display` is True only when a bare Tk() succeeded, and that is the
-    only thing allowed to excuse a GUI test from running."""
-    require_display(True)          # must not raise
+    only thing allowed to excuse a GUI test from running.
+
+    The skip is caught rather than simply not expected: letting it escape would
+    skip THIS test, and a skipped test reports success. That is the same fault
+    this file exists to close, one level up - the mutation runner found it here
+    before anybody else did.
+    """
+    try:
+        require_display(True)
+    except pytest.skip.Exception as e:
+        raise AssertionError(
+            "require_display skipped on a machine WITH a display: %r" % e)
 
 
 def test_no_display_skips_with_the_reason_it_was_given():
@@ -46,13 +56,20 @@ def test_a_tclerror_with_a_display_present_fails_rather_than_skips(monkeypatch):
     def always_broken():
         raise tk.TclError("invalid command name \"tcl_findLibrary\"")
 
-    with pytest.raises(pytest.fail.Exception) as excinfo:
+    # The skip branch is caught EXPLICITLY. `pytest.raises(fail.Exception)`
+    # does not match `Skipped`, so a regression to skipping would sail past the
+    # raises() block, skip this test, and be scored as a pass - which is the
+    # exact failure under test, wearing this test as a disguise.
+    try:
         build_tk_or_fail(always_broken, "a deliberately broken build")
-    # pytest.fail raises Failed, which is NOT a skip - that distinction is the
-    # entire fix, so assert it rather than trusting the exception type's name
-    assert not isinstance(excinfo.value, pytest.skip.Exception)
-    assert "tcl_findLibrary" in str(excinfo.value)
-    assert "not a missing display" in str(excinfo.value)
+    except pytest.skip.Exception as e:
+        raise AssertionError(
+            "build_tk_or_fail SKIPPED where it must FAIL: %r" % e)
+    except pytest.fail.Exception as e:
+        assert "tcl_findLibrary" in str(e)
+        assert "not a missing display" in str(e)
+    else:
+        raise AssertionError("a build that never succeeds must not return")
 
 
 def test_one_retry_is_allowed_because_the_cause_is_known(capsys):
@@ -87,6 +104,12 @@ def test_the_retry_is_not_unlimited():
             raise tk.TclError("still broken")
         return "an application"
 
-    with pytest.raises(pytest.fail.Exception):
+    try:
         build_tk_or_fail(broken_twice_then_fine, "a build broken twice")
+    except pytest.skip.Exception as e:
+        raise AssertionError("skipped where it must fail: %r" % e)
+    except pytest.fail.Exception:
+        pass
+    else:
+        raise AssertionError("two failures in a row must not be recovered from")
     assert len(calls) == 2, "it must stop after one retry, not keep going"
