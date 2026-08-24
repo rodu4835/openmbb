@@ -199,6 +199,69 @@ cross-surface test fails; flip `taper_resolvable` handling on one side → the
 taper test fails. **Not in scope:** unifying number formatting (cosmetic;
 unify opportunistically), redesigning either surface. ~half a day.
 
+### 5b. Review fixes for the items 5+8 stack ← **NEXT, then push**
+
+The unpushed stack was adversarially reviewed 2026-08-24 (three lenses landed;
+the fourth stalled and its ground — conftest import mechanics, 3.12-vs-3.14
+surface, commit-count fidelity — was re-verified by hand). **The core holds:**
+a fact-by-fact diff of both surfaces at HEAD vs v0.24.1 on all three real
+captures plus sim shows *zero semantic shift*, the slice/token/wrap fears were
+each checked and refuted, and the truncation rework is genuinely race-free.
+Five findings block the push; all are small and fully specified:
+
+1. **The retry leaks the half-built Tk root** (reproduced). `build_tk_or_fail`'s
+   failed first build is never destroyed; it stays pinned as
+   `tkinter._default_root` — which `dialogs.py:89` uses as the parent for real
+   dialogs — and the leak is the *exact* mid-build-collection mechanism the
+   retry exists to recover from. Fix: in the except branch, before the collect,
+   destroy `tk._default_root` if it exists (wrapped in try/except TclError).
+   Test: a build that fails partway leaves `_default_root` None afterwards.
+2. **"The retry announces itself" is currently false** (reproduced). The
+   `print()` runs inside a passing test, where pytest capture discards it.
+   Fix: `warnings.warn(...)` instead — warnings surface in the terminal
+   summary even for passing tests, which is the honest channel. Update the
+   `capsys` assertion in test_display_honesty to `pytest.warns`.
+3. **The terminal-summary probe fails silent** (established). Its bare-Tk probe
+   is precisely the intermittent fault this item chased; on any exception it
+   returns without a word, silencing the guard. Fix: except → write one line —
+   "could not re-check the display; the skips above may or may not be honest"
+   — uncertainty must be loud, not absent.
+4. **The mirror test is vacuous for two of its six facts** (reproduced twice —
+   found independently first-hand and by the lens). `_mirror_log` never
+   produces `held_full_h` (needs an "Entering Charge Standby Mode" + a
+   disconnect/riding line after samples at full; it stops charging at 92%) and
+   never exercises the cell-floor row as *present* (always has decodable
+   riding MinCell, so sag exists and the floor is suppressed). Extend the log
+   — or add a second log — so all six facts are exercised **present**, then
+   add the two missing manifest entries (tab loses the full-hold sentence; tab
+   loses the floor row) that could not be written before because nothing could
+   catch them. The `_mirror_log` docstring ("every fact") becomes true instead
+   of aspirational.
+5. **Two hygiene nits from the same lenses, cheap enough to fold in:**
+   `report._wrap` keeps `break_on_hyphens=True`, so the taper sentence renders
+   "whole-\namp" with a mid-word break — pass `break_on_hyphens=False`; and
+   the page-phrase assertions around `tests/test_condition.py:539-544` (and
+   the coverage test's page half) assert multi-word phrases against the
+   *unflattened* wrapped page — flatten first, per the discipline the item-5
+   commit itself stated.
+
+Then push; CI (which has seen none of this) judges the stack whole.
+
+**Filed, not fixed (from the same review):**
+
+- **`coverage_note` asserts a cause it has not established.** "carry a value no
+  cell can hold (records written before a firmware change...)" is true of all
+  502 on the reference bike, but a record can also lack a cell reading
+  entirely, and the sentence would then claim a mechanism the data does not
+  show. Wants the composer to distinguish value-no-cell-can-hold from
+  no-reading-at-all counts. Pre-existing wording (shipped in v0.24.0), so a
+  plan item, not a push blocker.
+- **Module-level skips bypass `pytest_runtest_logreport`** — a raw
+  `pytest.skip(..., allow_module_level=True)` would evade the display-lie
+  summary. And **the summary is advisory**: it cannot turn the exit red, so on
+  CI a reintroduced lie still exits 0. Both are guards-of-guards; note them on
+  item 8's ledger rather than build a third layer now.
+
 ### 6. Parse `sevcon` — a controller fault must surface in an inspection verdict
 
 The old plan's Tier-1 item was ticked with "(sevcon/chargers/bluetooth still unread)" in
