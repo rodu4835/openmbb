@@ -72,7 +72,7 @@ def test_a_tclerror_with_a_display_present_fails_rather_than_skips(monkeypatch):
         raise AssertionError("a build that never succeeds must not return")
 
 
-def test_one_retry_is_allowed_because_the_cause_is_known(capsys):
+def test_one_retry_is_allowed_because_the_cause_is_known():
     """A previous test's Tk objects collected mid-build finalize the
     interpreter underneath the new one, and a forced collect clears it. One
     retry recovers that; it is not allowed to be silent."""
@@ -86,9 +86,12 @@ def test_one_retry_is_allowed_because_the_cause_is_known(capsys):
             raise tk.TclError("invalid command name \"tcl_findLibrary\"")
         return "an application"
 
-    assert build_tk_or_fail(broken_once, "a flaky build") == "an application"
+    # pytest.warns, not capsys: the announcement had to move out of stdout,
+    # which a passing test's capture discards, into a channel that survives a
+    # green run.
+    with pytest.warns(UserWarning, match="needed a retry"):
+        assert build_tk_or_fail(broken_once, "a flaky build") == "an application"
     assert len(calls) == 2
-    assert "needed a retry" in capsys.readouterr().out
 
 
 def test_the_retry_is_not_unlimited():
@@ -113,3 +116,37 @@ def test_the_retry_is_not_unlimited():
     else:
         raise AssertionError("two failures in a row must not be recovered from")
     assert len(calls) == 2, "it must stop after one retry, not keep going"
+
+
+def test_a_failed_build_leaves_no_root_behind():
+    """A build that dies PARTWAY may have created its Tk root before raising,
+    and nothing destroys it.
+
+    tkinter pins the first root created as `_default_root`, and dialogs.py
+    adopts that as the parent for every real message box - so the corpse of a
+    failed build would go on parenting dialogs for the rest of the session.
+    """
+    import tkinter as tk
+
+    state = {"n": 0}
+
+    def dies_after_creating_the_root():
+        state["n"] += 1
+        root = tk.Tk()
+        if state["n"] == 1:
+            raise tk.TclError("invalid command name \"tcl_findLibrary\"")
+        return root
+
+    before = getattr(tk, "_default_root", None)
+    with pytest.warns(UserWarning, match="needed a retry"):
+        built = build_tk_or_fail(dies_after_creating_the_root, "a dying build")
+    try:
+        assert state["n"] == 2
+        # the surviving default root must be the one we were HANDED, never the
+        # corpse of the attempt that failed
+        assert tk._default_root is built or tk._default_root is before
+    finally:
+        try:
+            built.destroy()
+        except tk.TclError:
+            pass

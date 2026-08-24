@@ -536,12 +536,16 @@ def test_the_report_prints_the_charging_block_and_its_caveat(tmp_path):
     ])
     s = sessions.Session(str(tmp_path), {"eventlogdump": log}, "")
     text = report.format_report(report.analyze_session(s))
-    assert "charging (habits, not graded)" in text
-    assert "sat at FULL with the charger still attached: 8 h" in text
-    assert "plugged in with the pack still hot" in text
+    # Flattened: these are composed sentences wrapped to the page width, so a
+    # phrase can straddle a line break. Asserting against the raw page makes the
+    # test hostage to the wrap point rather than to the wording.
+    flat = " ".join(text.split())
+    assert "charging (habits, not graded)" in flat
+    assert "sat at FULL with the charger still attached: 8 h" in flat
+    assert "plugged in with the pack still hot" in flat
     # the caveat has to travel with the number, or a reader assumes a taper was
     # looked for and found healthy
-    assert "the taper is NOT visible here" in text
+    assert "the taper is NOT visible here" in flat
 
 
 # --- where the hottest reading came from -------------------------------------

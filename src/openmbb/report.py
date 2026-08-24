@@ -496,8 +496,12 @@ def _wrap(sentence, indent="  ", hang="    "):
     The sentence comes from condition.py so that the tab cannot word it
     differently; only the wrapping is this file's business.
     """
+    # break_on_hyphens=False: the default splits "whole-amp resolution" across
+    # lines as "whole-" / "amp", which reads as a typo in a sentence whose whole
+    # job is to be believed.
     return textwrap.wrap(sentence, width=78, initial_indent=indent,
-                         subsequent_indent=hang) if sentence else []
+                         subsequent_indent=hang,
+                         break_on_hyphens=False) if sentence else []
 
 
 def _coverage_limit_lines(cov):

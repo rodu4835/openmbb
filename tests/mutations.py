@@ -286,6 +286,25 @@ MUTATIONS = [
      "    if tk_display is not True:",
      "    if True:",
      "tests/test_display_honesty.py::test_a_display_that_exists_never_skips"),
+
+    # item 5b - the two facts the mirror test could not previously exercise
+    ("mirror: the tab drops the time-at-full sentence", "src/openmbb/gui.py",
+     "                        condition_mod.full_hold_note(ch)), \"attention\")",
+     "                        \"\"), \"attention\")",
+     'tests/test_gui_flow.py::test_the_two_condition_surfaces_show_the_same_set_of_facts[holds+floor]'),
+
+    ("mirror: the tab drops the cell-floor row entirely", "src/openmbb/gui.py",
+     "            if condition_mod.show_cell_floor(a):",
+     "            if False:",
+     'tests/test_gui_flow.py::test_the_two_condition_surfaces_show_the_same_set_of_facts[holds+floor]'),
+
+    ("display: the retry stops burying the half-built root",
+     "tests/conftest.py",
+     '''        orphan = getattr(tk, "_default_root", None)
+        if orphan is not None and orphan is not before:''',
+     '''        orphan = getattr(tk, "_default_root", None)
+        if False:''',
+     "tests/test_display_honesty.py::test_a_failed_build_leaves_no_root_behind"),
 ]
 
 

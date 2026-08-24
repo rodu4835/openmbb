@@ -3242,7 +3242,90 @@ def _condition_block(page):
     return chr(10).join(out).lower()
 
 
-def test_the_two_condition_surfaces_show_the_same_set_of_facts(app):
+def _mirror_log_holds_and_floor():
+    """The two facts _mirror_log structurally cannot produce.
+
+    Riding records whose MinCell is the stale 8241 mV fabrication, so the modern
+    cell channel is dead, no sag can be computed, and the floor falls back to the
+    discharge-limit events - which is the only way `show_cell_floor` is ever
+    True. Plus a charge that reaches standby and is unplugged eight hours later:
+    a hold exists only as that EVENT PAIR, because the bike stops writing
+    charging samples the moment the charge finishes.
+    """
+    stale = (" %05d  06/24/2026 %02d:%02d:00  Riding  PackTemp: h 28C, "
+             "PackSOC: %d%%, Vpack:115.177V, BattAmps: 120, MotRPM:3300, "
+             "Odo: %dkm, Curr limit: 8295 A (31%%), MinCell: 8241mV")
+    limit = (" %05d  06/24/2026 %02d:%02d:00  Batt Dischg Cur Limited    "
+             "%d A (72%%), MinCell: %dmV, MaxPackTemp: 49C")
+    chg = ("00001     %s   Charging                   PackTemp: h 30C, l 28C, "
+           "AmbTemp: 20C, PackSOC: %d%%, Vpack:%.3fV, BattAmps: %4d, Mods: 10, "
+           "MbbChgEn")
+    evt = " 00001     %s   %s"
+
+    lines = [stale % (i + 1, 8, i, 90 - i * 2, 7000 + i * 3) for i in range(10)]
+    lines += [limit % (i + 30, 9, i, 380 + i, mv)
+              for i, mv in enumerate((3567, 3214, 3492))]
+    lines.append(evt % ("06/24/2026 20:00:00", "Calex 720W Charger 0 Connected"))
+    lines += [chg % ("06/24/2026 20:%02d:00" % (10 + i * 20), soc, v, -6)
+              for i, (soc, v) in enumerate(((30, 103.0), (60, 108.0), (100, 116.0)))]
+    lines.append(evt % ("06/24/2026 23:05:00", "Entering Charge Standby Mode"))
+    lines.append(evt % ("06/25/2026 07:05:00",
+                        "Calex 720W Charger 0 Disconnected"))
+    return chr(10).join(lines)
+
+
+def _fact_table(log):
+    """(name, composed-or-None, token) for every fact both surfaces compose."""
+    from openmbb import condition as cond
+    from openmbb import parsers as pmod
+    from openmbb import rides as ridesmod
+    from openmbb import sessions as smod
+
+    session = smod.Session("x", {"eventlogdump": log}, "")
+    text = pmod.event_log_text(session)
+    a = cond.assess(text)
+    ch = a.get("charging") or {}
+    recs = pmod.parse_ride_log(text)
+    rng = ridesmod.range_estimate(recs) if recs else None
+    return session, [
+        ("coverage limit", cond.coverage_note(a.get("coverage")), "unmeasured"),
+        ("taper", cond.taper_note(ch), "constant-voltage knee"),
+        ("charge index", cond.capacity_caveat() if a.get("charge_capacity")
+         else None, "not the pack's capacity"),
+        ("time at full", cond.full_hold_note(ch), "calendar ageing"),
+        ("range extrapolation", cond.range_caveat(rng), "upper bound"),
+        ("unloaded cell floor",
+         "shown" if cond.show_cell_floor(a) else None, "lowest cell"),
+    ]
+
+
+def test_the_mirror_logs_between_them_exercise_every_fact_as_present():
+    """The cross-surface test is only worth what its fixtures exercise.
+
+    A fact that is None on both surfaces passes the set comparison vacuously:
+    it proves a spurious row would be caught, and proves nothing about a
+    surface LOSING the rendering. Two of the six were in that state, which is
+    also why the manifest carries no entry for them - nothing could have caught
+    it. This asserts the two logs together put every fact in the PRESENT state
+    at least once, so that can never quietly become untrue again.
+    """
+    seen = set()
+    for log in (_mirror_log(), _mirror_log_holds_and_floor()):
+        _session, facts = _fact_table(log)
+        for name, composed, _token in facts:
+            if composed:
+                seen.add(name)
+    _session, every = _fact_table(_mirror_log())
+    missing = {n for n, _c, _t in every} - seen
+    assert not missing, (
+        "these facts are never exercised as PRESENT by any mirror log, so the "
+        "cross-surface test cannot notice a surface losing them: %s"
+        % sorted(missing))
+
+
+@pytest.mark.parametrize("make_log", [_mirror_log, _mirror_log_holds_and_floor],
+                         ids=["ride+charge", "holds+floor"])
+def test_the_two_condition_surfaces_show_the_same_set_of_facts(app, make_log):
     """The saved page and the Condition tab compose the same facts
     independently, and what bites is not the numbers but the PREDICATES and the
     CAVEATS. A drifted number is visibly wrong; a drifted caveat is invisibly
@@ -3254,14 +3337,9 @@ def test_the_two_condition_surfaces_show_the_same_set_of_facts(app):
     catches a row existing on one surface only - the failure that cannot be seen
     by reading either surface on its own.
     """
-    from openmbb import condition as cond
-    from openmbb import parsers as pmod
     from openmbb import report as rmod
-    from openmbb import rides as ridesmod
-    from openmbb import sessions as smod
 
-    log = _mirror_log()
-    session = smod.Session("x", {"eventlogdump": log}, "")
+    session, facts = _fact_table(make_log())
 
     page = _condition_block(rmod.format_report(rmod.analyze_session(session)))
     app._analyze_set(session)
@@ -3269,24 +3347,6 @@ def test_the_two_condition_surfaces_show_the_same_set_of_facts(app):
         " ".join(str(v) for v in (app.cond_tree.item(i)["values"] or []))
         for i in app.cond_tree.get_children()).lower()
     assert tab, "the Condition tab rendered no rows at all"
-
-    text = pmod.event_log_text(session)
-    a = cond.assess(text)
-    ch = a.get("charging") or {}
-    recs = pmod.parse_ride_log(text)
-    rng = ridesmod.range_estimate(recs) if recs else None
-
-    # (name, the composed value, a token that survives both surfaces' wrapping)
-    facts = [
-        ("coverage limit", cond.coverage_note(a.get("coverage")), "unmeasured"),
-        ("taper", cond.taper_note(ch), "constant-voltage knee"),
-        ("charge index", cond.capacity_caveat() if a.get("charge_capacity")
-         else None, "not the pack's capacity"),
-        ("time at full", cond.full_hold_note(ch), "calendar ageing"),
-        ("range extrapolation", cond.range_caveat(rng), "upper bound"),
-        ("unloaded cell floor",
-         "shown" if cond.show_cell_floor(a) else None, "lowest cell"),
-    ]
 
     for name, composed, token in facts:
         on_page = token in page
