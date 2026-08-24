@@ -258,6 +258,34 @@ MUTATIONS = [
      "            if condition_mod.show_cell_floor(a):",
      "            if floor:",
      'tests/test_gui_flow.py::test_the_two_condition_surfaces_show_the_same_set_of_facts'),
+
+    # item 8 - the skips say what they mean
+    ("display: a TclError with a display present becomes a skip again",
+     "tests/conftest.py",
+     '''        except tk.TclError as second:
+            pytest.fail(''',
+     '''        except tk.TclError as second:
+            pytest.skip(''',
+     "tests/test_display_honesty.py::test_a_tclerror_with_a_display_present_fails_rather_than_skips"),
+
+    ("display: the retry is removed, so a known-recoverable build fails",
+     "tests/conftest.py",
+     '''    except tk.TclError as first:
+        gc.collect()
+        try:
+            built = build()''',
+     '''    except tk.TclError as first:
+        gc.collect()
+        try:
+            raise first
+            built = build()''',
+     "tests/test_display_honesty.py::test_one_retry_is_allowed_because_the_cause_is_known"),
+
+    ("display: require_display skips even when a display exists",
+     "tests/conftest.py",
+     "    if tk_display is not True:",
+     "    if True:",
+     "tests/test_display_honesty.py::test_a_display_that_exists_never_skips"),
 ]
 
 

@@ -10,12 +10,14 @@ import time
 
 import pytest
 
+from conftest import build_tk_or_fail, require_display
+
 from openmbb.safety import WRITE_WHITELIST
 from openmbb.transport import first_number
 
 
 @pytest.fixture
-def app(monkeypatch):
+def app(monkeypatch, tk_display):
     tk = pytest.importorskip("tkinter")
     from openmbb import dialogs as mb
     monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
@@ -34,11 +36,10 @@ def app(monkeypatch):
     monkeypatch.setattr(_cfg, "CONFIG_PATH", _tmpcfg)
     from openmbb.gui import build_gui
     # hermetic: sessions go to a temp dir, never the user's configured location.
-    # Build directly (no throwaway probe root) and skip cleanly with no display.
-    try:
-        application = build_gui(sim=True, log_dir=tempfile.mkdtemp(prefix="zcflow_"))
-    except tk.TclError:
-        pytest.skip("no display available for Tk")
+    require_display(tk_display)
+    application = build_tk_or_fail(
+        lambda: build_gui(sim=True, log_dir=tempfile.mkdtemp(prefix="zcflow_")),
+        "build_gui(sim=True)")
     application._errors = errors
     yield application
     # A5 safety net: a test that opened the heavy-read modal must not leak a
@@ -1686,18 +1687,18 @@ def test_connect_narrates_probe_steps_live(app):
     assert "prompt" in log and "connected" in log
 
 
-def test_simulator_is_a_toggle_not_a_port(monkeypatch):
+def test_simulator_is_a_toggle_not_a_port(monkeypatch, tk_display):
     # v0.13: simulator is a toggle (sim_var, on the landing), NOT a port-dropdown
     # entry. Off in real mode; flipping it on makes connect/verify use the sim. The
     # Connect button reads "Connect & Probe" (not the literal "&&").
     import tempfile
-    tk = pytest.importorskip("tkinter")
+    pytest.importorskip("tkinter")
     from openmbb.gui import build_gui, CONNECT_LABEL
     from openmbb.sim import SimPort
-    try:
-        app = build_gui(sim=False, log_dir=tempfile.mkdtemp(prefix="a1_"))
-    except tk.TclError:
-        pytest.skip("no display available for Tk")
+    require_display(tk_display)
+    app = build_tk_or_fail(
+        lambda: build_gui(sim=False, log_dir=tempfile.mkdtemp(prefix="a1_")),
+        "build_gui(sim=False)")
     try:
         assert hasattr(app, "sim_var") and app.sim_var.get() is False  # off in real mode
         assert not any("SIM" in str(v).upper()                          # not a port entry

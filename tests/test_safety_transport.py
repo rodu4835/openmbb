@@ -469,10 +469,16 @@ def test_write_setting_rejects_empty_or_multitoken_value():
 # --- A4: long-command truncation marker + resync ----------------------------
 
 def test_truncated_read_marks_incomplete():
-    # chunks start after the 0.1 s flush-drain window, then the stream goes
+    # The response starts after the command is WRITTEN, then the stream goes
     # silent with no closing prompt -> the read is marked truncated.
-    port = TimedPort([(0.2, b"dumpall\r\n"),
-                      (0.22, b" partial data with no closing prompt\r\n")])
+    #
+    # ArmedTimedPort, not TimedPort: TimedPort's clock starts at construction,
+    # so its chunks raced exec_command's pre-write drain - which runs up to
+    # 0.3 s and discards what it reads. That left ~0.1 s of slack and failed on
+    # a loaded CI runner. Arming on the first write removes the race instead of
+    # widening it, and is what this port exists for.
+    port = ArmedTimedPort([(0.0, b"dumpall\r\n"),
+                           (0.02, b" partial data with no closing prompt\r\n")])
     tr = Transport(port, SessionLogger(base_dir=tempfile.mkdtemp(prefix="zctr_"),
                                        tag="t"))
     out = tr.exec_command("dumpall", heavy_consent="test: the sim has no contactor",

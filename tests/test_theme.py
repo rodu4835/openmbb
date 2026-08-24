@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import build_tk_or_fail, require_display
+
 from openmbb import theme
 
 
@@ -84,12 +86,18 @@ def test_theme_preference_round_trips(monkeypatch):
 # ------------------------------------------------------------------- centring
 
 @pytest.fixture
-def root():
+def root(tk_display):
+    # A bare Tk() IS the display test, so this site was always honest - it is
+    # routed through the session fixture only so one answer serves the suite
+    # and a second interpretation cannot drift back in.
     tk = pytest.importorskip("tkinter")
-    try:
-        r = tk.Tk()
-    except tk.TclError:
-        pytest.skip("no display available for Tk")
+    require_display(tk_display)
+    # This is the site that actually failed: a BARE Tk(), after test_gui_flow
+    # had built and destroyed the application a hundred-odd times, raising
+    # `invalid command name "tcl_findLibrary"`. It was reported as "no display
+    # available" on a machine with a display, which is how a floating subset of
+    # the theme tests silently stopped running.
+    r = build_tk_or_fail(tk.Tk, "a bare Tk() root")
     r.geometry("1000x700+120+80")
     r.update_idletasks()
     yield r
