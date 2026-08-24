@@ -199,7 +199,7 @@ cross-surface test fails; flip `taper_resolvable` handling on one side → the
 taper test fails. **Not in scope:** unifying number formatting (cosmetic;
 unify opportunistically), redesigning either surface. ~half a day.
 
-### 5b. Review fixes for the items 5+8 stack ← **NEXT, then push**
+### 5b. ~~Review fixes for the items 5+8 stack~~ — **shipped** (`3ad636e`)
 
 The unpushed stack was adversarially reviewed 2026-08-24 (three lenses landed;
 the fourth stalled and its ground — conftest import mechanics, 3.12-vs-3.14
