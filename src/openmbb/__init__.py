@@ -14,7 +14,7 @@ Console work is done PARKED, key on, kill switch off. Never while riding.
 """
 
 APP_NAME = "OpenMBB"
-__version__ = "0.24.0"
+__version__ = "0.24.1"
 
 # The day this version was released, ISO. Bumped WITH __version__ and
 # checked against the tag by the release gate. It exists so a copy can say

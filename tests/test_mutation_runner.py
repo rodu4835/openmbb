@@ -63,3 +63,20 @@ def test_the_manifest_is_not_empty_and_every_entry_is_well_formed():
         assert os.path.isfile(os.path.join(REPO, path)), path
         assert test.startswith("tests/") and "::" in test, test
         m._edits(label, old, new)       # raises if malformed
+
+
+def test_an_anchor_the_code_has_moved_past_is_stale_not_a_catch(monkeypatch):
+    """An entry whose source anchor no longer matches has stopped meaning
+    anything, and the run must fail rather than skip it quietly.
+
+    This is not hypothetical: adding the command mask to journal_consent moved
+    the line entry 5 pointed at, and STALE is what reported it - on its first
+    real outing, in the same commit that hardened the runner.
+    """
+    m = _runner()
+    real = m.MUTATIONS[0]
+    monkeypatch.setattr(m, "_tree_is_clean", lambda: True)
+    monkeypatch.setattr(m, "MUTATIONS", [
+        (real[0], real[1], "a line that this file has never contained",
+         "replacement", real[4])])
+    assert m.main([]) != 0

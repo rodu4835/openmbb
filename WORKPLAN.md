@@ -84,7 +84,7 @@ pre-write drain — passed 12/12 locally on a fast machine, failed on a loaded
 runner. The record moved inside the lock, immediately before `port.write()`
 (`bef9984`), which is *tighter* than the promise required.
 
-### 3a. v0.24.1 — the sharing path, hardened ← **NEXT, then push everything**
+### 3a. ~~v0.24.1 — the sharing path, hardened~~ — **shipped** (`a6ddc21`)
 
 The post-release review found two defects in the public binary and two in the
 mutation runner. All four are small; land them as one bundle, then push
