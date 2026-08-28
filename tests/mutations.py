@@ -303,6 +303,26 @@ MUTATIONS = [
      '''        orphan = getattr(tk, "_default_root", None)
         if False:''',
      "tests/test_display_honesty.py::test_a_failed_build_leaves_no_root_behind"),
+
+    # item 6 - the motor controller, read at last
+    ("sevcon: let a mode parse as a temperature (drop the excludes)",
+     "src/openmbb/parsers.py",
+     '''            ("motor_temp_c", ("motor", "temp"), ("max", "age", "control")),''',
+     '''            ("motor_temp_c", ("motor", "temp"), ()),''',
+     "tests/test_sevcon.py::test_a_mode_is_not_a_temperature"),
+
+    ("sevcon: an unreadable operational flag collapses to False",
+     "src/openmbb/parsers.py",
+     '''        out["operational"] = True if low.startswith("y") else (
+            False if low.startswith("n") else None)''',
+     '''        out["operational"] = low.startswith("y")''',
+     "tests/test_sevcon.py::test_an_unreadable_operational_flag_is_none_not_false"),
+
+    ("sevcon: a stored fault stops reaching the Health tab",
+     "src/openmbb/health.py",
+     '''    if sev.get("active_faults") is not None:''',
+     '''    if False:''',
+     "tests/test_sevcon.py::test_a_stored_fault_reaches_the_health_tab_as_an_alert"),
 ]
 
 

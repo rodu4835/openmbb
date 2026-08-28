@@ -788,6 +788,88 @@ def parse_runtime(text):
     return out
 
 
+def parse_sevcon(text):
+    """The `sevcon` block: the motor controller's own view of itself.
+
+    Read for the same reason `obd` is: a stored fault COUNT needs no reference
+    bike and no calibration, so it is one of the few things a single capture can
+    state flatly. The temperatures are returned because they are worth showing
+    beside it, and they are NOT graded - nobody has established what a warm
+    controller means on this platform, and inventing a threshold for the second
+    most expensive part on the bike is exactly the kind of number this project
+    refuses to print.
+
+    Labels here overlap in ways that punish a substring match, which is why the
+    excludes are explicit rather than incidental:
+
+      `Motor Temp`  vs  `Max Motor Temp This Ride`  vs  `Age of motor temp data`
+                    vs  `Motor Temp Control Mode`
+
+    all four contain "motor temp", and the last is a MODE, not a temperature -
+    it would have parsed as 0x01 degrees. `Controller Temp` and `Max Ctrl Temp`
+    do not even share a word, so both spellings are asked for by name.
+    """
+    kv = parse_kv(text)
+    if not kv:
+        return {}
+
+    def g(*needles, **kw):
+        return find(kv, *needles, **kw)
+
+    out = {}
+    for key, needles, excl in (
+            ("motor_temp_c", ("motor", "temp"), ("max", "age", "control")),
+            ("max_motor_temp_c", ("max", "motor", "temp"), ("age",)),
+            ("controller_temp_c", ("controller", "temp"), ("max", "age")),
+            ("max_controller_temp_c", ("max", "ctrl", "temp"), ("age",)),
+    ):
+        v = num(g(*needles, exclude=excl))
+        if v is not None:
+            out[key] = v
+
+    faults = num(g("number", "faults"))
+    if faults is not None:
+        out["active_faults"] = faults
+
+    mode = g("in", "operational", "mode")
+    if mode is not None:
+        low = str(mode).strip().lower()
+        # None, not False, when the word is neither: a value we could not read
+        # may never render as "not operational", which reads as a finding.
+        out["operational"] = True if low.startswith("y") else (
+            False if low.startswith("n") else None)
+
+    for key, needles in (("fw_rev", ("sevcon", "firmware")),
+                         ("serial", ("sevcon", "serial")),
+                         ("dcf_rev", ("sevcon", "dcf"))):
+        v = g(*needles)
+        if v:
+            out[key] = str(v).strip()
+
+    odo = num(g("odometer", "km"))
+    if odo is not None:
+        # NOT the bike's mileage, and it must never be shown as though it were.
+        # Measured on all three reference captures the moment this field first
+        # parsed:
+        #
+        #   sevcon 16172.7 km  vs  mbb 6809.0 km    ratio 2.3752
+        #   sevcon 16172.7 km  vs  mbb 6809.0 km    ratio 2.3752
+        #   sevcon 18821.3 km  vs  mbb 7924.0 km    ratio 2.3752
+        #
+        # Identical to four decimals across two months and ~1,100 km of riding,
+        # so it is a fixed scale factor, not drift. The controller's own km and
+        # miles agree with each other (18821.3 / 11689.8 = 1.6100), so the block
+        # is self-consistent - it is counting something that is not wheel
+        # distance, and a reduction a shade over 2.37 is what sits between the
+        # motor and the rear wheel.
+        #
+        # Kept because the RATIO is the interesting quantity and a second bike
+        # would establish whether 2.3752 is this bike's gearing or the
+        # controller's default. Until then no surface prints it.
+        out["odo_km"] = odo
+    return out
+
+
 def parse_obd(text):
     """The `obd` block: fault codes, in the sense any mechanic would recognise.
 

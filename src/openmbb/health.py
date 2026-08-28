@@ -28,7 +28,8 @@ value None and displays "n/a".
 """
 
 from . import gearing, rides
-from .parsers import (first_val, parse_bms, parse_obd, parse_stats,
+from .parsers import (first_val, parse_bms, parse_obd, parse_sevcon,
+                      parse_stats,
                       parse_status)
 from .transport import first_number, parse_settings_dump
 
@@ -351,6 +352,35 @@ def health_snapshot(session, temp_units="C", log_peak_c=None):
                            note="the bike's own OBD fault memory. A stored code "
                                 "is a fact rather than a threshold - read it "
                                 "before anything else on this tab."))
+
+    # The controller, read for the first time. Graded on the FAULT COUNT only:
+    # that is presence-or-absence, which needs no reference bike. The
+    # temperatures ride along in the display because they are worth seeing
+    # beside it, and nothing here grades them - no capture has established what
+    # a warm Sevcon means on this platform.
+    sev = parse_sevcon(session.cmd("sevcon"))
+    if sev.get("active_faults") is not None:
+        n = sev["active_faults"]
+        bits = ["%g active" % n if n else "none active"]
+        if sev.get("max_controller_temp_c") is not None:
+            bits.append("controller peaked %s this ride"
+                        % fmt_temp(sev["max_controller_temp_c"], temp_units))
+        if sev.get("max_motor_temp_c") is not None:
+            bits.append("motor %s"
+                        % fmt_temp(sev["max_motor_temp_c"], temp_units))
+        if sev.get("operational") is False:
+            # Reported, NOT graded: one capture, taken at rest, says Yes. What
+            # No means on a healthy parked bike is unestablished, and a guess
+            # here would invent a fault on the most expensive part after the
+            # pack.
+            bits.append("not in operational mode")
+        out.append(_metric(
+            "Sevcon faults", n, status="alert" if n else "ok",
+            display=", ".join(bits),
+            note="the motor controller's own stored fault count. Like the OBD "
+                 "codes this is a fact rather than a threshold; the "
+                 "temperatures beside it are measured and NOT graded, because "
+                 "nothing has established what a warm controller means here."))
 
     # F5: surface any live console warning as its own row
     for w in (status.get("warnings") or []):
