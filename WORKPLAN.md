@@ -262,18 +262,50 @@ Then push; CI (which has seen none of this) judges the stack whole.
   CI a reintroduced lie still exits 0. Both are guards-of-guards; note them on
   item 8's ledger rather than build a third layer now.
 
-### 6. Parse `sevcon` — a controller fault must surface in an inspection verdict
+### 6. ~~Parse `sevcon`~~ — **shipped** (`da3d511`, `2d51a0f`)
 
-The old plan's Tier-1 item was ticked with "(sevcon/chargers/bluetooth still unread)" in
-its own note, and it stayed unread: `parsers.py` has no `parse_sevcon`. The plan's own
-words call the controller "the second most expensive part on the bike" — and on a
-bike-day inspection, a Sevcon fault would not surface in the verdict today. A redacted
-`rev41_sevcon.txt` fixture already exists to build against.
+`parse_sevcon` plus a Health row graded exactly like `obd`: the stored fault
+COUNT is presence-or-absence and needs no reference bike, so three faults is an
+alert and none is an ok. The temperatures ride along in the display and are NOT
+graded — nothing has established what a warm Sevcon means here. A capture with
+no `sevcon` block gets **no row**, rather than a clean one.
 
-- **Change:** `parse_sevcon` (temperature, fault state, serial already redact-mapped);
-  a Health row; presence/absence grades like `obd`, measurements do not.
-  **Mutation:** the fixture-interrogation pattern — remove the parse → the named
-  fixture test fails.
+Two things worth keeping from the build:
+
+- **A mode is not a temperature.** Four labels in the block contain "motor
+  temp", and `Motor Temp Control Mode` is `0x01`. The exclude that stops it
+  being read as a temperature was **inert** when first written — `find()` takes
+  the first matching key and this bike prints the real one first, so ordering
+  luck did the work and the test passed with the guard deleted. The mutation
+  runner caught it; the test now rearranges the real block so the guard is
+  load-bearing.
+- **The controller's odometer is not the bike's mileage** — see below.
+
+### 6b. What the Sevcon odometer's 2.3752 ratio is *(a question for a second bike)*
+
+Measured on all three reference captures the moment the field first parsed:
+
+    sevcon 16172.7 km  vs  mbb 6809.0 km    ratio 2.3752
+    sevcon 16172.7 km  vs  mbb 6809.0 km    ratio 2.3752
+    sevcon 18821.3 km  vs  mbb 7924.0 km    ratio 2.3752
+
+Identical to four decimals across two months and ~1,100 km of riding, so it is a
+fixed scale factor, not drift. The controller's own km and miles agree with each
+other (1.6100), so the block is self-consistent — it is counting something that
+is not wheel distance, and a reduction a shade over 2.37 is what sits between
+the motor and the rear wheel.
+
+**Open:** whether 2.3752 is *this bike's gearing* or *the controller's default*.
+One capture from any second Gen2 settles it — if the ratio is identical on a
+bike with different sprockets it is a Sevcon constant; if it tracks the gearing
+it is a measurement of the drive ratio, and this project already has
+`gearing.py` and `rwhcirc` to compare it against. Costs nothing extra: the
+standard contactor-free pull already carries `sevcon` and `stats`. Added to
+*At a bike* section B.
+
+Until then no surface prints the figure, and a test renders every surface and
+fails if it appears — shown as distance it would put a number on screen 2.4
+times the bike's real mileage.
 
 ### 7. Golden transcripts and richer port fakes (~1.5 days)
 
@@ -426,6 +458,10 @@ six steps. What the data buys:
   calibration samples for `derate_profile`/`cell_sag`. Caveat now recorded: rev-12-era
   MinCell is a stuck constant, so `cell_sag` may be uncalibratable there regardless —
   the mail-in below may be the better calibration source.
+- **Free, and new:** the same pull answers item 6b. Compare that bike's
+  `sevcon` "Odometer Km" against its `stats` odometer. A ratio of 2.3752 means
+  the number is a Sevcon constant; anything else means it tracks the gearing and
+  is a real measurement of the drive reduction.
 - Afterwards: **Export share-safe copy** before the capture leaves the machine.
 
 ### C. The issue-#1 reporter — a mail-in, zero cost
