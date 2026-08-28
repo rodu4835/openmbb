@@ -416,9 +416,14 @@ tests/           pytest suite (safety/transport/config/analysis + GUI flow)
 
 Everything lands in `<save-base>/openmbb-sessions/<timestamp>_<port>/`:
 `session_raw.log` (every byte, timestamped), one file per command,
-`session_meta.txt` (power mode, firmware rev, timestamp),
+`session_meta.txt` (capture format, power mode, firmware rev, timestamp),
 `settings_baseline_*.txt`, `settings_backup_*.txt` (auto, pre-write),
-`writes_journal.txt`.
+`writes_journal.txt` (every setting write, and every consented heavy read).
+
+The `capture_format:` line states the layout a folder was written in. A copy of
+OpenMBB that meets a **newer** format refuses to read it rather than guess at
+it, and a folder that carries no stamp at all is a format-1 capture — every
+capture written before the stamp existed is one.
 
 **Where it saves:** by default the `<save-base>` is **`~/Documents/OpenMBB`** (a
 fixed, user-visible location — *not* the launch directory, so sessions never get
