@@ -14,10 +14,10 @@ Console work is done PARKED, key on, kill switch off. Never while riding.
 """
 
 APP_NAME = "OpenMBB"
-__version__ = "0.24.1"
+__version__ = "0.25.0"
 
 # The day this version was released, ISO. Bumped WITH __version__ and
 # checked against the tag by the release gate. It exists so a copy can say
 # how old it is without asking anybody: OpenMBB makes no network requests,
 # so it can never know what is newer, only how stale it is itself.
-__release_date__ = "2026-08-23"
+__release_date__ = "2026-08-28"

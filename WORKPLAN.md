@@ -297,7 +297,7 @@ every bike (a DCF default nobody sets per-model) or does it vary? Same free
 measurement as before — one contactor-free pull carries both odometers and the
 stats to compute true revs/km. The refusal-to-print stands either way.
 
-### 6c. The verdict must not let a green OK hide a red fault row ← **NEXT**
+### 6c. ~~The verdict must not let a green OK hide a red fault row~~ — **shipped** (`9e53397`)
 
 **The gap, measured on the real capture (2026-08-28):** with 4 active OBD DTCs
 and the warning lamp ON — or 3 stored Sevcon faults — the Health tab shows a
@@ -349,7 +349,7 @@ list is non-empty, or a bike with stored faults reads clean in the list view.
 
 ~1–2 h. Then 6d below, then bump 0.25.0 and tag.
 
-### 6d. Four small fixes from the item-6 review — same gate as 6c
+### 6d. ~~Five small fixes from the item-6 review~~ — **shipped** (`9e53397`)
 
 1. **A hex fault count invents a pass** *(reproduced; lens filed it, promoted
    here deliberately)*. `num("0x1C")` reads the leading 0 → `active_faults =
