@@ -51,6 +51,20 @@ def test_a_mode_is_not_a_temperature():
     assert sev["motor_temp_c"] == 35          # not 1, and not 140 (the age)
     assert sev["controller_temp_c"] == 27     # not 173 (the age)
 
+    # On THIS bike `Motor Temp` is printed before `Motor Temp Control Mode`, so
+    # a first-match-wins lookup reaches the right line by luck and the exclude
+    # changes nothing. The mutation runner caught that: the guard could be
+    # deleted and this test stayed green.
+    #
+    # So ask the question another bike might: same real block, mode first.
+    lines = _fixture().splitlines()
+    mode = [ln for ln in lines if "Motor Temp Control Mode" in ln]
+    assert len(mode) == 1, "fixture no longer carries the colliding label"
+    reordered = chr(10).join(mode + [ln for ln in lines if ln not in mode])
+    moved = parsers.parse_sevcon(reordered)
+    assert moved["motor_temp_c"] == 35, (
+        "a MODE was read as a temperature when it happened to come first")
+
 
 def test_a_block_that_is_not_there_yields_nothing_rather_than_zero():
     """A controller that was never read must not report zero faults: that is a
