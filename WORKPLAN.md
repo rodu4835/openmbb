@@ -11,14 +11,12 @@ current: what to do next, what needs a motorcycle, and what was deliberately not
 Opus sessions. Queue items below are scaffolded for direct pickup — files, the change,
 the tests, and the mutation each test must catch.
 
-**State:** v0.24.0 released 2026-08-23 (tag `12f0b65`, public, three assets). One
-commit local and unpushed (`a646b7c`, the listen-capture fix) pending the v0.24.1
-bundle below. Suite 588 passed (~8 min); the skip count flickers 0–2 run to run —
-that is item 8, now with direct evidence. 18 mutation entries, 18/18 caught. Three
-real captures, one bike, newest 2026-08-19 — **no v0.23.x-or-later build has ever
-touched real hardware**. The whole sprint was adversarially reviewed on 2026-08-24
-(four lenses, 21 findings: 4 fix-now, 8 filed, 9 clean); everything below reflects
-that review.
+**State:** v0.24.1 released; HEAD is `38cb656`, pushed, CI green both OSes
+(612+5 per OS; the Windows runner hit the transient Tcl read fault and the
+retry+warning machinery handled it in public view). Items 1–6, 5b and 8
+shipped. 617 tests locally, 0 skipped; 34 mutation entries, 34/34. The item-6
+review is DONE (two lenses, 16 findings: 5 for the release gate below, 4
+filed, 7 clean) — v0.25.0 ships when 6c and 6d land.
 
 **The organising constraint, sharpened:** only one motorcycle has ever been measured, and
 the code has now largely caught up with what one bike's data can teach. The next unit of
@@ -281,31 +279,102 @@ Two things worth keeping from the build:
   load-bearing.
 - **The controller's odometer is not the bike's mileage** — see below.
 
-### 6b. What the Sevcon odometer's 2.3752 ratio is *(a question for a second bike)*
+### 6b. What constant does the Sevcon odometer assume? *(second-bike question, premise corrected)*
 
-Measured on all three reference captures the moment the field first parsed:
+The ratio is real and exact — sevcon/MBB odometer = **2.3752** on all three
+captures, to four decimals across ~1,100 km — but the first explanation
+recorded for it ("a reduction a shade over 2.37 is what sits between the motor
+and the rear wheel") is **refuted by the repo's own data**, and the review
+caught it: `gearing.py` puts the FX/FXS stock reduction at **4.50**, and the
+same capture's `stats` measure 18,082,161 motor revs over 7,924 km = 2,282
+revs/km — almost exactly what 4.50 predicts (2,289). So ~4.49 sits between the
+motor and the wheel, not 2.37; the Sevcon's figure is its own distance model
+run with a wrong constant (an assumed reduction near 1.89, or equivalently a
+wrong wheel circumference).
 
-    sevcon 16172.7 km  vs  mbb 6809.0 km    ratio 2.3752
-    sevcon 16172.7 km  vs  mbb 6809.0 km    ratio 2.3752
-    sevcon 18821.3 km  vs  mbb 7924.0 km    ratio 2.3752
+**Open, for any second Gen2:** is the Sevcon's assumed constant the same on
+every bike (a DCF default nobody sets per-model) or does it vary? Same free
+measurement as before — one contactor-free pull carries both odometers and the
+stats to compute true revs/km. The refusal-to-print stands either way.
 
-Identical to four decimals across two months and ~1,100 km of riding, so it is a
-fixed scale factor, not drift. The controller's own km and miles agree with each
-other (1.6100), so the block is self-consistent — it is counting something that
-is not wheel distance, and a reduction a shade over 2.37 is what sits between
-the motor and the rear wheel.
+### 6c. The verdict must not let a green OK hide a red fault row ← **NEXT**
 
-**Open:** whether 2.3752 is *this bike's gearing* or *the controller's default*.
-One capture from any second Gen2 settles it — if the ratio is identical on a
-bike with different sprockets it is a Sevcon constant; if it tracks the gearing
-it is a measurement of the drive ratio, and this project already has
-`gearing.py` and `rwhcirc` to compare it against. Costs nothing extra: the
-standard contactor-free pull already carries `sevcon` and `stats`. Added to
-*At a bike* section B.
+**The gap, measured on the real capture (2026-08-28):** with 4 active OBD DTCs
+and the warning lamp ON — or 3 stored Sevcon faults — the Health tab shows a
+red ALERT and the verdict still reads *"OK — Nothing in this capture looks
+wrong with the pack."* The sentence is true and the effect is wrong: in the
+inspection flow the verdict is the terminal step, and a buyer reading a green
+OK will not naturally go hunting other tabs. (Correction for the record:
+`da3d511`'s message claimed a controller fault "reaches a verdict" — it reaches
+the Health tab only. And the hole predates item 6: `condition.verdict`'s
+health-metric intake is a hard-coded allow-list of `("Isolation resistance",
+"Warning")`, so the OBD **Fault codes** row has never moved the verdict
+either.)
 
-Until then no surface prints the figure, and a test renders every surface and
-fails if it appears — shown as distance it would put a number on screen 2.4
-times the bike's real mileage.
+**The decision (Fable, 2026-08-28): the verdict stays a pack verdict.**
+Widening it into a bike verdict would blur its identity — its checks are pack
+checks with chemistry-grounded thresholds, its `confidence: full` means *pack*
+questions answered, and its docstring draws that boundary on purpose. But a
+green OK that walks a buyer past a red row is a silence reading as a pass. So:
+don't widen the claim, don't stay silent — say the extra sentence, composed
+once (the item-5 pattern) so no surface can drift.
+
+**Scaffold:**
+
+1. `condition.beyond_pack_notes(metrics)` → list of sentences, empty when
+   nothing qualifies. Intake: health rows labelled **"Fault codes"** or
+   **"Sevcon faults"** at watch/alert. Each sentence carries the row's display
+   text and the load-bearing clause — that the pack verdict above **does not
+   cover** this finding. One composer, both fault classes; fixing only the
+   Sevcon label would leave the identical hole one label over.
+2. `condition.verdict()` returns a new `beyond_pack` key (it already receives
+   `metrics`). The **level is unchanged** — that is the whole point.
+3. Surfaces: the Condition tab renders each note as its own attention row
+   beside the verdict; the report's `== Verdict ==` block prints them after
+   the headline. The inspection flow's final step opens the Condition tab, so
+   the tab rendering covers it.
+4. Tests: a real-shaped capture with fabricated Sevcon faults and one with
+   active DTCs → the note appears on BOTH surfaces (the Verdict section sits
+   outside the item-5 mirror slice, so this needs its own cross-surface
+   assertion). **Mutations:** sever the intake → note vanishes → test fails;
+   make the composer move the verdict LEVEL → the level-unchanged test fails.
+
+Two sharpenings from the review: **(a)** the pack-scope boundary is already
+breached once in code — "Warning" rows come from *any* live console warning
+(health.py:387), which is in-code precedent for admitting the fault-count rows
+as notes; **(b)** `library.deep_verdict` caches this verdict, so the library's
+green "ok" cell has the same blind spot — include `beyond_pack` in the cached
+dict, bump `SUMMARY_VERSION`, and tag the library row "attention" when the
+list is non-empty, or a bike with stored faults reads clean in the list view.
+
+~1–2 h. Then 6d below, then bump 0.25.0 and tag.
+
+### 6d. Four small fixes from the item-6 review — same gate as 6c
+
+1. **A hex fault count invents a pass** *(reproduced; lens filed it, promoted
+   here deliberately)*. `num("0x1C")` reads the leading 0 → `active_faults =
+   0.0` → "none active, ok". Hex is demonstrably in-family in this exact
+   block: the same real capture prints `0x01`, `0x00`, `0x010d0005` on
+   neighbouring lines. This is the graded field, in the unsafe direction —
+   precisely the class a release must not carry. Fix NARROWLY in
+   `parse_sevcon`: if a value string for any numeric field contains a hex
+   token (`0x`), treat that field as unreadable — no `active_faults` key
+   means **no row**, which is the honest "could not read". Do NOT touch
+   `num()` itself — it is shared by every parser; the general survey is filed
+   as item 13. Test + mutation entry.
+2. **The motor's ride-max temperature reads as a current reading.** The row
+   says "controller peaked 27 C this ride, motor 36 C" — the 36 is also a
+   ride max. Wording: "peaks this ride: controller 27 C, motor 36 C".
+3. **"not in operational mode" renders inside a green OK row.** Reported-not-
+   graded is right; the rendering hides that. Append "(not graded)" to the
+   phrase so the row cannot read as a finding.
+4. **`parse_sevcon` joins `DICT_PARSERS`** in test_parser_properties.py — it
+   passes all three properties today (verified, 200 examples); membership
+   makes that continuous instead of a one-time fact.
+5. **Correct the 2.3752 physics comment** in parsers.py — see 6b below, whose
+   premise the review refuted with the repo's own data.
+
+
 
 ### 7. Golden transcripts and richer port fakes (~1.5 days)
 
@@ -408,6 +477,28 @@ version would be read as format 1 by an older tool.
   `time`, `app_version`) when the session directory is created; the pull path
   keeps enriching it with firmware/power-mode as now (which also intersects
   item 9 — both are "move the record down to where every caller passes").
+
+### 13. `num()` accepts a hex prefix and reads its leading zero
+
+`num("0x1C")` → 0.0, in every parser that uses `num`/`all_nums`. Item 6d
+refuses it locally in the one *graded* field; this item is the survey: which
+fields across all parsers can meet a hex token on real firmware, and whether
+the garble guard should refuse `0x` outright the way it refuses split decimals.
+`num` also lacks the split-digit-run guard `_unit_number` has — same survey.
+
+### 14. The simulator's sevcon block predates the parser
+
+`SIM_SEVCON`'s labels miss every fault/operational/firmware needle, so a sim
+session renders **no Sevcon row** — the demo mode never shows the feature it
+exists to demo. Extend the sim block to the rev-41 shape. (Honest silence
+today, not a lie — no row is no claim — which is why this filed rather than
+gated the release.)
+
+Also noted from the review, no items: the odometer-leak sentinel renders only
+`health_snapshot` + `format_report` from a sevcon-only session (the invariant
+holds because the field has one consumer — tighten opportunistically); and the
+release gate walks `git ls-files`, so an *untracked* capture copied into the
+repo is unscanned by design — worth remembering, not changing.
 
 ---
 
