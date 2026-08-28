@@ -341,10 +341,11 @@ MUTATIONS = [
     # controller has a fault would be lying about the pack.
     ("beyond-pack: let a note escalate the pack verdict's level",
      "src/openmbb/condition.py",
-     '''        "beyond_pack": beyond_pack_notes(metrics),''',
-     '''        "beyond_pack": beyond_pack_notes(metrics),
-        "_mutated_level": checks.append(
-            {"name": "x", "level": "concern", "detail": "x"}),''',
+     '''    # 4. preconditions that weaken whatever the checks said''',
+     '''    for _note in beyond_pack_notes(metrics):
+        add("Beyond the pack", "concern", _note)
+
+    # 4. preconditions that weaken whatever the checks said''',
      "tests/test_beyond_pack.py::test_the_verdict_level_is_not_moved_by_a_note"),
 
     ("beyond-pack: the saved page stops printing the notes",
