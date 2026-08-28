@@ -746,6 +746,39 @@ def _headline(level, answered, total):
     return "Nothing in this capture looks wrong with the pack"
 
 
+#: Health rows that report a fault the PACK verdict does not cover. Both, not
+#: one: the Sevcon row is new, but the OBD row has been invisible to the
+#: verdict since the verdict existed, and fixing the new label alone would
+#: leave the identical hole one label over.
+_BEYOND_PACK_LABELS = ("Fault codes", "Sevcon faults")
+
+
+def beyond_pack_notes(metrics):
+    """Findings a reader must not walk past because the pack verdict is green.
+
+    The verdict is about the PACK. That scope is deliberate and it is what
+    makes the thing trustworthy - its checks are pack checks against
+    chemistry-grounded thresholds, and "confidence: full" counts pack questions
+    answered, not bike questions. So this does not widen the claim.
+
+    What it refuses to do is stay quiet. A stored fault code sits on the Health
+    tab in red while the verdict says "nothing wrong with the pack", and a
+    buyer reading the green line at the end of an inspection has been walked
+    past it. Each note carries the row's own words and the clause that matters:
+    the verdict above does not cover this.
+    """
+    out = []
+    for m in metrics or []:
+        if m.get("label") not in _BEYOND_PACK_LABELS:
+            continue
+        if m.get("status") not in ("watch", "alert"):
+            continue
+        what = str(m.get("display") or m.get("value") or "").strip()
+        out.append("%s: %s - the verdict above is about the PACK and does not "
+                   "cover this." % (m["label"], what))
+    return out
+
+
 def verdict(assessment, metrics=None):
     """A plain-language read on the pack, from one capture.
 
@@ -830,6 +863,11 @@ def verdict(assessment, metrics=None):
         level = "unknown"
     return {
         "level": level,
+        # Deliberately NOT folded into `level`: see beyond_pack_notes. A pack
+        # verdict that went amber because the motor controller has a fault
+        # would be lying about the pack, which is the one thing this function
+        # is for.
+        "beyond_pack": beyond_pack_notes(metrics),
         "headline": _headline(level, len(answered), len(checks)),
         "checks": checks,
         "answered": len(answered),

@@ -816,6 +816,25 @@ def parse_sevcon(text):
     def g(*needles, **kw):
         return find(kv, *needles, **kw)
 
+    def n(value):
+        """A number, unless it is written in hex - then it is unreadable.
+
+        `num("0x1C")` reads the leading zero and returns 0.0, which in the
+        graded field renders "none active" and an OK row: a fault count of 28
+        presented as a clean bike. Hex is not hypothetical here - this very
+        block prints 0x01, 0x00 and 0x010d0005 on neighbouring lines, so a
+        firmware writing the count the same way is an ordinary thing to meet.
+
+        Refused locally rather than in `num()`, which every parser shares; the
+        general survey is a separate question. A refused value means the key is
+        absent, which means no row at all - "could not read" said properly.
+        """
+        if value is None:
+            return None
+        if "0x" in str(value).lower():
+            return None
+        return num(value)
+
     out = {}
     for key, needles, excl in (
             ("motor_temp_c", ("motor", "temp"), ("max", "age", "control")),
@@ -823,11 +842,11 @@ def parse_sevcon(text):
             ("controller_temp_c", ("controller", "temp"), ("max", "age")),
             ("max_controller_temp_c", ("max", "ctrl", "temp"), ("age",)),
     ):
-        v = num(g(*needles, exclude=excl))
+        v = n(g(*needles, exclude=excl))
         if v is not None:
             out[key] = v
 
-    faults = num(g("number", "faults"))
+    faults = n(g("number", "faults"))
     if faults is not None:
         out["active_faults"] = faults
 
@@ -846,7 +865,7 @@ def parse_sevcon(text):
         if v:
             out[key] = str(v).strip()
 
-    odo = num(g("odometer", "km"))
+    odo = n(g("odometer", "km"))
     if odo is not None:
         # NOT the bike's mileage, and it must never be shown as though it were.
         # Measured on all three reference captures the moment this field first
@@ -859,13 +878,21 @@ def parse_sevcon(text):
         # Identical to four decimals across two months and ~1,100 km of riding,
         # so it is a fixed scale factor, not drift. The controller's own km and
         # miles agree with each other (18821.3 / 11689.8 = 1.6100), so the block
-        # is self-consistent - it is counting something that is not wheel
-        # distance, and a reduction a shade over 2.37 is what sits between the
-        # motor and the rear wheel.
+        # is self-consistent - it is simply counting with a constant that is
+        # not this bike's.
+        #
+        # The first explanation recorded here said the 2.37 WAS the reduction
+        # between motor and wheel. This repo's own data refutes that:
+        # gearing.py puts the FX/FXS stock reduction at 4.50, and the same
+        # capture's `stats` measure 18,082,161 motor revs over 7,924 km =
+        # 2,282 revs/km, almost exactly the 2,289 that 4.50 predicts. So ~4.49
+        # sits between the motor and the wheel, and the Sevcon is running its
+        # own distance model on a wrong constant (an assumed reduction near
+        # 1.89, or an equivalent wheel-circumference error).
         #
         # Kept because the RATIO is the interesting quantity and a second bike
-        # would establish whether 2.3752 is this bike's gearing or the
-        # controller's default. Until then no surface prints it.
+        # would establish whether that constant is a DCF default or per-bike.
+        # Until then no surface prints it.
         out["odo_km"] = odo
     return out
 

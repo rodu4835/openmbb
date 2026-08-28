@@ -153,3 +153,23 @@ def test_every_reference_capture_reads_a_clean_controller():
         mbb = parsers.parse_stats(sessions.load_session(f).cmd("stats"))
         if sev.get("odo_km") and mbb.get("odo_km"):
             assert 2.37 < sev["odo_km"] / mbb["odo_km"] < 2.38, f
+
+
+def test_a_hex_fault_count_is_unreadable_not_zero():
+    """`num("0x1C")` reads the leading zero and returns 0.0, so a count of 28
+    faults rendered "none active" and a green OK row.
+
+    Hex is not hypothetical in this block: the same real capture prints 0x01,
+    0x00 and 0x010d0005 on neighbouring lines, so a firmware writing the count
+    that way is an ordinary thing to meet. A value we cannot read produces NO
+    key and therefore no row, which is what "could not read" looks like.
+    """
+    hexed = _fixture().replace("- Number of Faults          :    0",
+                               "- Number of Faults          :    0x1C")
+    sev = parsers.parse_sevcon(hexed)
+    assert "active_faults" not in sev, "a hex count must not parse as a number"
+
+    s = sessions.Session("x", {"sevcon": hexed}, "")
+    assert not [m for m in health.health_snapshot(s)
+                if m["label"] == "Sevcon faults"], (
+        "an unreadable fault count must leave the row out, never render ok")

@@ -277,6 +277,11 @@ def _verdict_lines(v):
     if not v:
         return []
     out = ["", "== Verdict ==", "  %s" % v["headline"]]
+    # Directly under the headline, before the checks: this is the line a reader
+    # who stops at the verdict has to see, and putting it after the caveats
+    # would bury it exactly where the green OK already buried it.
+    for note in v.get("beyond_pack") or []:
+        out += _wrap(note, indent="  ! ", hang="    ")
     for c in v["checks"]:
         out.append("    [%-7s] %-24s %s" % (c["level"], c["name"], c["detail"]))
     for c in v["caveats"]:

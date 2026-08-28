@@ -323,6 +323,44 @@ MUTATIONS = [
      '''    if sev.get("active_faults") is not None:''',
      '''    if False:''',
      "tests/test_sevcon.py::test_a_stored_fault_reaches_the_health_tab_as_an_alert"),
+
+    # 6c - a green verdict may not hide a red row
+    ("beyond-pack: sever the intake, so no note is ever composed",
+     "src/openmbb/condition.py",
+     '''        if m.get("label") not in _BEYOND_PACK_LABELS:''',
+     '''        if True:''',
+     "tests/test_beyond_pack.py::test_both_fault_classes_produce_a_note"),
+
+    ("beyond-pack: cover only the Sevcon label, leaving OBD invisible",
+     "src/openmbb/condition.py",
+     '''_BEYOND_PACK_LABELS = ("Fault codes", "Sevcon faults")''',
+     '''_BEYOND_PACK_LABELS = ("Sevcon faults",)''',
+     "tests/test_beyond_pack.py::test_both_fault_classes_produce_a_note"),
+
+    # The level must NOT move. A pack verdict that went amber because the motor
+    # controller has a fault would be lying about the pack.
+    ("beyond-pack: let a note escalate the pack verdict's level",
+     "src/openmbb/condition.py",
+     '''        "beyond_pack": beyond_pack_notes(metrics),''',
+     '''        "beyond_pack": beyond_pack_notes(metrics),
+        "_mutated_level": checks.append(
+            {"name": "x", "level": "concern", "detail": "x"}),''',
+     "tests/test_beyond_pack.py::test_the_verdict_level_is_not_moved_by_a_note"),
+
+    ("beyond-pack: the saved page stops printing the notes",
+     "src/openmbb/report.py",
+     '''    for note in v.get("beyond_pack") or []:''',
+     '''    for note in []:''',
+     'tests/test_gui_flow.py::test_a_fault_the_pack_verdict_ignores_reaches_both_surfaces'),
+
+    # 6d - a hex fault count is unreadable, not zero
+    ("sevcon: read a hex fault count as its leading zero",
+     "src/openmbb/parsers.py",
+     '''        if "0x" in str(value).lower():
+            return None''',
+     '''        if False:
+            return None''',
+     "tests/test_sevcon.py::test_a_hex_fault_count_is_unreadable_not_zero"),
 ]
 
 

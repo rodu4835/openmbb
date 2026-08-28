@@ -100,6 +100,9 @@ BLOCK = st.lists(st.one_of(MUTATED, TEXTISH), max_size=12).map("\n".join)
 
 # Every parser that takes a block of console text and returns a dict.
 DICT_PARSERS = [
+    # parse_sevcon passes all three properties as written; membership is what
+    # makes that a continuous fact instead of a thing verified once.
+    parsers.parse_sevcon,
     parsers.parse_bms, parsers.parse_stats, parsers.parse_status,
     parsers.parse_inputs, parsers.parse_outputs, parsers.parse_runtime,
     parsers.parse_obd,

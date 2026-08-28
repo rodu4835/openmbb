@@ -1693,6 +1693,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             soc = "-" if row.get("soc_pct") is None else "%.0f%%" % row["soc_pct"]
             if verdict:
                 v = verdict["level"]
+                # A stored fault the pack verdict does not cover must not read
+                # as a clean row here either: the list is scanned faster than
+                # the tab, and "ok" is the word people act on.
+                if verdict.get("beyond_pack"):
+                    v = "%s + faults" % v
             elif not row["has_event_log"]:
                 # a capture taken without '+event log' can never reach a verdict,
                 # and saying so beats a spinner that resolves to nothing
@@ -4850,6 +4855,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             def _row(check, finding, tag):
                 self.cond_tree.insert("", "end", tags=(tag,),
                                       values=(check, finding))
+
+            # First rows on the tab, above everything: these are the findings
+            # the verdict deliberately does not cover, and burying them under
+            # the measurements would repeat the failure they exist to fix.
+            for _note in (self._cond_verdict or {}).get("beyond_pack") or []:
+                _row("Beyond the pack verdict", _note, "attention")
 
             clk = condition_mod.clock_check(self.analyze_session)
             if clk.get("mbb_clock"):

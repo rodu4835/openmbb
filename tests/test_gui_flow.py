@@ -3385,3 +3385,50 @@ def test_the_coverage_limit_reaches_both_surfaces(app):
         assert "UNMEASURED" in surface, name
         assert "not clean" in surface, name
         assert "12 of 20 ride records" in surface, name
+
+
+# --- the verdict's beyond-the-pack notes, on both surfaces -------------------
+
+def _beyond_sevcon(faults):
+    import io as _io
+    import os as _os
+    path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                         "fixtures", "rev41_sevcon.txt")
+    with _io.open(path, encoding="utf-8") as f:
+        return f.read().replace("- Number of Faults          :    0",
+                                "- Number of Faults          :    %d" % faults)
+
+
+def _beyond_tab_rows(app, session):
+    app._analyze_set(session)
+    return " ".join(
+        " ".join(str(v) for v in (app.cond_tree.item(i)["values"] or []))
+        for i in app.cond_tree.get_children())
+
+
+def test_a_fault_the_pack_verdict_ignores_reaches_both_surfaces(app, tmp_path):
+    """The Verdict block sits OUTSIDE the item-5 mirror slice, so it needs its
+    own cross-surface assertion or the saved page and the tab can drift apart
+    with nothing to notice."""
+    from openmbb import report as rmod
+    from openmbb import sessions as smod
+
+    session = smod.Session(str(tmp_path), {"sevcon": _beyond_sevcon(3)}, "")
+    page = rmod.format_report(rmod.analyze_session(session))
+    tab = _beyond_tab_rows(app, session)
+
+    for surface, name in ((page, "the saved page"), (tab, "the Condition tab")):
+        flat = " ".join(surface.split())
+        assert "Sevcon faults: 3 active" in flat, name
+        assert "does not cover this" in flat, name
+
+
+def test_a_clean_capture_adds_no_beyond_pack_note_to_either_surface(app, tmp_path):
+    from openmbb import report as rmod
+    from openmbb import sessions as smod
+
+    session = smod.Session(str(tmp_path), {"sevcon": _beyond_sevcon(0)}, "")
+    page = rmod.format_report(rmod.analyze_session(session))
+    tab = _beyond_tab_rows(app, session)
+    for surface, name in ((page, "the saved page"), (tab, "the Condition tab")):
+        assert "does not cover this" not in surface, name

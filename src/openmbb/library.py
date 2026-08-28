@@ -34,7 +34,7 @@ SUMMARY_FILE = "session_summary.json"
 #      resting cell-spread check to "unknown" and dropped the isolation and
 #      warning-light checks entirely - a bike the Condition tab grades "concern"
 #      showed a green "ok" here, in the one column a buyer triages on.
-SUMMARY_VERSION = 2
+SUMMARY_VERSION = 3
 
 
 # --- notes -------------------------------------------------------------------
@@ -232,8 +232,14 @@ def deep_verdict(folder, use_cache=True):
     # re-parses the short command outputs already loaded above.
     metrics = health.health_snapshot(s)
     v = condition.verdict(condition.assess(log), metrics)
+    # `beyond_pack` travels with the level for the same reason the metrics are
+    # not optional above: without it a bike whose controller or OBD memory
+    # holds a stored fault renders as a green "ok" in this list, which is the
+    # blind spot the Condition tab just had fixed one surface over.
     data = {"version": SUMMARY_VERSION, "level": v["level"],
-            "headline": v["headline"], "evidence": _log_fingerprint(log)}
+            "headline": v["headline"],
+            "beyond_pack": v.get("beyond_pack") or [],
+            "evidence": _log_fingerprint(log)}
     # Writing into the capture folder bumps the folder's mtime, and the Charts
     # trend metrics plot each capture AT its folder mtime - so simply opening
     # this list would restamp every capture to "now" and flatten a year of

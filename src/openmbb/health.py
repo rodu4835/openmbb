@@ -362,18 +362,24 @@ def health_snapshot(session, temp_units="C", log_peak_c=None):
     if sev.get("active_faults") is not None:
         n = sev["active_faults"]
         bits = ["%g active" % n if n else "none active"]
+        # Both figures are ride MAXIMA. "controller peaked X, motor Y" read as
+        # a peak and a current reading, which is two different claims in one
+        # phrase; one label now covers both numbers it owns.
+        peaks = []
         if sev.get("max_controller_temp_c") is not None:
-            bits.append("controller peaked %s this ride"
-                        % fmt_temp(sev["max_controller_temp_c"], temp_units))
+            peaks.append("controller %s"
+                         % fmt_temp(sev["max_controller_temp_c"], temp_units))
         if sev.get("max_motor_temp_c") is not None:
-            bits.append("motor %s"
-                        % fmt_temp(sev["max_motor_temp_c"], temp_units))
+            peaks.append("motor %s"
+                         % fmt_temp(sev["max_motor_temp_c"], temp_units))
+        if peaks:
+            bits.append("peaks this ride: %s" % ", ".join(peaks))
         if sev.get("operational") is False:
             # Reported, NOT graded: one capture, taken at rest, says Yes. What
             # No means on a healthy parked bike is unestablished, and a guess
             # here would invent a fault on the most expensive part after the
             # pack.
-            bits.append("not in operational mode")
+            bits.append("not in operational mode (not graded)")
         out.append(_metric(
             "Sevcon faults", n, status="alert" if n else "ok",
             display=", ".join(bits),
