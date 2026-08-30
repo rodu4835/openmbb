@@ -506,7 +506,7 @@ holds because the field has one consumer — tighten opportunistically); and the
 release gate walks `git ls-files`, so an *untracked* capture copied into the
 repo is unscanned by design — worth remembering, not changing.
 
-### 19. The coast-regen refusal is folklore — demote it to a warning
+### 19. ~~The coast-regen refusal is folklore~~ — **shipped** (`a05f16c`)
 
 **Decided (Fable, 2026-08-30).** The gate refuses exactly 0% coast regen with
 *"0% coasting regen can cause fishtailing in low traction"*. Three findings, in
@@ -536,7 +536,7 @@ sites. **Flip the two pinned checks** (`cli.py:141` selftest,
 Mutations: restore the refusal → validator test fails; drop the warn → warn
 test fails. Commit message records the provenance.
 
-### 20. The verdict headline must name its driver — and isolation stays load-bearing
+### 20. ~~The verdict headline names its driver~~ — **shipped**
 
 **Decided (Fable, 2026-08-30).** The bike-day capture headlined *"Walk away, or
 get the pack checked"* driven by the isolation row, with three of four pack
@@ -630,7 +630,7 @@ than declaring the machine's ceiling. It is also labelled "Eco" while reporting
 the active mode. Keep the validator at the console's 20–102; hardcoding 89 would
 bake one motorcycle into a platform-wide whitelist.
 
-### 15b. The review of 15 found the same sin one layer down ← **NEXT, blocks the push**
+### 15b. ~~The review of 15 found the same sin one layer down~~ — **shipped** (`ba1b5a1`)
 
 The adversarial review (2026-08-30) confirmed the core — `console_write_result`
 is right on all seven real wire replies and every hostile shape tried;
