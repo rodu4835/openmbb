@@ -3762,10 +3762,10 @@ def test_the_refused_setting_gate_has_no_back_door(app, monkeypatch):
 
     _write_value is the choke point every caller passes through.
     """
-    asked = []
+    asked, refused = [], []
     from openmbb import dialogs as mb
     monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: asked.append(a) or True)
-    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: None)
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: refused.append(a))
     monkeypatch.setattr(mb, "showinfo", lambda *a, **k: None)
 
     app._connect()
@@ -3783,8 +3783,19 @@ def test_the_refused_setting_gate_has_no_back_door(app, monkeypatch):
 
     # straight at the choke point, the way Reset reaches it
     app._write_value("maxcustregcotq_allow", "55")
-    assert not sent, "a write the firmware refuses reached the wire"
+
+    # The refusal is SYNCHRONOUS - the gate runs before any thread starts - so
+    # assert it directly. Asserting only "nothing was sent" was vacuous: the
+    # write path dispatches through _run_bg, so `sent` is empty the instant
+    # _write_value returns whether the gate is there or not, and the mutation
+    # runner caught this test staying green with the gate removed.
+    assert refused, "the gate must refuse, and say so"
+    assert "cannot be written on this firmware" in str(refused[-1])
     assert not asked, "it should not even ask to confirm"
+
+    # ...and nothing reaches the wire afterwards either
+    _pump(app, lambda: bool(sent), timeout=8)
+    assert not sent, "a write the firmware refuses reached the wire"
 
 
 def test_launching_in_simulator_mode_says_so_without_touching_the_toggle(app):

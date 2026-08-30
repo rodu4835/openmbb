@@ -469,8 +469,10 @@ MUTATIONS = [
     # items 17-18 - what read badly at an actual motorcycle
     ("port: Refresh fills the list and leaves the field blank again",
      "src/openmbb/gui.py",
-     '''            if len(real_ports) == 1 and not (self.port_var.get() or "").strip():''',
-     '''            if False:''',
+     '''            if len(ports) == 1 and not (self.port_var.get() or "").strip():
+                self.port_var.set(ports[0])''',
+     '''            if False:
+                self.port_var.set(ports[0])''',
      "tests/test_gui_flow.py::test_refresh_selects_a_lone_port_when_nothing_is_chosen"),
 
     ("simulator: the title bar stops saying it is not your bike",
