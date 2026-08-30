@@ -539,8 +539,10 @@ test fails. Commit message records the provenance.
 ### 20. ~~The verdict headline names its driver~~ — **shipped**
 
 **Decided (Fable, 2026-08-30).** The bike-day capture headlined *"Walk away, or
-get the pack checked"* driven by the isolation row, with three of four pack
-checks unknown. The field called it an overshoot. The resolution is NOT to
+get the pack checked"* driven by the isolation row, with two of four pack
+checks unknown (the first draft of this item said three; the review checked
+the capture — cell spread at rest was answered, 3 mV — and the headline now
+correctly prints "2 of 4"). The field called it an overshoot. The resolution is NOT to
 demote isolation:
 
 - **Isolation stays in the level.** HV-to-chassis leakage is a battery-system
@@ -556,8 +558,8 @@ demote isolation:
 - **The concern/watch branches carry the unanswered count**, exactly as the ok
   branch does. The docstring already argues a separate confidence field is
   "where nobody looks" — and then the concern branch omits the count entirely,
-  which is how "Walk away" printed with no hint that 3 of 4 checks were
-  unanswered. *"— and 3 of 4 checks went unanswered"* belongs on the harsh
+  which is how "Walk away" printed with no hint that 2 of 4 checks were
+  unanswered. *"(2 of 4 checks unanswered)"* belongs on the harsh
   branches most of all.
 
 **Scaffold:** `_headline` takes the checks (or the driving subset); both
@@ -566,6 +568,84 @@ length. Tests: concern-driven-by-isolation names isolation; the unanswered
 count appears on concern; cross-surface test already covers the render.
 Mutations: strip the driver clause → naming test fails; drop the count → count
 test fails.
+
+### 20b. The stack review — item 19's blast radius was six, and two other misses ← **NEXT, blocks the push**
+
+Adversarial review of the eight unpushed commits (2026-08-30, two lenses). What
+held: mutation entries 43–51 all catch; every FAILED × {moved, unknown, clean}
+dialog and journal line renders correctly; the selftest's 101 refusal is
+genuinely the validator; the "Zero's app wrote 0" evidence is real in dump 042;
+item 20's headlines render as claimed on all five captures with no surface
+truncating them; the beyond-pack notes under an isolation headline read
+coherently. Nine things to fix before the push, none large:
+
+**Item 19 — the blast radius was six enforcement points, not four.** Two
+shipped, tracked JSON assets still tell the user 0 is refused for fishtail risk,
+and **both are rendered by the GUI in the exact flow item 19 changed**:
+
+1. `src/openmbb/assets/write_options_help.json:41` — *"Exactly 0% is refused
+   by the app … (fishtail risk). Use a small nonzero value"* — feeds the
+   Writes-tab description panel (`_write_help_parts`) AND the write confirm
+   dialog (`_write_help_lines`). Reproduced: the confirm screen for a 0 write
+   says "refused … fishtail" and, three lines later, the new warning says it
+   is supported. The confirm dialog contradicts the write it is about to send.
+2. `src/openmbb/assets/command_reference.json:716–717` — same claim, rendered
+   by the Console tab's dangerous-command dialog under "What could happen".
+   Its twin in `info.html` *was* updated, so the two copies now disagree.
+3. **The pinning test scans three files and so cannot see either.** Widen
+   `test_no_shipped_text_still_claims_…` to every file under
+   `src/openmbb/assets/` plus `gui.py` and `README.md`, and add a manifest
+   entry that re-inserts the claim into `write_options_help.json`.
+4. **The replacement warning claims the safe direction** — *"a supported value
+   rather than a dangerous one"*. The decision was no claim in either
+   direction and the commit's own text says "Nothing claims 0 is safe". Drop
+   the clause; "Zero's own app writes 0 in some flows" is the fact.
+
+**Item 15b — the guard covered one branch of two.**
+
+5. The **silent-clamp** branch (`"%s did not change … (No harm done — the bike
+   kept its previous value.)"`) is unconditional, seconds after the collateral
+   warning listed what the write moved. Reproduced with a doctored verify
+   dump. Same `moved` guard the REFUSED branch got.
+
+**Item 20 — three wording/consistency misses.**
+
+6. The **"Warning" check lowercases to a driver clause of just "— warning"**,
+   which names nothing: *"Worth a closer look — warning"*. For that check, use
+   its `detail` (the console's warning text), not its name.
+7. **`SUMMARY_VERSION` was not bumped** when the headline wording changed, so a
+   cached `session_summary.json` keeps serving *"get the pack checked"* until
+   its fingerprint changes. 3 → 4.
+8. The Condition tab label renders **three em dashes** (`CONCERN — Walk away …
+   — isolation …`) — the pattern the item-20 commit itself argues nobody parses
+   in a driveway. `_paint_verdict` separator becomes `: `.
+9. The tree stated three times that the bike-day capture had **three** cell
+   checks unanswered; it had **two** (cell spread at rest answered, 3 mV). This
+   plan is corrected above; fix `condition.py:758`'s docstring and note the
+   commit-message error in the fix commit.
+
+One note, not a fix: under an isolation-driven headline the 6c note still says
+*"the verdict above is about the PACK"*. Both sentences are true and the lens
+read the stack as coherent; recorded here so the next wording pass considers
+"covers the battery system" instead.
+
+### 21. The audit file's two record types disagree about masking
+
+`journal_observed` masks registered secrets; `journal_write` never has and
+still does not, while `journal_consent` spells the rule out. A setting write is
+name/old/new — low leak risk — but the rule should be one rule. Route all three
+through the same masked writer; one test that a redacted secret in a value is
+`****` in every record type.
+
+### 22. The unanswered count's denominator moves with the bike
+
+*"2 of 4 checks unanswered"* counts the checks that happened to EXIST — and
+isolation/warning rows exist only when they fire. The same evidence reads
+"2 of 3" on a bike with healthy isolation and "2 of 4" on one with a fault, so
+the number is not a fixed scorecard. Decide: count only the three pack checks
+in the fraction and name conditional rows separately, or say "N of the M
+checks this capture could run". The former is more honest about what the
+count means.
 
 ---
 
