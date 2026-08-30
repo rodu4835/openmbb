@@ -200,6 +200,25 @@ class SessionLogger:
         with self._lock, open(self.journal_path, "a", encoding="utf-8") as f:
             f.write(line)
 
+    def journal_observed(self, name, old, new, because):
+        """A setting that MOVED without being asked to.
+
+        Writing `spfront` on the reference bike changed four regen values nobody
+        touched. That is not a write this program performed, so it does not
+        belong in `journal_write`: routing it there forced the status word
+        PENDING, which this file defines as intent recorded before the wire, and
+        left an unrequested change wearing the signature of an interrupted
+        authorized one.
+
+        `because` is OUR sentence and is written as ours. Nothing here is
+        attributed to the console.
+        """
+        line = "%s | %s | %s -> %s | OBSERVED (not requested) - %s\n" % (
+            _dt.datetime.now().isoformat(timespec="seconds"),
+            name, old, new, str(because).strip())
+        with self._lock, open(self.journal_path, "a", encoding="utf-8") as f:
+            f.write(self._mask(line))
+
     def journal_write(self, name, old, new, ok, got=None, said=None):
         """Record a write. `got` is what the bike actually read back.
 
@@ -216,9 +235,18 @@ class SessionLogger:
         """
         # ok=None -> PENDING (intent journaled BEFORE the write reaches the wire)
         status = "PENDING" if ok is None else ("VERIFIED" if ok else "UNVERIFIED")
-        if got is not None and str(got) != str(new):
-            status += " (bike reports %s)" % got
+        if got is not None:
+            if not str(got).strip():
+                # A read-back that did not come back is not a value the bike
+                # reports. It used to render as "(bike reports )" - an empty
+                # claim attributed to the motorcycle.
+                status += " (read-back did not return this setting)"
+            elif str(got) != str(new):
+                status += " (bike reports %s)" % got
         if said:
+            # ONLY genuine console text reaches this label. An annotation of our
+            # own goes through `note`, unattributed, because a permanent audit
+            # file is the last place to paraphrase a machine.
             status += " [console said: %s]" % said
         line = "%s | %s | %s -> %s | %s\n" % (
             _dt.datetime.now().isoformat(timespec="seconds"),

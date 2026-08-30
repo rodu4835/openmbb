@@ -142,8 +142,13 @@ def test_the_controller_odometer_is_never_printed_as_distance():
 
 @pytest.mark.skipif(not os.path.isdir(REAL), reason="no real captures here")
 def test_every_reference_capture_reads_a_clean_controller():
+    # `_sim` / `_listen` are NOT from a bike - the same rule gui.py and
+    # library.py apply, and one the capture format treats as load-bearing. A
+    # simulator run written to the default save location used to fail this
+    # test by being asked bike questions.
     folders = [os.path.join(REAL, d) for d in os.listdir(REAL)
-               if os.path.isdir(os.path.join(REAL, d))]
+               if os.path.isdir(os.path.join(REAL, d))
+               and not d.endswith(("_sim", "_listen"))]
     assert folders
     for f in folders:
         sev = parsers.parse_sevcon(sessions.load_session(f).cmd("sevcon"))

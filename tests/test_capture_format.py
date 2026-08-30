@@ -54,7 +54,8 @@ def test_the_real_captures_are_format_one_and_still_load():
     format. That is the distinction the stamp exists to make: `app_version` was
     never a format version and was never comparable as one."""
     folders = [os.path.join(REAL, d) for d in os.listdir(REAL)
-               if os.path.isdir(os.path.join(REAL, d))]
+               if os.path.isdir(os.path.join(REAL, d))
+               and not d.endswith(("_sim", "_listen"))]
     assert folders, REAL
     for f in folders:
         assert capture_format(f) == 1, f

@@ -4536,9 +4536,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                               said=said if said_kind == "failed"
                                               else None)
                     for mname, mold, mnew in moved:
-                        self.logger.journal_write(
-                            mname, mold, mnew, None,
-                            said="changed by the %s write, not requested" % name)
+                        # Not journal_write: this is not a write we performed,
+                        # and calling it one forced a PENDING that reads as an
+                        # interrupted authorized change.
+                        self.logger.journal_observed(
+                            mname, mold, mnew,
+                            "moved by the %s write" % name)
                     return got, verified, verify, said_kind, said, moved
 
                 def done2(r2):
@@ -4557,16 +4560,48 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             % (name, len(moved),
                                "\n".join("  %s: %s -> %s" % m for m in moved),
                                name))
+                    # A read-back that did not come back is not a value, and
+                    # nothing below may describe it as one. This is its own
+                    # branch because every other branch's sentence would be a
+                    # claim about a check that could not run.
+                    unknown = not str(got).strip()
                     if not verified:
                         # What the console SAID is quoted, never asserted. This
                         # branch used to state "the console reported SUCCESS"
                         # literally - and said it at a bike over a reply that
                         # read FAILED.
                         if said_kind == "failed":
+                            if unknown:
+                                tail = ("The verify read did not return %s, so "
+                                        "what the bike holds now is UNKNOWN — "
+                                        "re-read the settings before you ride."
+                                        % name)
+                            elif moved or first_number(got) != first_number(old_val):
+                                # "Nothing was changed" is a claim, and this
+                                # write demonstrably changed something.
+                                tail = ("%s now reads %r — and this write still "
+                                        "moved other settings (see the previous "
+                                        "message)." % (name, got)) if moved else (
+                                    "%s now reads %r, which is neither the value "
+                                    "you wrote nor the one it had."
+                                    % (name, got))
+                            else:
+                                tail = "%s is still %r. Nothing was changed." % (
+                                    name, got)
                             messagebox.showwarning(APP_NAME,
-                                "The bike REFUSED this write. The console said:\n\n"
-                                "    %s\n\n%s is still %r. Nothing was changed."
-                                % (said, name, got))
+                                "The bike REFUSED this write. The console said:"
+                                "\n\n    %s\n\n%s" % (said, tail))
+                        elif unknown:
+                            messagebox.showwarning(APP_NAME,
+                                "Could not verify the write to %s: the read-back "
+                                "did not return that setting at all.\n\nThis is "
+                                "NOT a report that the bike changed or refused "
+                                "anything — it means the check could not run. "
+                                "What %s holds now is UNKNOWN; re-read the "
+                                "settings before you ride.%s"
+                                % (name, name,
+                                   ("\n\nThe console said: %s" % said)
+                                   if said else ""))
                         elif first_number(got) == first_number(old_val):
                             messagebox.showwarning(APP_NAME,
                                 "%s did not change: it still reads %r, the value it "

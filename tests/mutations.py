@@ -382,6 +382,29 @@ MUTATIONS = [
                                                  ignore=(name,))''',
      '''                    moved = []''',
      'tests/test_gui_flow.py::test_a_write_that_moves_other_settings_says_so'),
+
+    # item 15b - the review of 15 found the same sin one layer down
+    ("journal: attribute our own annotation to the console again",
+     "src/openmbb/gui.py",
+     '''                        self.logger.journal_observed(
+                            mname, mold, mnew,
+                            "moved by the %s write" % name)''',
+     '''                        self.logger.journal_write(
+                            mname, mold, mnew, None,
+                            said="moved by the %s write" % name)''',
+     'tests/test_gui_flow.py::test_the_journal_never_puts_our_words_in_the_console_s_mouth'),
+
+    ("journal: report an empty read-back as a value the bike reports",
+     "src/openmbb/transport.py",
+     '''            if not str(got).strip():''',
+     '''            if False:''',
+     'tests/test_gui_flow.py::test_a_read_back_that_did_not_return_is_not_a_value_the_bike_reports'),
+
+    ("write: describe a read-back that never returned as a bike action",
+     "src/openmbb/gui.py",
+     '''                    unknown = not str(got).strip()''',
+     '''                    unknown = False''',
+     'tests/test_gui_flow.py::test_an_empty_read_back_is_reported_as_unknown_not_as_a_bike_action'),
 ]
 
 

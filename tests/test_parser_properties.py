@@ -324,6 +324,8 @@ def test_the_real_captures_are_unchanged_by_all_of_it():
         folder = os.path.join(base, name)
         if not os.path.isdir(folder):
             continue
+        if name.endswith(("_sim", "_listen")):
+            continue        # not from a bike; this corpus is the real captures
         st = parsers.parse_stats(sessions.load_session(folder).cmd("stats"))
         if st.get("odo_km") is None:
             continue

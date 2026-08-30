@@ -3527,3 +3527,82 @@ def test_a_write_that_moves_other_settings_says_so(app, monkeypatch):
     assert "also changed" in joined
     assert victim in joined
     assert "The bike did this, not OpenMBB" in joined
+
+
+def test_the_journal_never_puts_our_words_in_the_console_s_mouth(tmp_path):
+    """Item 15's own fix committed item 15's sin one layer down: a collateral
+    change journalled as
+
+        sprear | 90 -> 91 | PENDING [console said: changed by the spfront write]
+
+    - OpenMBB's sentence attributed to the motorcycle, in the permanent audit
+    file. And PENDING is defined in that same file as intent recorded BEFORE
+    the wire, so an unrequested change wore the signature of an interrupted
+    authorized one.
+    """
+    from openmbb.transport import SessionLogger
+
+    lg = SessionLogger(base_dir=str(tmp_path), tag="t")
+    lg.journal_observed("sprear", "90", "91", "moved by the spfront write")
+    text = open(lg.journal_path, encoding="utf-8").read()
+
+    assert "OBSERVED (not requested)" in text
+    assert "moved by the spfront write" in text
+    assert "console said" not in text      # we never said the bike said it
+    assert "PENDING" not in text           # nor that we were about to write it
+
+
+def test_a_read_back_that_did_not_return_is_not_a_value_the_bike_reports(tmp_path):
+    """`(bike reports )` claimed the motorcycle reported an empty string. A
+    check that could not run may not be dressed as a reading."""
+    from openmbb.transport import SessionLogger
+
+    lg = SessionLogger(base_dir=str(tmp_path), tag="t")
+    lg.journal_write("spfront", "20", "22", False, got="")
+    text = open(lg.journal_path, encoding="utf-8").read()
+
+    assert "read-back did not return this setting" in text
+    assert "bike reports" not in text
+
+
+def test_an_empty_read_back_is_reported_as_unknown_not_as_a_bike_action(
+        app, monkeypatch):
+    """It used to render as "The bike set spfront to '', not the '22' you asked
+    for - it clamped or adjusted the value": a bike-ACTION claim manufactured
+    from a verify read that returned nothing."""
+    warned = []
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: warned.append(a))
+
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: len(app.settings) >= 30)
+
+    monkeypatch.setattr(app.transport, "write_setting", lambda *a, **k: "no-op")
+    real = app.transport.exec_command
+    calls = {"set": 0}
+
+    def doctored(cmd, *a, **k):
+        out = real(cmd, *a, **k)
+        if cmd == "set":
+            calls["set"] += 1
+            if calls["set"] >= 2:
+                # the verify read comes back WITHOUT the written row
+                out = chr(10).join(ln for ln in out.splitlines()
+                                   if not ln.strip().startswith("spfront"))
+        return out
+
+    monkeypatch.setattr(app.transport, "exec_command", doctored)
+    app.unlock_var.set(True)
+    app._write_value("spfront", "22")
+    assert _pump(app, lambda: warned)
+
+    msg = str(warned[-1])
+    assert "UNKNOWN" in msg
+    assert "could not run" in msg
+    assert "clamped or adjusted" not in msg     # never a bike ACTION
+    assert "The bike set" not in msg
