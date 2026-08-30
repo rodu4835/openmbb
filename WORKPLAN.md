@@ -506,6 +506,48 @@ holds because the field has one consumer — tighten opportunistically); and the
 release gate walks `git ls-files`, so an *untracked* capture copied into the
 repo is unscanned by design — worth remembering, not changing.
 
+### 18b. The 17/18 review — the gate has a back door, and the simulator tag has none ← **blocks the push, with 16**
+
+All nine 20b fixes were verified landed (the asset scan proven by planting a
+claim in a file the old list never covered). Items 17/18 have four misses:
+
+1. **`REFUSED_ON_REV41` gates staging only.** The `↺ Reset` action calls
+   `_write_value` directly, so the *exact* bike-day sequence — write `spfront`,
+   the `_allow` row drifts, Reset appears, click — still sends the write the
+   firmware refuses. Reproduced. Fix: the check belongs in `_write_value`, the
+   choke point every caller passes; keep the staging check as the early UX.
+   (Item 16 removes the Reset affordance from such rows too — do both.)
+2. **The refusal dialog makes a false promise:** *"does not stop you writing
+   the underlying settings"* — the `x10` siblings it names are not whitelisted
+   and the Console refuses `set`; there is no path in OpenMBB that writes
+   them. Rewrite: the value is derived from an `x10` sibling OpenMBB cannot
+   write either; the sprocket settings that move it are the ones you can.
+3. **`openmbb --sim` launches with NO title tag** — `_refresh_sim_badge` is
+   called only from the toggle. Reproduced. That is literally the bike-day
+   scenario ("a `--sim` window left open"). Call it once the sim var is
+   initialised at build.
+4. **Two of the three Refresh buttons keep the blank-field trap** — the
+   Settings dialog's and the cable-test wizard's each refill their own list
+   with a private lambda. Route all three through `_refresh_ports`' rule.
+5. **`condition.py:766`'s docstring** says the bike-day capture had two of
+   four unanswered; name the capture (`212001`, the no-event-log pull) as
+   this plan now does.
+
+Also from the review, accepted with a note: the Risk-column widening now
+addresses a clip that no longer occurs (item 19's text split on `" - "` yields
+just `SAFE`), harmless; the constructor picks the *first* of several ports
+while Refresh picks none, so "the same rule" was an overclaim; and `41f0246`'s
+message says it committed CRLF assets when it touched only the manifest.
+
+### 18c. Filed from the same review
+
+- **The title tag tracks the checkbox, not the live connection.** Untick
+  Simulator while connected to the sim and the tag drops mid-session. The
+  transport knows what it is connected to; the tag should ask it.
+- **The asset scan silently skips any non-UTF-8 text file.** Assert that a
+  skipped file is a known binary by extension (`.png`, `.ico`); anything else
+  unreadable fails the test rather than passing it.
+
 ### 19. ~~The coast-regen refusal is folklore~~ — **shipped** (`a05f16c`)
 
 **Decided (Fable, 2026-08-30).** The gate refuses exactly 0% coast regen with
@@ -539,10 +581,13 @@ test fails. Commit message records the provenance.
 ### 20. ~~The verdict headline names its driver~~ — **shipped**
 
 **Decided (Fable, 2026-08-30).** The bike-day capture headlined *"Walk away, or
-get the pack checked"* driven by the isolation row, with two of four pack
-checks unknown (the first draft of this item said three; the review checked
-the capture — cell spread at rest was answered, 3 mV — and the headline now
-correctly prints "2 of 4"). The field called it an overshoot. The resolution is NOT to
+get the pack checked"* driven by the isolation row. On the pull taken
+**without the event log** (`2026-08-29_212001`, the v0.21.0 pull) two of four
+checks were unknown and the headline now prints "(2 of 4 checks unanswered)";
+on the full capture (`213006`) all four are answered and the headline carries
+no count. Two earlier tellings got this wrong — "three" in the first draft,
+and "the bike-day capture" as if there were one — and a review checked the
+captures both times. The field called it an overshoot. The resolution is NOT to
 demote isolation:
 
 - **Isolation stays in the level.** HV-to-chassis leakage is a battery-system
@@ -569,7 +614,7 @@ count appears on concern; cross-surface test already covers the render.
 Mutations: strip the driver clause → naming test fails; drop the count → count
 test fails.
 
-### 20b. The stack review — item 19's blast radius was six, and two other misses ← **NEXT, blocks the push**
+### 20b. ~~The stack review’s nine fixes~~ — **shipped** (`58bf24f`)
 
 Adversarial review of the eight unpushed commits (2026-08-30, two lenses). What
 held: mutation entries 43–51 all catch; every FAILED × {moved, unknown, clean}
@@ -752,16 +797,69 @@ the warning wording should survive a rider seeing it on every speed change.
 Tests + mutations per fix (the review verified entries 40–42 still catch).
 Then push the pair, with 19/20/16–18 to follow.
 
-### 16. `↺ Reset` appears on rows the user never wrote
+### 16. `↺ Reset` must mean "before YOUR write" — decided and scaffolded ← **NEXT**
 
-`_row_differs_from_baseline`'s docstring says *"the user has changed this
-setting"*; it means "differs from the last clean full read", which is not the
-same thing. Two failures followed: **(a)** after the `spfront` write, Reset
-appeared on two regen rows the *bike* had changed, sending the rider into three
-futile writes the bike refused; **(b)** after a clamped write it offered to
-"restore the last-read value (85)" — a transient the Zero app had written ninety
-seconds earlier, so clicking it would have destroyed a correct restoration.
-"Last read" is treated as "known good" and was neither.
+**Decided (Fable, 2026-08-30).** Both field failures have one root: the marker
+fires on *"differs from the last clean full read"* while every sentence around
+it promises *"before you changed things"* — the `_ingest_settings` comment says
+exactly that. A "clean full read" is just a full read, not a known-good state.
+So a row the **bike** moved as collateral differs from the snapshot (failure a:
+three refused writes chasing a change the rider never made), and a transient
+app-written value captured *by* a full read becomes the "restore" target
+(failure b: Reset offered to undo a correct restoration). The predicate cannot
+be repaired; it has to be replaced by provenance — which item 15 now supplies.
+
+**What Reset means from here:** *put this row back to the value it had
+immediately before your FIRST write to it in this session.* That is a claim the
+tool can support. "Restore" — implying known-good — is not, and the word goes.
+
+**Scaffold (gui.py):**
+
+1. **Provenance, recorded where the write happens.** `self._user_wrote:
+   {name: pre_write_value}` — set in `done2` with `setdefault(name, old_val)`,
+   so a second write to the same row keeps the *original* pre-value and Reset
+   always means "undo everything I did to this row". `self._moved_by:
+   {row: written_name}` — from item 15's `moved` list, the rows the bike
+   changed in response.
+2. **Three row states, by provenance, never by diff.**
+   - in `_user_wrote` and current ≠ pre-value → **`↺ Put back <pre-value>`**,
+     tag `reset`. The value is *in the label*, and it is the pre-write value
+     whether or not that was "good" (in failure b it would read `Put back 85`,
+     which is honest — the dialog no longer recommends it).
+   - in `_moved_by` → **`↔ moved by your <name> write`**, tag `moved`, **no
+     write affordance**. Click explains: the bike changed this in response to
+     the named write; OpenMBB did not write it and will not offer to — on rev
+     41 these are the derived values that answer FAILED (item 18); changing
+     the named setting back is what moves them back.
+   - **firmware-derived rows** (`REFUSED_ON_REV41` on rev 41) render with
+     their own tag and no editable New-value cell — the review found they
+     still render exactly like every other row (SAFE tag, editable cell) and
+     only refuse at staging, which `safety.py`'s docstring overclaims.
+   - otherwise nothing. **The "differs from snapshot" state is retired**, not
+     kept as a third indicator — it is precisely what produced the misleading
+     markers. `_row_differs_from_baseline` goes; its docstring is the lie.
+3. **The action.** Put-back calls `_write_value(row, pre_value)` — it already
+   re-reads, confirms old→new, backs up, verifies, journals, and reports the
+   outcome (item 15). On a verified put-back, drop the row from `_user_wrote`
+   so the marker clears; on a clamp, keep it — the journal has the outcome.
+4. **Four promises to rewrite** — help text `gui.py:164`, the Writes intro
+   `:4176`, the confirm dialog `:4556` ("that row shows '↺ Reset' to put it
+   back to the last full read"), and `_writes_action_click`'s docstring.
+   `_baseline_settings` stays only if something else needs it (`:2323`
+   disconnect reset, `:3895` snapshot); if nothing does, remove it too.
+5. **In-session only, said plainly.** After a restart there is no marker; the
+   journal and `settings_backup_*.txt` are the durable record.
+
+**Tests:** (i) after one user write only that row carries `Put back <value>`
+with the pre-value in the label; (ii) a doctored verify dump that moves an
+untouched row yields the `moved by` marker and a click issues **no write**;
+(iii) two writes to one row keep the original pre-value as target; (iv) a
+verified put-back clears the marker; (v) **the bike-day case** — a row that
+differs from the clean-read snapshot but was never written shows *no* Reset.
+Tests at `test_gui_flow.py:114/1039/1043/1085` assert the old predicate and
+must move to the new states. **Mutations:** treat collateral as user-written →
+(ii) fails; keep the *last* pre-value → (iii) fails; restore the diff predicate
+→ (v) fails.
 
 ### 17. ~~Three things that read badly at an actual motorcycle~~ — **shipped**
 
