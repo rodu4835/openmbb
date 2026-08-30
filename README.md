@@ -215,8 +215,15 @@ whole tool with no bike or cable. The staged flow below unlocks one step at a ti
    the live dump. Click a row's New value cell to type a value, then Write. Every
    write: re-read current → confirm old→new with effect/risk → auto-backup full
    settings → journal the intent *before it hits the wire* → send → read-back
-   verify → journal the result. A changed row shows **↺ Reset** to restore the
-   last-read value; a read-back mismatch points you to it.
+   verify → journal the result. The journal records **what the bike reported**
+   rather than what was asked for, and quotes the console's own sentence when it
+   refuses. Every write also diffs the full settings dump either side of itself
+   and names anything else that moved — on rev 41, writing `spfront` silently
+   changes four regen values, and the tool says so rather than leaving you to
+   find it. A row **you** wrote then shows `↺ Put back <value>` — the value it
+   held before your first write to it this session, named in the label. A row
+   the **bike** moved shows `↔ moved by your <name> write` and offers no write at
+   all.
 
 **Tools → Inspect a bike…** is the guided version of all of the above, for the
 case it was built for: a bike you have never seen, with its owner standing next
@@ -382,6 +389,12 @@ accident:
   other blocklisted command: the **type `confirm`** dialog, not a hard wall.
 - Validators: coast regen accepts 0-100; writing exactly 0 warns that it disables off-throttle regen;
   `noregenstopped No` warns; range limits on every numeric.
+- **Two whitelisted settings the rev-41 firmware refuses outright.**
+  `maxcustregcotq_allow` and `maxcustregbrtq_allow` are DERIVED values — the bike
+  computes each from its `x10` sibling against a gearing-dependent ceiling, which
+  is why the console answers FAILED every time and why they move on their own
+  when the sprockets change. OpenMBB reads and shows them, and says this instead
+  of letting you fail three times.
 - A mid-session **reboot** (boot banner) or a **silent** console is detected and
   surfaced — login state is re-locked rather than trusted.
 
@@ -390,6 +403,7 @@ accident:
 ```
 src/openmbb/
   __init__.py    name, version, module docstring
+  version.py     release date + age line; never claims an update exists
   safety.py      blocklist, write whitelist, validators
   transport.py   serial transport, session logging, settings parser
   sim.py         fake serial port (synthetic fixtures for hardware-free use)
@@ -406,6 +420,8 @@ src/openmbb/
   gearing.py     gearing math (teeth -> ratio -> speedo settings)
   compare.py     settings diff + the pack's own figures across sessions
   library.py     the saved captures on disk: rows, notes, cached verdicts
+  redact.py      share-safe export: strips VIN/serials, re-scans its own output,
+                 and refuses to vouch for what it cannot recognise
   charts.py      series extraction for the dependency-free plots
   config.py      saved preferences (units, theme, save location, logins)
   dialogs.py     themed message boxes, centred on the parent window
@@ -416,9 +432,20 @@ tests/           pytest suite (safety/transport/config/analysis + GUI flow)
 
 Everything lands in `<save-base>/openmbb-sessions/<timestamp>_<port>/`:
 `session_raw.log` (every byte, timestamped), one file per command,
-`session_meta.txt` (capture format, power mode, firmware rev, timestamp),
-`settings_baseline_*.txt`, `settings_backup_*.txt` (auto, pre-write),
-`writes_journal.txt` (every setting write, and every consented heavy read).
+`session_meta.txt` (capture format, timestamp, app version, firmware rev, power
+mode), `settings_baseline_*.txt` — including the `_postlogin_` one, which is the
+authoritative pre-change backup — `settings_backup_*.txt` (auto, pre-write), and
+`writes_journal.txt` (every setting write, and every consented heavy read). Add a
+note or open a session in the **Library** and two more appear:
+`session_note.txt`, which is your own free text, and `session_summary.json`, the
+cached verdict.
+
+**Before you hand that folder to anyone**, note what the share-safe export does
+and does not cover. **File → Export share-safe copy…** strips the VIN and the
+MBB, module and Sevcon serials, re-scans everything it writes, and destroys the
+copy rather than give you one it cannot vouch for. It looks for **those
+identifier shapes and nothing else** — so your own `session_note.txt` goes as you
+wrote it, and so does the folder name. Read them first.
 
 The `capture_format:` line states the layout a folder was written in. A copy of
 OpenMBB that meets a **newer** format refuses to read it rather than guess at
@@ -428,7 +455,7 @@ capture written before the stamp existed is one.
 **Where it saves:** by default the `<save-base>` is **`~/Documents/OpenMBB`** (a
 fixed, user-visible location — *not* the launch directory, so sessions never get
 buried inside the install folder when you start from the desktop shortcut).
-Change it via **Session → Set save location…** (remembered across runs in
+Change it via **Tools → Settings → Session** (remembered across runs in
 `~/.openmbb/config.json`) or per-launch with `--logdir <path>`; if the configured
 folder ever goes missing (deleted, unplugged drive) the app falls back to the
 default instead of failing to connect. The current save target is shown in the
