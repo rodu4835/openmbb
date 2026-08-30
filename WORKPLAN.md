@@ -506,11 +506,72 @@ holds because the field has one consumer — tighten opportunistically); and the
 release gate walks `git ls-files`, so an *untracked* capture copied into the
 repo is unscanned by design — worth remembering, not changing.
 
+### 19. The coast-regen refusal is folklore — demote it to a warning
+
+**Decided (Fable, 2026-08-30).** The gate refuses exactly 0% coast regen with
+*"0% coasting regen can cause fishtailing in low traction"*. Three findings, in
+descending order of force:
+
+1. **It is internally incoherent.** The gate accepts **1%** and refuses **0%**,
+   and no dynamics cliff exists between them — the whitelist's own effect text
+   says *"very low values give free coasting."* A gate that admits 1 and
+   refuses 0 encodes a superstition, not a hazard.
+2. **The physics reads backwards.** Coast regen applies braking torque through
+   the rear wheel; *more* regen is what demands traction. At 0% the wheel
+   freewheels and contributes no regen braking at all.
+3. **The manufacturer contradicts it on the wire.** On 2026-08-29 Zero's own
+   app set this value to 0 as a side effect, without comment (in the raw log).
+
+Provenance: the claim dates to **v0.3.0** — the founding commit, before the
+project's verification discipline existed — cites no source, and is repeated in
+five places (`safety.py` ×2, `gui.py:232`, `info.html` ×2, `README.md:383`).
+
+**Scaffold:** `_v_coast_regen` drops the refusal; a `warn_fn` fires on 0 with
+facts only — *"0 disables off-throttle regen entirely: the bike freewheels when
+you roll off, which changes the deceleration you're used to. Zero's own app
+sets 0 in some flows."* No traction claim in either direction — the hazard
+cannot be substantiated and neither can its absence. Update all five text
+sites. **Flip the two pinned checks** (`cli.py:141` selftest,
+`test_safety_transport.py:688`): 0 now validates and the warn fires.
+Mutations: restore the refusal → validator test fails; drop the warn → warn
+test fails. Commit message records the provenance.
+
+### 20. The verdict headline must name its driver — and isolation stays load-bearing
+
+**Decided (Fable, 2026-08-30).** The bike-day capture headlined *"Walk away, or
+get the pack checked"* driven by the isolation row, with three of four pack
+checks unknown. The field called it an overshoot. The resolution is NOT to
+demote isolation:
+
+- **Isolation stays in the level.** HV-to-chassis leakage is a battery-system
+  fault and the most safety-critical row in the tool. A green OK over an
+  isolation alert would recreate the exact sin 6c fixed, in the worse
+  direction. The boundary, restated for the docstring: **the verdict covers
+  the battery system** — cell health, isolation, live warnings; fault-count
+  rows (OBD, Sevcon) are beyond-pack notes.
+- **The headline names what drove it.** `_headline("concern", ...)` returns a
+  fixed string naming "the pack" whatever the driver. It should carry the
+  driving check(s): *"Walk away, or get it checked before you buy — isolation
+  resistance: 478 kOhm"*. Compose from the concern/watch checks.
+- **The concern/watch branches carry the unanswered count**, exactly as the ok
+  branch does. The docstring already argues a separate confidence field is
+  "where nobody looks" — and then the concern branch omits the count entirely,
+  which is how "Walk away" printed with no hint that 3 of 4 checks were
+  unanswered. *"— and 3 of 4 checks went unanswered"* belongs on the harsh
+  branches most of all.
+
+**Scaffold:** `_headline` takes the checks (or the driving subset); both
+surfaces already render `v["headline"]` so no surface work beyond wording
+length. Tests: concern-driven-by-isolation names isolation; the unanswered
+count appears on concern; cross-surface test already covers the render.
+Mutations: strip the driver clause → naming test fails; drop the count → count
+test fails.
+
 ---
 
 ## From the bike day, 2026-08-29
 
-### 15. Outcome vs intent — the write path says what it asked for, never what happened ← **NEXT**
+### 15. ~~Outcome vs intent~~ — implemented (`f6aff37`, **unpushed pending 15b**)
 
 Four findings, one shape, and the highest-value work on this board. Every one
 was invisible to the simulator.
@@ -568,6 +629,48 @@ mode* (89 → 80 when Custom was set to 80), so it mirrors configuration rather
 than declaring the machine's ceiling. It is also labelled "Eco" while reporting
 the active mode. Keep the validator at the console's 20–102; hardcoding 89 would
 bake one motorcycle into a platform-wide whitelist.
+
+### 15b. The review of 15 found the same sin one layer down ← **NEXT, blocks the push**
+
+The adversarial review (2026-08-30) confirmed the core — `console_write_result`
+is right on all seven real wire replies and every hostile shape tried;
+`settings_diff` reproduces the real collateral exactly; the rewritten tests did
+not weaken — and found **four defects in exactly the claim-fabrication class
+item 15 exists to kill**, three reproduced end-to-end:
+
+1. **The journal wraps OpenMBB's own annotation in `[console said: ...]`.**
+   A collateral line renders as `sprear | 90 -> 91 | PENDING [console said:
+   changed by the spfront write, not requested]` — words the console never
+   said, in the permanent audit file. Fix: `journal_write` gains a `note=`
+   distinct from `said=`; only genuine console text ever gets the
+   `console said` label.
+2. **Collateral lines carry a permanent PENDING** — a status the same file
+   defines as "intent journaled BEFORE the write reaches the wire", so an
+   observed, unrequested change reads as an interrupted authorized write, and
+   the real journal's every-PENDING-gets-a-closing-line invariant breaks. Fix:
+   a distinct status — `OBSERVED (not requested)` — via the same `note=` path.
+3. **The refusal dialog says "Nothing was changed." unconditionally** —
+   contradicting the moved-settings warning displayed seconds earlier by the
+   same write, and its "X is still %r" is not guarded by `got == old_val`.
+   Fix: say "Nothing was changed" only when `not moved and got == old_val`;
+   otherwise state what did change.
+4. **An empty read-back produces a bike-action claim.** A verify dump missing
+   the written row yields *"The bike set spfront to '', not the '22' you asked
+   for — it clamped or adjusted"* and journals `(bike reports )`. A read-back
+   that could not run must never be described as something the bike DID. Fix:
+   `got == ""`/missing is its own branch — "the verify read did not return
+   this setting; what the bike holds now is UNKNOWN" — journalled as such.
+
+Plus one correction to the item-15 essay's own premise: *"a maxcustspmph write
+has no cross-effects at all"* is **refuted by its own capture** — dumps 038→040
+show `maxcustspkph` 137→143 and `maxcustsprpm` 5202→5445 moving with it. They
+are the setting's unit-mirrors, so every effective speed write will fire the
+collateral warning naming them. That is the warning working as designed
+(reporting, not modelling) — but the fix commit must correct the record, and
+the warning wording should survive a rider seeing it on every speed change.
+
+Tests + mutations per fix (the review verified entries 40–42 still catch).
+Then push the pair, with 19/20/16–18 to follow.
 
 ### 16. `↺ Reset` appears on rows the user never wrote
 
@@ -684,30 +787,6 @@ posted.** Posting it is Ron's, not Claude's.
 
 ## Open decisions, not tasks
 
-- **Is the coast-regen safety rationale inverted?** `safety.py:80` refuses
-  exactly 0% because *"0% coasting regen can cause fishtailing in low traction"*.
-  Coast regen applies decelerating torque through the REAR wheel, so *more* regen
-  is what breaks traction; at 0% the wheel freewheels and contributes no regen
-  braking at all. And on 2026-08-29 the **Zero app itself set that value to 0**
-  without comment, so the project's hardest refusal on this setting is
-  contradicted by the manufacturer's own software. Flagged, not fixed: it is a
-  vehicle-dynamics claim inside a safety gate and wants a source, not a confident
-  edit.
-- **Does a non-pack row belong in the pack verdict's LEVEL?** On the bike-day
-  capture the headline read *"Walk away, or get the pack checked before you buy"*
-  driven by the **isolation resistance** row, with three of four pack checks
-  `unknown` for want of ride data. That is the mirror image of what 6c decided:
-  6c moved fault rows into notes that do NOT move the level, while isolation was
-  already a check that DOES. The boundary is now inconsistent, and the field
-  found it first. Either isolation becomes a beyond-the-pack note too, or 6c's
-  rule needs restating to say which non-pack findings are load-bearing and why.
-
-- **The −100 °C sentinel on ride/charge samples** — latent (zero occurrences in 5 real
-  logs); the fix needs a semantics decision (drop field / drop sample / consumer
-  filters) that only a real dead-sensor capture forces. Visit B may provide one.
-- **"Module connect failures" rename** — 100% thermal-correlated on one bike; renaming
-  on one machine's correlation is not this project's move. Visit B provides the second
-  bike.
 - **What displayed 0% means** — A.6.
 - **DST** — A.5 or C, calendar-gated past 1 Nov 2026.
 - **`session_meta.txt` on a second pull** — see queue item 2's limitation note.
