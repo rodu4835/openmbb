@@ -1100,3 +1100,57 @@ def test_a_baseline_with_no_readable_stamp_is_ranked_low_not_dropped(tmp_path):
     (tmp_path / "settings_baseline_20260819_160000.txt").write_text(
         "stamped\n", encoding="utf-8")
     assert "stamped" in sessions.load_session(str(tmp_path)).settings_text
+
+
+# --- the headline names what drove it (item 20) -----------------------------
+
+def _checks(**levels):
+    return [{"name": n, "level": lv, "detail": ""} for n, lv in levels.items()]
+
+
+def test_the_headline_names_the_check_that_earned_it():
+    """The bike-day capture headlined "Walk away, or get the pack checked before
+    you buy" and gave no way to know WHAT was wrong. It was isolation
+    resistance - not a cell finding at all - on a capture whose three cell
+    checks were unanswered for want of ride data."""
+    checks = [
+        {"name": "Isolation resistance", "level": "concern", "detail": "478 kOhm"},
+        {"name": "Weakest cell vs pack", "level": "unknown", "detail": ""},
+        {"name": "Lowest cell under load", "level": "unknown", "detail": ""},
+        {"name": "Cell spread at rest", "level": "ok", "detail": "3 mV"},
+    ]
+    line = condition._headline("concern", 2, 4, checks)
+    assert "isolation resistance" in line.lower()
+    assert "Walk away" in line
+
+
+def test_the_harsh_branches_carry_the_unanswered_count():
+    """The docstring argues that burying the evidence count in a separate
+    `confidence` field puts it where nobody looks - then the concern branch
+    omitted it entirely, which is how "Walk away" printed over a capture that
+    could answer one check out of four."""
+    checks = [
+        {"name": "Isolation resistance", "level": "concern", "detail": ""},
+        {"name": "Weakest cell vs pack", "level": "unknown", "detail": ""},
+        {"name": "Lowest cell under load", "level": "unknown", "detail": ""},
+        {"name": "Cell spread at rest", "level": "ok", "detail": ""},
+    ]
+    assert "2 of 4 checks unanswered" in condition._headline("concern", 2, 4, checks)
+    assert "1 of 4 checks unanswered" in condition._headline("watch", 3, 4, [
+        {"name": "Cell spread at rest", "level": "watch", "detail": ""}])
+    # ...and stays quiet when everything WAS answered
+    assert "unanswered" not in condition._headline("concern", 4, 4, checks)
+
+
+def test_isolation_still_moves_the_verdict_level(tmp_path):
+    """Demoting the most safety-critical row in the tool to a note would put a
+    green OK over an HV-to-chassis leak - the failure 6c fixed, in the worse
+    direction. The verdict covers the BATTERY SYSTEM: cell health, isolation,
+    live warnings. Fault counts are beyond-pack notes; isolation is not."""
+    metrics = [{"label": "Isolation resistance", "value": 478, "status": "alert",
+                "display": "478 kOhm"}]
+    v = condition.verdict(condition.assess(""), metrics)
+    assert v["level"] == "concern"
+    assert "isolation resistance" in v["headline"].lower()
+    # and it is NOT relegated to the beyond-pack notes
+    assert not any("Isolation" in n for n in v["beyond_pack"])

@@ -433,6 +433,19 @@ MUTATIONS = [
      "- Validators: coast regen accepts 0-100;",
      "- Validators: coast regen of exactly 0 is refused (fishtail risk);",
      "tests/test_safety_transport.py::test_no_shipped_text_still_claims_the_coast_regen_fishtail_hazard"),
+
+    # item 20 - the headline names its driver and counts what it could not answer
+    ("headline: stop naming the check that earned the verdict",
+     "src/openmbb/condition.py",
+     '''    named = [c["name"] for c in (checks or []) if c.get("level") == level]''',
+     '''    named = []''',
+     "tests/test_condition.py::test_the_headline_names_the_check_that_earned_it"),
+
+    ("headline: drop the unanswered count from the harsh branches",
+     "src/openmbb/condition.py",
+     '''        missing = (" (%d of %d checks unanswered)" % (total - answered, total))''',
+     '''        missing = ""''',
+     "tests/test_condition.py::test_the_harsh_branches_carry_the_unanswered_count"),
 ]
 
 

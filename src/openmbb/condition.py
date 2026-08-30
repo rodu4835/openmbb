@@ -33,6 +33,8 @@ dicts out. No hardware, no serial port, no GUI.
 import datetime as _dt
 import re
 
+EM = chr(0x2014)
+
 from . import health, parsers
 
 # The one capacity measurement on this platform that does NOT go through the SOC
@@ -729,15 +731,48 @@ _RANK = {"concern": 3, "watch": 2, "ok": 1, "unknown": 0}
 _FROM_HEALTH = {"ok": "ok", "watch": "watch", "alert": "concern",
                 "info": "unknown"}
 
-def _headline(level, answered, total):
-    """The one line a buyer reads. It carries the evidence count, because a
-    clean result off one check out of three is not the same statement as a
-    clean result off all three - and putting that difference in a separate
-    'confidence' field is putting it where nobody looks."""
+def _driver_clause(checks, level):
+    """The checks that produced `level`, named, for the headline.
+
+    A buyer who reads one line should learn WHICH finding earned it. Without
+    this the harsh branches said "get the pack checked" whatever drove them -
+    on the reference bike that was isolation resistance, and the sentence gave
+    no way to know.
+    """
+    named = [c["name"] for c in (checks or []) if c.get("level") == level]
+    if not named:
+        return ""
+    if len(named) == 1:
+        return " %s %s" % (EM, named[0].lower())
+    return " %s %s" % (EM, ", ".join(n.lower() for n in named))
+
+
+def _headline(level, answered, total, checks=None):
+    """The one line a buyer reads.
+
+    It carries the evidence count, because a clean result off one check out of
+    three is not the same statement as a clean result off all three - and
+    putting that difference in a separate 'confidence' field is putting it
+    where nobody looks. That argument was made for the OK branch and then not
+    applied to the harsh ones, which is how "Walk away" printed over a capture
+    whose three cell checks were all unanswered.
+
+    SCOPE: this verdict covers the BATTERY SYSTEM - cell health, isolation,
+    live warnings. Fault-count rows (OBD, Sevcon) are beyond-pack notes and do
+    not move the level; see beyond_pack_notes.
+    """
+    # Parenthetical on the harsh branches: they already carry an em-dash for
+    # the driver, and two in one line is a sentence nobody reads standing in a
+    # driveway.
+    missing = ""
+    if answered < total:
+        missing = (" (%d of %d checks unanswered)" % (total - answered, total))
     if level == "concern":
-        return "Walk away, or get the pack checked before you buy"
+        return ("Walk away, or get it checked before you buy%s%s"
+                % (_driver_clause(checks, "concern"), missing))
     if level == "watch":
-        return "Worth a closer look - something here is not clean"
+        return ("Worth a closer look%s%s"
+                % (_driver_clause(checks, "watch"), missing))
     if level == "unknown":
         return "Cannot tell from this capture - it does not contain the evidence"
     if answered < total:
@@ -868,7 +903,7 @@ def verdict(assessment, metrics=None):
         # would be lying about the pack, which is the one thing this function
         # is for.
         "beyond_pack": beyond_pack_notes(metrics),
-        "headline": _headline(level, len(answered), len(checks)),
+        "headline": _headline(level, len(answered), len(checks), checks),
         "checks": checks,
         "answered": len(answered),
         "total_checks": len(checks),
