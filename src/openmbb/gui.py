@@ -4603,13 +4603,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                    ("\n\nThe console said: %s" % said)
                                    if said else ""))
                         elif first_number(got) == first_number(old_val):
+                            # "No harm done" is a claim about the whole write,
+                            # and a write that moved other settings did harm
+                            # somewhere. Same guard the refusal branch got; it
+                            # was fixed there and missed here.
+                            harm = ("" if moved else
+                                    " (No harm done — the bike kept its "
+                                    "previous value.)")
+                            extra = ("\n\nBut this write DID move other "
+                                     "settings — see the previous message."
+                                     if moved else "")
                             messagebox.showwarning(APP_NAME,
                                 "%s did not change: it still reads %r, the value it "
-                                "had before your write of %r.%s (No harm done — the "
-                                "bike kept its previous value.)"
+                                "had before your write of %r.%s%s%s"
                                 % (name, got, new_val,
                                    ("\n\nThe console said: %s" % said)
-                                   if said else ""))
+                                   if said else "", harm, extra))
                         else:
                             # A third value: the bike took the command and chose
                             # its own figure. Naming that is more use than
@@ -5113,7 +5122,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                              "pack.", foreground=P["dim"])
                 return
             self.lbl_cond_verdict.config(
-                text="%s  —  %s" % (v["level"].upper(), v["headline"]),
+                # A colon, not a dash: the headline now carries its own
+                # em dash for the driving check, and three dashes in one line
+                # is the sentence this project argues nobody parses.
+                text="%s: %s" % (v["level"].upper(), v["headline"]),
                 foreground=P[self._VERDICT_COLOUR.get(v["level"], "dim")])
 
         def _render_health(self):

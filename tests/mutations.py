@@ -446,6 +446,25 @@ MUTATIONS = [
      '''        missing = (" (%d of %d checks unanswered)" % (total - answered, total))''',
      '''        missing = ""''',
      "tests/test_condition.py::test_the_harsh_branches_carry_the_unanswered_count"),
+
+    # item 20b - what the stack review found
+    ("assets: put the fishtail refusal back into the write confirm dialog",
+     "src/openmbb/assets/write_options_help.json",
+     '''"caution": "0% disables off-throttle regen completely''',
+     '''"caution": "Exactly 0% is refused by the app (fishtail risk). 0% disables off-throttle regen completely''',
+     "tests/test_safety_transport.py::test_no_shipped_text_still_claims_the_coast_regen_fishtail_hazard"),
+
+    ("headline: let the Warning check name itself instead of its message",
+     "src/openmbb/condition.py",
+     '''        if c.get("name") == "Warning" and str(c.get("detail") or "").strip():''',
+     '''        if False:''',
+     "tests/test_condition.py::test_a_warning_driver_names_the_warning_not_the_word"),
+
+    ("write: claim no harm done over a write that moved other settings",
+     "src/openmbb/gui.py",
+     '''                            harm = ("" if moved else''',
+     '''                            harm = ("" if False else''',
+     "tests/test_gui_flow.py::test_a_clamped_write_that_moved_other_settings_claims_no_harm_done"),
 ]
 
 

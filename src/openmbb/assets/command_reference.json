@@ -713,8 +713,8 @@
     "category": "write",
     "danger": "caution",
     "one_liner": "Set Custom-mode coast (off-throttle) regen (% of allowed).",
-    "what_it_does": "WRITE_WHITELIST 'maxcustregcotq_allow' - 'Custom mode: coast regen (% of allowed)'. Off-throttle coast regen in Custom mode, % of allowed (real name maxcustregcotq_allow). Validator _v_coast_regen: whole number 0-100 but EXACTLY 0 is refused (0% coasting regen can cause fishtailing in low traction). Risk text: 'SAFE, but exactly 0 is refused (fishtail risk in low traction).' Gated Writes-tab path only.",
-    "what_could_happen": "Changes off-throttle regen braking feel. Very low values give free coasting; exactly 0 is refused because zero coast regen can cause fishtailing in low traction.",
+    "what_it_does": "WRITE_WHITELIST 'maxcustregcotq_allow' - 'Custom mode: coast regen (% of allowed)'. Off-throttle coast regen in Custom mode, % of allowed (real name maxcustregcotq_allow). Validator _v_coast_regen: whole number 0-100. Exactly 0 is ALLOWED and warned - it disables off-throttle regen entirely. Risk text: 'SAFE - factory-supported range; 0 disables coast regen entirely.' Gated Writes-tab path only.",
+    "what_could_happen": "Changes off-throttle regen braking feel. Very low values give free coasting; exactly 0 disables off-throttle regen entirely, so the write flow warns before you confirm.",
     "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value.",
     "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
   },

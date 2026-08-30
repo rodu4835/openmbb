@@ -2,21 +2,21 @@
   {
     "name": "spfront",
     "plain_name": "Sprocket teeth, front",
-    "what_it_does": "Feeds the speedometer and odometer math. Set this to the actual tooth count of the front sprocket you have installed. The FX/FXS factory sprocket is 20 teeth. This value affects only the displayed speed, trip distance, and Wh-per-km \u2014 it changes no physical parameter.",
+    "what_it_does": "Feeds the speedometer and odometer math. Set this to the actual tooth count of the front sprocket you have installed. The FX/FXS factory sprocket is 20 teeth. This value affects only the displayed speed, trip distance, and Wh-per-km — it changes no physical parameter.",
     "caution": "Benign to get wrong (display math only), but a wrong value will make the speedo, odometer, and energy-efficiency numbers wrong. After a re-gear, set this before relying on any distance or speed readings.",
     "seen_on_rev41": true
   },
   {
     "name": "sprear",
     "plain_name": "Sprocket teeth, rear",
-    "what_it_does": "Feeds the speedometer and odometer math. Set this to the actual tooth count of the rear sprocket installed. The FX/FXS factory rear sprocket is 90 teeth. Display math only \u2014 no physical effect on the drivetrain.",
+    "what_it_does": "Feeds the speedometer and odometer math. Set this to the actual tooth count of the rear sprocket installed. The FX/FXS factory rear sprocket is 90 teeth. Display math only — no physical effect on the drivetrain.",
     "caution": "Display math only; no physical effect. Wrong value skews speed and odo readings. For a 56-tooth rear sprocket, enter 56.",
     "seen_on_rev41": true
   },
   {
     "name": "rwhcirc",
     "plain_name": "Rear wheel circumference (mm)",
-    "what_it_does": "Sets the rear wheel circumference used in speedometer calculations. Trim this value until your speedo matches a GPS fix. Typical range is 1900\u20132000 mm depending on tire size and inflation. Display math only.",
+    "what_it_does": "Sets the rear wheel circumference used in speedometer calculations. Trim this value until your speedo matches a GPS fix. Typical range is 1900–2000 mm depending on tire size and inflation. Display math only.",
     "caution": "Display math only. Too high = speedo reads slower than actual; too low = reads faster. Verify against a GPS, not a stopwatch estimate.",
     "seen_on_rev41": true
   },
@@ -24,7 +24,7 @@
     "name": "maxcustspmph",
     "plain_name": "Custom mode: max speed (mph)",
     "what_it_does": "Sets the top speed cap when riding in Custom ride mode. It can be LOWERED below stock, but it cannot be raised above the factory 89 mph: the console accepts values up to 102 and even reports SUCCESS, yet the value silently stays 89 (verified live 2026-07-12). This is a factory-supported parameter.",
-    "caution": "Lowering it restricts Custom mode (very low = a slow crawl). Raising it above the factory 89 mph is a silent no-op \u2014 the console reports SUCCESS but the setting is clamped/capped back to 89, so it does NOT unlock a higher top speed.",
+    "caution": "Lowering it restricts Custom mode (very low = a slow crawl). Raising it above the factory 89 mph is a silent no-op — the console reports SUCCESS but the setting is clamped/capped back to 89, so it does NOT unlock a higher top speed.",
     "seen_on_rev41": true
   },
   {
@@ -38,21 +38,21 @@
     "name": "maxcustregcotq_allow",
     "plain_name": "Custom mode: coast regen (% of allowed)",
     "what_it_does": "Sets the regenerative braking strength when you roll off the throttle (coast) in Custom mode, as a percentage of what the Sevcon allows. Lower values give a more free-coasting feel and improve efficiency. Higher values give stronger engine-braking.",
-    "caution": "Exactly 0% is refused by the app \u2014 zero coast regen can cause the rear wheel to momentarily unload on slippery surfaces (fishtail risk). Use a small nonzero value such as 5% for a near-freewheel feel.",
+    "caution": "0% disables off-throttle regen completely: the bike freewheels when you roll off instead of slowing, which changes the deceleration you are used to. Zero's own app writes 0 in some flows. Values around 5% give a near-freewheel feel with regen still present.",
     "seen_on_rev41": true
   },
   {
     "name": "maxcustregbrtq_allow",
     "plain_name": "Custom mode: brake regen (% of allowed)",
     "what_it_does": "Sets the regen braking force applied when the brake switch closes (i.e. when you pull the brake lever) in Custom mode, as a percentage of what the Sevcon allows. 0% disables brake-lever-triggered regen in Custom mode; 100% applies maximum allowed brake regen.",
-    "caution": "Factory-supported. At 0% the brake lever triggers no regen in Custom mode. High values add significant electrical braking on top of hydraulic brakes \u2014 test in a safe area before riding normally.",
+    "caution": "Factory-supported. At 0% the brake lever triggers no regen in Custom mode. High values add significant electrical braking on top of hydraulic brakes — test in a safe area before riding normally.",
     "seen_on_rev41": true
   },
   {
     "name": "brakeregen",
     "plain_name": "Apply regen on brake switch (Yes/No)",
     "what_it_does": "Master switch that determines whether the brake light switch triggers regenerative braking at all. When set to Yes (the default), pulling either brake lever applies max brake regen in addition to hydraulic braking. When set to No, brake-lever regen is disabled globally.",
-    "caution": "Affects brake feel in every ride mode. Make only modest changes and test in a parking lot. NOT confirmed present on the verified 2017 FXS rev-41 bike \u2014 it may not appear in your set dump even after login.",
+    "caution": "Affects brake feel in every ride mode. Make only modest changes and test in a parking lot. NOT confirmed present on the verified 2017 FXS rev-41 bike — it may not appear in your set dump even after login.",
     "seen_on_rev41": false
   },
   {
@@ -72,21 +72,21 @@
   {
     "name": "reserve_sw",
     "plain_name": "Use SOC reserve partition (Yes/No)",
-    "what_it_does": "Enables or disables the battery reserve partition feature. When Yes, the bike withholds a configurable percentage of state-of-charge as a 'reserve' that the gauge treats like an empty tank before tapping into it. The actual pack capacity is unchanged \u2014 this is purely a gauge and range-planning feature.",
-    "caution": "Gauge behavior only \u2014 adds zero real amp-hours. On an aged pack, disabling the reserve (No) or shrinking it removes a low-SoC safety margin that helps avoid deep discharge. NOT confirmed present on the verified 2017 FXS rev-41 bike.",
+    "what_it_does": "Enables or disables the battery reserve partition feature. When Yes, the bike withholds a configurable percentage of state-of-charge as a 'reserve' that the gauge treats like an empty tank before tapping into it. The actual pack capacity is unchanged — this is purely a gauge and range-planning feature.",
+    "caution": "Gauge behavior only — adds zero real amp-hours. On an aged pack, disabling the reserve (No) or shrinking it removes a low-SoC safety margin that helps avoid deep discharge. NOT confirmed present on the verified 2017 FXS rev-41 bike.",
     "seen_on_rev41": false
   },
   {
     "name": "reserve_pct",
     "plain_name": "Reserve partition size (%)",
     "what_it_does": "The percentage of battery SoC the reserve partition withholds before the gauge shows empty. Default is 33%. Raising it makes the gauge hit 'empty' earlier in real terms; lowering it lets you run the pack further before the gauge reads zero.",
-    "caution": "Gauge behavior only. Reducing below the default gives less visual warning before the pack approaches its true lower limit \u2014 this matters more on an aged, reduced-capacity pack. Accepts 0\u201350%. NOT confirmed present on the verified 2017 FXS rev-41 bike.",
+    "caution": "Gauge behavior only. Reducing below the default gives less visual warning before the pack approaches its true lower limit — this matters more on an aged, reduced-capacity pack. Accepts 0–50%. NOT confirmed present on the verified 2017 FXS rev-41 bike.",
     "seen_on_rev41": false
   },
   {
     "name": "fuelgaugepes",
     "plain_name": "Fuel gauge pessimism (%)",
-    "what_it_does": "A display buffer that shifts the shown SoC percentage downward by this many points so the gauge reads a bit lower than the calculated state-of-charge. Default is 5%. At 5%, a calculated 20% SoC displays as 15%. This only shifts the number shown \u2014 it does not change how the pack charges or discharges.",
+    "what_it_does": "A display buffer that shifts the shown SoC percentage downward by this many points so the gauge reads a bit lower than the calculated state-of-charge. Default is 5%. At 5%, a calculated 20% SoC displays as 15%. This only shifts the number shown — it does not change how the pack charges or discharges.",
     "caution": "Reducing below 5% removes a displayed-SoC safety buffer that helps avoid unexpectedly deep discharge, especially on an aged pack where SoC calculations drift. The app warns if you set it below 5%. NOT confirmed present on the verified 2017 FXS rev-41 bike.",
     "seen_on_rev41": false
   },

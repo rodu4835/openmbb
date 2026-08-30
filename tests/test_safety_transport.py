@@ -794,16 +794,25 @@ def test_no_shipped_text_still_claims_the_coast_regen_fishtail_hazard():
     import os
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    shipped = [
-        os.path.join(root, "src", "openmbb", "assets", "info.html"),
-        os.path.join(root, "src", "openmbb", "gui.py"),
-        os.path.join(root, "README.md"),
-    ]
+    assets = os.path.join(root, "src", "openmbb", "assets")
+    # EVERY asset, not a hand-listed few. The first version of this test named
+    # three files, and the claim survived in two others - write_options_help.json
+    # (the write CONFIRM dialog) and command_reference.json (the Console tab's
+    # dangerous-command dialog) - so the confirm screen for a 0 write told the
+    # rider it was refused while the app sent it.
+    shipped = [os.path.join(assets, n) for n in sorted(os.listdir(assets))
+               if os.path.isfile(os.path.join(assets, n))]
+    shipped += [os.path.join(root, "src", "openmbb", "gui.py"),
+                os.path.join(root, "README.md")]
     for path in shipped:
-        with open(path, encoding="utf-8") as f:
-            text = f.read().lower()
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read().lower()
+        except (UnicodeDecodeError, OSError):
+            continue        # an icon or a binary: nothing a reader reads
         assert "fishtail" not in text, path
         assert "0 is refused" not in text, path
+        assert "0% is refused" not in text, path
 
     # and the validator agrees with the text
     assert _v_coast_regen("0")[0]

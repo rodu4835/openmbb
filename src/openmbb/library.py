@@ -34,7 +34,10 @@ SUMMARY_FILE = "session_summary.json"
 #      resting cell-spread check to "unknown" and dropped the isolation and
 #      warning-light checks entirely - a bike the Condition tab grades "concern"
 #      showed a green "ok" here, in the one column a buyer triages on.
-SUMMARY_VERSION = 3
+#: 4: the verdict headline changed wording (it now names the check that
+#: earned it), and this file caches that STRING - so an un-bumped cache would
+#: keep serving "get the pack checked" until a capture's fingerprint changed.
+SUMMARY_VERSION = 4
 
 
 # --- notes -------------------------------------------------------------------

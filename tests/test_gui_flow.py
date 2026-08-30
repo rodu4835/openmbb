@@ -3615,3 +3615,50 @@ def test_an_empty_read_back_is_reported_as_unknown_not_as_a_bike_action(
     assert "could not run" in msg
     assert "clamped or adjusted" not in msg     # never a bike ACTION
     assert "The bike set" not in msg
+
+
+def test_a_clamped_write_that_moved_other_settings_claims_no_harm_done(
+        app, monkeypatch):
+    """The refusal branch got this guard and the silent-clamp branch did not:
+    "(No harm done - the bike kept its previous value.)" was printed
+    unconditionally, seconds after the collateral warning listed what the same
+    write had moved."""
+    warned = []
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: warned.append(a))
+
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: len(app.settings) >= 30)
+
+    # the write is a no-op for spfront, but the verify dump shows sprear moved
+    monkeypatch.setattr(app.transport, "write_setting", lambda *a, **k: "no-op")
+    real = app.transport.exec_command
+    calls = {"set": 0}
+
+    def doctored(cmd, *a, **k):
+        out = real(cmd, *a, **k)
+        if cmd == "set":
+            calls["set"] += 1
+            if calls["set"] >= 2:
+                lines = []
+                for ln in out.splitlines():
+                    if ln.strip().startswith("sprear"):
+                        ln = ln.replace(" 90", " 91", 1)
+                    lines.append(ln)
+                out = chr(10).join(lines)
+        return out
+
+    monkeypatch.setattr(app.transport, "exec_command", doctored)
+    app.unlock_var.set(True)
+    app._write_value("spfront", "22")
+    assert _pump(app, lambda: len(warned) >= 2)
+
+    clamp = str(warned[-1])
+    assert "did not change" in clamp
+    assert "No harm done" not in clamp
+    assert "DID move other settings" in clamp

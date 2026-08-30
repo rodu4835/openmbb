@@ -1154,3 +1154,14 @@ def test_isolation_still_moves_the_verdict_level(tmp_path):
     assert "isolation resistance" in v["headline"].lower()
     # and it is NOT relegated to the beyond-pack notes
     assert not any("Isolation" in n for n in v["beyond_pack"])
+
+
+def test_a_warning_driver_names_the_warning_not_the_word():
+    """The check is NAMED "Warning" and carries the console's message in
+    `detail`. Using the name gave a driver clause of just "- warning", which
+    tells a reader in a driveway nothing about what earned the level."""
+    line = condition._headline("watch", 4, 4, [
+        {"name": "Warning", "level": "watch",
+         "detail": "Isolation fault detected"}])
+    assert "Isolation fault detected" in line
+    assert not line.rstrip().endswith("warning")

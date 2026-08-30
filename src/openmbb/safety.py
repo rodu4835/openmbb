@@ -155,9 +155,8 @@ WRITE_WHITELIST = {
         lambda v: ("0 disables off-throttle regen completely: the bike will "
                    "freewheel when you roll off instead of slowing, which "
                    "changes the deceleration you are used to. Zero's own app "
-                   "also writes 0 in some flows, so this is a supported value "
-                   "rather than a dangerous one - but ride carefully until you "
-                   "have felt it."
+                   "also writes 0 in some flows. Ride carefully until you have "
+                   "felt it."
                    if str(v).strip() == "0" else None)),
     "maxcustregbrtq_allow": (
         "Custom mode: brake regen (% of allowed)",

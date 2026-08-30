@@ -739,12 +739,20 @@ def _driver_clause(checks, level):
     on the reference bike that was isolation resistance, and the sentence gave
     no way to know.
     """
-    named = [c["name"] for c in (checks or []) if c.get("level") == level]
+    def _label(c):
+        # "Warning" is the check's NAME, not a finding - a driver clause of
+        # just "- warning" tells a reader in a driveway nothing. That check
+        # carries the console's own message in `detail`, so use it.
+        if c.get("name") == "Warning" and str(c.get("detail") or "").strip():
+            return str(c["detail"]).strip()
+        return c["name"].lower()
+
+    named = [_label(c) for c in (checks or []) if c.get("level") == level]
     if not named:
         return ""
     if len(named) == 1:
-        return " %s %s" % (EM, named[0].lower())
-    return " %s %s" % (EM, ", ".join(n.lower() for n in named))
+        return " %s %s" % (EM, named[0])
+    return " %s %s" % (EM, ", ".join(named))
 
 
 def _headline(level, answered, total, checks=None):
@@ -755,7 +763,9 @@ def _headline(level, answered, total, checks=None):
     putting that difference in a separate 'confidence' field is putting it
     where nobody looks. That argument was made for the OK branch and then not
     applied to the harsh ones, which is how "Walk away" printed over a capture
-    whose three cell checks were all unanswered.
+    whose cell checks were mostly unanswered (two of four, on the capture
+    that prompted this - the first telling of it said three, and the review
+    checked).
 
     SCOPE: this verdict covers the BATTERY SYSTEM - cell health, isolation,
     live warnings. Fault-count rows (OBD, Sevcon) are beyond-pack notes and do
