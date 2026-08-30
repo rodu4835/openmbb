@@ -465,6 +465,25 @@ MUTATIONS = [
      '''                            harm = ("" if moved else''',
      '''                            harm = ("" if False else''',
      "tests/test_gui_flow.py::test_a_clamped_write_that_moved_other_settings_claims_no_harm_done"),
+
+    # items 17-18 - what read badly at an actual motorcycle
+    ("port: Refresh fills the list and leaves the field blank again",
+     "src/openmbb/gui.py",
+     '''            if len(real_ports) == 1 and not (self.port_var.get() or "").strip():''',
+     '''            if False:''',
+     "tests/test_gui_flow.py::test_refresh_selects_a_lone_port_when_nothing_is_chosen"),
+
+    ("simulator: the title bar stops saying it is not your bike",
+     "src/openmbb/gui.py",
+     '''                              "   [SIMULATOR — NOT YOUR BIKE]" if on else ""))''',
+     '''                              ""))''',
+     "tests/test_gui_flow.py::test_the_title_bar_says_when_it_is_the_simulator"),
+
+    ("writes: offer a setting the firmware is known to refuse",
+     "src/openmbb/gui.py",
+     '''            if name in REFUSED_ON_REV41 and _parse_fw_rev(self.version_text) == 41:''',
+     '''            if False:''',
+     "tests/test_gui_flow.py::test_a_setting_the_firmware_refuses_is_not_offered_as_a_write"),
 ]
 
 

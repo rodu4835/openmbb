@@ -3662,3 +3662,87 @@ def test_a_clamped_write_that_moved_other_settings_claims_no_harm_done(
     assert "did not change" in clamp
     assert "No harm done" not in clamp
     assert "DID move other settings" in clamp
+
+
+# --- what read badly at an actual motorcycle (items 17, 18) -----------------
+
+def test_refresh_selects_a_lone_port_when_nothing_is_chosen(app, monkeypatch):
+    """Open the app before plugging the cable in and the box starts blank.
+    Refresh filled the DROPDOWN and left the field empty, so Connect failed
+    telling you to click Refresh - which you had just done."""
+    from openmbb import gui as gui_mod
+
+    app.port_var.set("")
+    monkeypatch.setattr(gui_mod, "list_serial_ports", lambda: ["COM7"])
+    app._refresh_ports()
+    assert app.port_var.get() == "COM7"
+
+
+def test_refresh_does_not_overrule_a_chosen_port(app, monkeypatch):
+    """Auto-select is for an EMPTY field only: picking for somebody who already
+    picked is a different bug."""
+    from openmbb import gui as gui_mod
+
+    app.port_var.set("COM3")
+    monkeypatch.setattr(gui_mod, "list_serial_ports", lambda: ["COM7"])
+    app._refresh_ports()
+    assert app.port_var.get() == "COM3"
+
+
+def test_refresh_stays_out_of_it_when_several_ports_appear(app, monkeypatch):
+    from openmbb import gui as gui_mod
+
+    app.port_var.set("")
+    monkeypatch.setattr(gui_mod, "list_serial_ports", lambda: ["COM3", "COM7"])
+    app._refresh_ports()
+    assert app.port_var.get() == ""
+
+
+def test_the_title_bar_says_when_it_is_the_simulator(app):
+    """A full rehearsal ran against the simulator AT a bike before anyone
+    noticed. The status-bar badge is not where you look with a motorcycle in
+    front of you; the title bar is visible from every tab."""
+    app.sim_var.set(True)
+    app._refresh_sim_badge()
+    assert "SIMULATOR" in app.title()
+    assert "NOT YOUR BIKE" in app.title()
+
+    app.sim_var.set(False)
+    app._refresh_sim_badge()
+    assert "SIMULATOR" not in app.title()
+
+
+def test_the_connect_tab_states_which_build_is_running(app):
+    """`pip install -e` updates the venv, not the frozen build the Start Menu
+    launches - a bike-day pull was taken on v0.21.0 while the repo was on
+    v0.25.0, and only session_meta.txt revealed it afterwards."""
+    from openmbb import __version__
+
+    line = app._connect_version_line()
+    assert __version__ in line
+    assert "OpenMBB" in line
+
+
+def test_a_setting_the_firmware_refuses_is_not_offered_as_a_write(
+        app, monkeypatch):
+    """maxcustregcotq_allow returns FAILED on rev 41, three times over at the
+    bike. It is a DERIVED value the firmware computes from its x10 sibling.
+    Offering the write anyway sent the rider chasing three refusals."""
+    infos = []
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: infos.append(a))
+
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: len(app.settings) >= 30)
+
+    app._set_pending_write("maxcustregcotq_allow", "55")
+    assert "maxcustregcotq_allow" not in app._pending_writes
+    assert infos, "the refusal must be explained, not silently dropped"
+    msg = str(infos[-1])
+    assert "cannot be written on this firmware" in msg
+    assert "DERIVED" in msg

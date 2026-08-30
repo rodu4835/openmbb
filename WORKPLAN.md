@@ -763,7 +763,7 @@ futile writes the bike refused; **(b)** after a clamped write it offered to
 seconds earlier, so clicking it would have destroyed a correct restoration.
 "Last read" is treated as "known good" and was neither.
 
-### 17. Three things that read badly at an actual motorcycle
+### 17. ~~Three things that read badly at an actual motorcycle~~ — **shipped**
 
 - **The COM port is not auto-selected if the app opens before the cable.**
   `_refresh_ports` repopulates the dropdown but never sets `port_var`, and the
@@ -779,7 +779,7 @@ seconds earlier, so clicking it would have destroyed a correct restoration.
   a real one at a glance: a full rehearsal ran against the simulator first. Wants
   a persistent SIMULATOR banner and a version line on the Connect tab.
 
-### 18. Two whitelisted settings cannot be written on rev 41 at all
+### 18. ~~Two whitelisted settings cannot be written on rev 41~~ — **shipped**
 
 `maxcustregcotq_allow` and `maxcustregbrtq_allow` return `FAILED`, reproducibly
 (three attempts), while being offered in the Writes tab with risk gradings.

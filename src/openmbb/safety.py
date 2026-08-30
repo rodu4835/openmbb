@@ -54,6 +54,26 @@ READONLY_GUARDS = [
 # set so it can say "not seen on the verified rev 41" instead of implying those
 # entries will appear after login. READONLY_GUARDS are all absent from the rev-41
 # `set` dump (they are Sevcon-side / documented values), so none are listed here.
+#: Whitelisted names the rev-41 FXS console REFUSED to write, observed live.
+#:
+#: Both are the `_allow` half of a pair whose `x10` sibling the firmware
+#: computes: writing `spfront` moved them on its own (2026-08-29 21:48:55), and
+#: setting coast regen from Zero's app returned `maxcustregcotqx10` to 50 with
+#: no console write at all. So they read as DERIVED values with a
+#: gearing-dependent ceiling, and the console answers
+#:
+#:     FAILED  maxcustregcotq_allow could not be set to 55
+#:
+#: They stay whitelisted: the tool still reads and displays them, and another
+#: model or firmware may accept them. What this set changes is that the Writes
+#: tab stops offering them as ordinary editable rows on the one machine where
+#: the refusal has actually been watched - three attempts, same answer.
+#:
+#: Remove a name from here the moment any bike accepts a write to it.
+REFUSED_ON_REV41 = frozenset({
+    "maxcustregcotq_allow", "maxcustregbrtq_allow",
+})
+
 REV41_FXS_SETTINGS = frozenset({
     "spfront", "sprear", "rwhcirc",
     "maxcustspmph", "maxcusttq_allowed", "maxcustregcotq_allow", "maxcustregbrtq_allow",

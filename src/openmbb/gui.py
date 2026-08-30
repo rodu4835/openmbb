@@ -32,7 +32,8 @@ from . import gearing as gearing_mod
 from . import library as library_mod
 from . import health as health_mod
 from . import parsers, rides, sessions
-from .safety import (READONLY_GUARDS, REV41_FXS_SETTINGS, WRITE_PANEL_CONTEXT,
+from .safety import (READONLY_GUARDS, REFUSED_ON_REV41,
+                     REV41_FXS_SETTINGS, WRITE_PANEL_CONTEXT,
                      WRITE_WHITELIST, command_blocked)
 from .sim import SimPort
 from . import theme as theme_mod
@@ -2599,9 +2600,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_console.config(state="disabled")
 
         # -- Phase 0: Connect --------------------------------------------------
+        def _connect_version_line(self):
+            """Which build is actually running, shown where you look before a pull.
+
+            `pip install -e` updates the venv, not the frozen build the Start Menu
+            launches - a bike-day pull was taken on v0.21.0 while the repo was on
+            v0.25.0, and only session_meta.txt revealed it afterwards.
+            """
+            return "OpenMBB v%s (released %s)" % (__version__, __release_date__)
+
         def _build_connect_tab(self):
             f = self._new_tab(" Connect ", "Connect to your bike",
                               "verify the cable, then connect")
+            # Which build is running, on the screen you are looking at when you
+            # decide to pull from a motorcycle. See _connect_version_line.
+            ttk.Label(f, text=self._connect_version_line(),
+                      style="Muted.TLabel").pack(anchor="w", pady=(0, 6))
             # the pre-connect controls (port row + how-to blurb) are hidden once
             # connected — the success banner is all that's relevant then.
             row = self.connect_row = ttk.Frame(f)
@@ -2702,6 +2716,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _refresh_ports(self):
             real_ports = list_serial_ports()
             self.cbo_port.config(values=real_ports)
+            # Open the app before plugging the cable in and the field starts
+            # blank; Refresh filled the DROPDOWN and left it blank, so Connect
+            # failed telling you to click Refresh - which you had just done.
+            # Same rule the constructor already applies: nothing chosen and
+            # exactly one port present means there is nothing to choose between.
+            if len(real_ports) == 1 and not (self.port_var.get() or "").strip():
+                self.port_var.set(real_ports[0])
             if not hasattr(self, "txt_probe"):
                 return
             # A2: give Refresh visible feedback — a blank list otherwise looks broken
@@ -2727,9 +2748,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _refresh_sim_badge(self):
             """Reflect the simulator state in the single status-bar indicator
             (the redundant landing badge was removed — one place is enough)."""
+            on = bool(self.sim_var.get())
             lbl = getattr(self, "lbl_sim", None)
             if lbl is not None:
-                lbl.config(text="◆ SIMULATOR MODE" if self.sim_var.get() else "")
+                lbl.config(text="◆ SIMULATOR MODE" if on else "")
+            # A full rehearsal ran against the simulator AT a bike before anyone
+            # noticed. A status-bar badge is not where you look with a motorcycle
+            # in front of you; the title bar is visible from every tab.
+            try:
+                self.title("%s v%s%s  —  Zero MBB console (Gen2)"
+                           % (APP_NAME, __version__,
+                              "   [SIMULATOR — NOT YOUR BIKE]" if on else ""))
+            except Exception:
+                pass
 
         def _probe_log(self, text):
             self.txt_probe.config(state="normal")
@@ -2772,10 +2803,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 return
             port_name = self.port_var.get().strip()
             if not self.sim_var.get() and not port_name:
-                messagebox.showerror(APP_NAME, "No port selected. Pick your COM port "
-                                     "(click Refresh after plugging in the cable), or "
-                                     "turn on Simulator mode (Home screen, or Tools → "
-                                     "Settings → Connection) to explore without a bike.")
+                # "Click Refresh after plugging in the cable" was an incomplete
+                # remedy: Refresh fills the LIST, and unless exactly one port is
+                # present you must then pick from it. At a bike that reads as
+                # "click Refresh and you are sorted".
+                messagebox.showerror(APP_NAME, "No port selected. Click Refresh "
+                                     "(after plugging in the cable), then PICK your "
+                                     "COM port from the dropdown — Refresh fills the "
+                                     "list; it only chooses for you when exactly one "
+                                     "port is present. Or turn on Simulator mode (Home "
+                                     "screen, or Tools → Settings → Connection) to "
+                                     "explore without a bike.")
                 return
             # D1: every connection re-earns its phases (drops any --sim rehearsal
             # state and closes a previously-open port before reopening).
@@ -4143,7 +4181,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # value, then click "Write" on that same row. No separate input box.
             cols = ("name", "current", "risk", "new", "write")
             heads = ("Setting", "Current", "Risk", "New value", "")
-            widths = (150, 120, 90, 140, 90)
+            # Risk was 90 px and clipped mid-word ("SAFE, but exactly 0 is refus")
+            # on the screen whose whole job is telling you what a write will do.
+            widths = (150, 110, 260, 130, 90)
             trow = ttk.Frame(f)
             trow.pack(fill="x", pady=(8, 4))
             self.tree = ttk.Treeview(trow, columns=cols, show="headings", height=9)
@@ -4391,6 +4431,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _set_pending_write(self, name, val):
             """Stage/clear an inline pending write for a row, then repaint it."""
             if name not in WRITE_WHITELIST or name not in self.settings:
+                return
+            if name in REFUSED_ON_REV41 and _parse_fw_rev(self.version_text) == 41:
+                # Watched to fail three times at a bike. Offering the write
+                # anyway sent the rider into three refusals chasing a change
+                # the firmware computes for itself.
+                messagebox.showinfo(
+                    APP_NAME,
+                    "%s cannot be written on this firmware.\n\nThe console "
+                    "answers FAILED every time (verified on rev 41). It is a "
+                    "DERIVED value: the bike computes it from its 'x10' sibling "
+                    "against a gearing-dependent ceiling, which is why it moves "
+                    "on its own when you change sprockets.\n\nOpenMBB still "
+                    "reads and shows it, and does not stop you writing the "
+                    "underlying settings." % name)
+                self._pending_writes.pop(name, None)
+                self._render_write_row(name)
                 return
             cur = self.settings.get(name, {}).get("value", "")
             if not val or first_number(val) == first_number(cur):
