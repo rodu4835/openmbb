@@ -11,18 +11,33 @@ current: what to do next, what needs a motorcycle, and what was deliberately not
 Opus sessions. Queue items below are scaffolded for direct pickup — files, the change,
 the tests, and the mutation each test must catch.
 
-**State:** v0.25.0 released. **The bike day happened (2026-08-29)** — first real
-hardware since v0.22.x, and everything built in v0.23–v0.25 met a motorcycle at
-once: the 45 s idle window returned `8301 of 8301` entries with zero
-`TRUNCATED`, `HEAVY READ CONSENTED` reached a real journal, `capture_format: 1`
-stamped, and the four-link write chain passed a real write in both directions.
-**Five real captures now**, and a 4th capacity point: 17.92 → 17.92 → 17.83 →
-**18.00 Ah**, spread 0.9%, no measurable degradation.
+**State:** v0.25.0 released; **15 commits unpushed**, tree clean, 648 tests
+passing with 0 skipped, **60/60 mutation entries catching**. Every bike-day
+finding is closed (items 15–20b) and each was reviewed adversarially before
+landing — three of those reviews found real defects, twice in a fix that had
+just been made for the same class of problem.
 
-It also produced **eleven findings**, filed as items 15–18 and two decisions
-below. The theme is one sentence: **the tool models intent well and outcome
-poorly** — it records what it asked for and never reconciles it with what
-happened. Most are unreachable from the simulator by construction.
+**The bike day (2026-08-29)** was the first real hardware since v0.22.x, and
+everything built across v0.23–v0.25 met a motorcycle at once and held: the 45 s
+idle window returned `8301 of 8301` entries with zero `TRUNCATED`,
+`HEAVY READ CONSENTED` reached a real journal, `capture_format: 1` stamped, and
+the four-link write chain passed a real write in both directions. **Five real
+captures now**, and a 4th capacity point: 17.92 → 17.92 → 17.83 → **18.00 Ah**,
+spread 0.9%, no measurable degradation.
+
+It also produced **eleven findings**, and the theme held all the way through:
+**the tool modelled intent well and outcome poorly** — it recorded what it
+asked for and never reconciled it with what happened. Most were unreachable
+from the simulator by construction. What that cost, concretely: the tool told a
+rider the console reported SUCCESS over a wire that said FAILED; a write moved
+four settings nobody touched and said nothing; the audit file recorded requests
+and not results; a safety refusal that had shipped for 22 versions turned out
+to be unsourced folklore contradicted by the manufacturer's own app; and the
+write confirm dialog told a rider a value was refused while the app sent it.
+
+**Next:** tag v0.26.0 (held deliberately — the stack is CI-validated but a
+release publishes binaries, and Ron's call), then items 7 and 9–14, then
+**At a bike**, which is now the binding constraint again.
 
 **The organising constraint, sharpened:** only one motorcycle has ever been measured, and
 the code has now largely caught up with what one bike's data can teach. The next unit of
