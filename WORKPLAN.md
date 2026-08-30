@@ -506,7 +506,7 @@ holds because the field has one consumer — tighten opportunistically); and the
 release gate walks `git ls-files`, so an *untracked* capture copied into the
 repo is unscanned by design — worth remembering, not changing.
 
-### 18b. The 17/18 review — the gate has a back door, and the simulator tag has none ← **blocks the push, with 16**
+### 18b. ~~The 17/18 review’s five fixes~~ — **shipped**
 
 All nine 20b fixes were verified landed (the asset scan proven by planting a
 claim in a file the old list never covered). Items 17/18 have four misses:
@@ -797,7 +797,7 @@ the warning wording should survive a rider seeing it on every speed change.
 Tests + mutations per fix (the review verified entries 40–42 still catch).
 Then push the pair, with 19/20/16–18 to follow.
 
-### 16. `↺ Reset` must mean "before YOUR write" — decided and scaffolded ← **NEXT**
+### 16. ~~`↺ Reset` must mean "before YOUR write"~~ — **shipped**
 
 **Decided (Fable, 2026-08-30).** Both field failures have one root: the marker
 fires on *"differs from the last clean full read"* while every sentence around

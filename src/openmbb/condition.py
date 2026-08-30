@@ -763,9 +763,10 @@ def _headline(level, answered, total, checks=None):
     putting that difference in a separate 'confidence' field is putting it
     where nobody looks. That argument was made for the OK branch and then not
     applied to the harsh ones, which is how "Walk away" printed over a capture
-    whose cell checks were mostly unanswered (two of four, on the capture
-    that prompted this - the first telling of it said three, and the review
-    checked).
+    whose cell checks were mostly unanswered - two of four on the pull taken
+    WITHOUT the event log (2026-08-29_212001). The full capture from the same
+    evening answers all four and carries no count, which is correct: two
+    tellings of this got the number wrong and a third got the capture wrong.
 
     SCOPE: this verdict covers the BATTERY SYSTEM - cell health, isolation,
     live warnings. Fault-count rows (OBD, Sevcon) are beyond-pack notes and do

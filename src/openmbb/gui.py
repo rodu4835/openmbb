@@ -161,7 +161,9 @@ WRITES
   appear. Click a row's New value cell to type a value, then click Write. Each
   write re-reads the current value, backs up all settings, sends the change,
   reads it back to verify, and journals it to disk. Changed a setting? Its row
-  shows ↺ Reset to restore the value from your last full read.
+  shows ↺ Put back <value> — the value it held before YOUR first write to it
+  this session. A row the BIKE moved is marked "moved by your <name> write" and
+  is not offered as a write at all.
 
 ANALYZE (always available, no bike needed)
   Reads a saved session folder (or the current one) and interprets it:
@@ -266,6 +268,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.settings = {}
             self.settings_order = []
             self._baseline_settings = {}   # {name: value} from the last clean full read
+            # WHO moved what. `_user_wrote` maps a setting to the value it held
+            # immediately before this session's FIRST write to it - so Reset
+            # always means "undo everything I did to this row", not "undo the
+            # last step". `_moved_by` maps a row the BIKE changed to the write
+            # that provoked it. Both come from the write flow; neither is a diff.
+            self._user_wrote = {}
+            self._moved_by = {}
             self._cmd_history = []      # raw command-line history (↑/↓)
             self._cmd_hist_idx = 0
             self._busy = False
@@ -297,6 +306,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # Connection (not a port-dropdown entry);
             # starts on when launched with --sim.
             self.sim_var = tk.BooleanVar(value=sim)
+            # _refresh_sim_badge used to run only from the toggle, so `openmbb
+            # --sim` launched with no badge and no title tag - which IS the
+            # bike-day scenario: a simulator window left open and mistaken for
+            # the bike. Painted once here, after the widgets exist.
+            self.after(0, self._refresh_sim_badge)
             self._build_menubar()
             self._build_statusbar()
             self._build_bottom_bar()   # T3: global safe-quit + "done" hub
@@ -404,8 +418,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         _TREE_TAGS = {
             "health_tree": (("ok", "green"), ("watch", "warn"),
                             ("alert", "danger"), ("info", "fg")),
+            # "moved" = the bike changed this row in response to a write of
+            # ours. Dim, because it is information rather than an affordance.
             "tree": (("safe", "green"), ("caution", "warn"),
-                     ("pending", "green"), ("reset", "accent")),
+                     ("pending", "green"), ("reset", "accent"),
+                     ("moved", "dim")),
             "cond_tree": (("measured", "fg"), ("attention", "warn"),
                           ("unknown", "dim")),
         }
@@ -577,9 +594,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 cbo = ttk.Combobox(prow, textvariable=self.port_var,
                                    values=list_serial_ports(), width=18)
                 cbo.pack(side="left", padx=8)
+                def _wizard_refresh():
+                    ports = list_serial_ports()
+                    cbo.config(values=ports)
+                    self._pick_lone_port(ports)
+
                 ttk.Button(prow, text="Refresh",
-                           command=lambda: cbo.config(values=list_serial_ports())
-                           ).pack(side="left")
+                           command=_wizard_refresh).pack(side="left")
                 ttk.Label(body, text="Plug in the FTDI cable, pick your port above, and "
                           "power the bike — key ON, or plug in the AC charger.",
                           style="Muted.TLabel", wraplength=440, justify="left").pack(
@@ -1924,6 +1945,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             def _refresh_settings_ports():
                 ports = list_serial_ports()
                 cbo.config(values=ports)
+                self._pick_lone_port(ports)
                 conn_status.config(text=("Found: %s" % ", ".join(ports)) if ports
                                    else "No COM ports found — plug in the FTDI cable "
                                         "and Refresh (or use Simulator mode).")
@@ -2321,6 +2343,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.settings = {}
             self.settings_order = []
             self._baseline_settings = {}
+            self._user_wrote = {}
+            self._moved_by = {}
             # a disconnect returns to a truly clean slate: drop the loaded analysis and
             # the pull's green command borders so a reconnect doesn't LOOK pre-pulled.
             self.analyze_session = None
@@ -2713,16 +2737,22 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.connect_row.pack(fill="x", before=self.txt_probe)
             self.connect_help.pack(anchor="w", before=self.txt_probe)
 
+        def _pick_lone_port(self, ports):
+            """Choose FOR the user only when there is nothing to choose between.
+
+            Refresh used to fill a dropdown and leave the field blank, so Connect
+            failed telling you to click Refresh - which you had just done. Three
+            Refresh buttons had their own private lambda; this is the one rule
+            they all use now. It never overrules a port already chosen, and never
+            picks between two.
+            """
+            if len(ports) == 1 and not (self.port_var.get() or "").strip():
+                self.port_var.set(ports[0])
+
         def _refresh_ports(self):
             real_ports = list_serial_ports()
             self.cbo_port.config(values=real_ports)
-            # Open the app before plugging the cable in and the field starts
-            # blank; Refresh filled the DROPDOWN and left it blank, so Connect
-            # failed telling you to click Refresh - which you had just done.
-            # Same rule the constructor already applies: nothing chosen and
-            # exactly one port present means there is nothing to choose between.
-            if len(real_ports) == 1 and not (self.port_var.get() or "").strip():
-                self.port_var.set(real_ports[0])
+            self._pick_lone_port(real_ports)
             if not hasattr(self, "txt_probe"):
                 return
             # A2: give Refresh visible feedback — a blank list otherwise looks broken
@@ -4173,7 +4203,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       "a value (a '✎ Write →' appears on that row), arm UNLOCK WRITES "
                       "(top-right), then click Write. Every write backs up all settings "
                       "first, then reads the value back to verify — change one thing at a "
-                      "time. A changed row shows '↺ Reset' to restore the last full read. "
+                      "time. A row you have written shows '↺ Put back <value>' — the "
+                      "value it held before your first write to it this session. "
                       "Rows below are the settings your bike reports as safe to change."
                       ).pack(anchor="w", pady=(2, 6))
 
@@ -4215,7 +4246,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self._writes_wheel = getattr(f, "_owl_wheel", None)
 
             # (No separate revert journal (owner): a changed row shows '↺ Reset' inline,
-            # which restores the last full read's value through the same safe write
+            # which puts back the pre-write value through the same safe write
             # flow. The on-disk journal is still written as the audit trail.)
 
             self._bind_page_wheel(f)   # wheel/two-finger scroll over the whole page
@@ -4230,28 +4261,51 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     self.tree.insert("", "end", iid=name, values=(name, "", "", "", ""))
                     self._render_write_row(name)
 
-        def _row_differs_from_baseline(self, name):
-            """True when the live value differs from the last clean full read — i.e.
-            the user has changed this setting and a reset-to-default is offered."""
-            base = self._baseline_settings.get(name)
+        def _put_back_value(self, name):
+            """What this row held before YOUR first write to it, or None.
+
+            Replaces `_row_differs_from_baseline`, whose docstring said "the user
+            has changed this setting" and whose code meant "differs from the last
+            clean full read". Those agree until they do not, and at a bike they
+            did not: a row the BIKE moved differed from the snapshot, so the tool
+            offered to undo a change the rider had never made.
+            """
+            pre = self._user_wrote.get(name)
             cur = self.settings.get(name, {}).get("value")
-            if base is None or cur is None:
-                return False
-            return first_number(base) != first_number(cur)
+            if pre is None or cur is None:
+                return None
+            if first_number(pre) == first_number(cur):
+                return None          # already back where it started
+            return pre
 
         def _render_write_row(self, name):
             """Paint a row's cells + action from state: a staged '✎ Write →', or a
-            '↺ Reset' when it differs from the last full read, else nothing."""
+            '↺ Put back <value>' for a row YOU wrote, '↔ moved by ...' for one the
+            bike moved, else nothing. Never a diff against a full read: that is
+            what offered to undo changes the rider never made."""
             if name not in WRITE_WHITELIST or name not in self.settings:
                 return
             _l, _e, risk, _v, _w = WRITE_WHITELIST[name]
             cur = self.settings.get(name, {}).get("value", "")
             base = (name, cur, risk.split(" - ")[0])
+            pre = self._put_back_value(name)
             if name in self._pending_writes:
                 self.tree.item(name, values=base + (self._pending_writes[name],
                                "✎ Write →"), tags=("pending",))
-            elif self._row_differs_from_baseline(name):
-                self.tree.item(name, values=base + ("", "↺ Reset"), tags=("reset",))
+            elif pre is not None:
+                # The value is IN the label. It is the value before your write,
+                # whether or not that was a good one - "Reset"/"restore" implied
+                # known-good, and at the bike the last-read value was a transient
+                # the Zero app had written ninety seconds earlier.
+                self.tree.item(name, values=base + (
+                    "", "↺ Put back %s" % first_number(pre)), tags=("reset",))
+            elif name in self._moved_by:
+                # The bike moved this in response to a write of ours. Informational
+                # only: no write affordance, because on rev 41 these are the
+                # derived values that answer FAILED (see REFUSED_ON_REV41).
+                self.tree.item(name, values=base + (
+                    "", "↔ moved by your %s write" % self._moved_by[name]),
+                    tags=("moved",))
             else:
                 tag = "safe" if risk.startswith("SAFE") else "caution"
                 self.tree.item(name, values=base + ("", ""), tags=(tag,))
@@ -4442,9 +4496,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     "answers FAILED every time (verified on rev 41). It is a "
                     "DERIVED value: the bike computes it from its 'x10' sibling "
                     "against a gearing-dependent ceiling, which is why it moves "
-                    "on its own when you change sprockets.\n\nOpenMBB still "
-                    "reads and shows it, and does not stop you writing the "
-                    "underlying settings." % name)
+                    "on its own when you change sprockets.\n\nOpenMBB reads and "
+                    "shows it, but cannot write the 'x10' sibling either — that "
+                    "one is not on the whitelist and the console refuses it from "
+                    "the Console tab. What you CAN change are the sprocket "
+                    "settings that move it." % name)
                 self._pending_writes.pop(name, None)
                 self._render_write_row(name)
                 return
@@ -4457,7 +4513,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
         def _writes_action_click(self, event):
             """Single click on the action cell (#5): apply a staged '✎ Write →', or
-            '↺ Reset' the row back to the last full read's value. A click on the 'New
+            '↺ Put back' the row to the value it held before your first write to it
+            this session. A click on the 'New
             value' cell (#4) opens the inline editor."""
             row = self.tree.identify_row(event.y)
             if not row or row not in WRITE_WHITELIST or row not in self.settings:
@@ -4467,9 +4524,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if row in self._pending_writes:
                     self._write_value(row, self._pending_writes[row])
                     return "break"
-                base = self._baseline_settings.get(row)
-                if base is not None and self._row_differs_from_baseline(row):
-                    self._write_value(row, first_number(base))   # reset to default
+                pre = self._put_back_value(row)
+                if pre is not None:
+                    self._write_value(row, first_number(pre))
+                    return "break"
+                if row in self._moved_by:
+                    messagebox.showinfo(APP_NAME,
+                        "%s was changed by the bike, not by you.\n\nIt moved when "
+                        "you wrote %s — the firmware computes it from other "
+                        "settings. OpenMBB did not write it and will not offer "
+                        "to; putting %s back is what moves it back."
+                        % (row, self._moved_by[row], self._moved_by[row]))
                     return "break"
             if col == "#4":                      # New-value cell -> start editing
                 self._open_new_editor(row)
@@ -4515,6 +4580,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             # The four links of the write chain, checked HERE. Three of them used
             # to be enforced only by the Writes tab being disabled - a property of
             # the user interface, not a check this function performs.
+            #
+            # The firmware-refusal gate is here too, and not only at staging. It
+            # was at staging alone, and the '↺ Reset' action calls this function
+            # directly - so the exact bike-day sequence (write spfront, watch an
+            # _allow row drift, click Reset) still sent a write the console
+            # answers FAILED to. Every caller passes through here.
+            if (name in REFUSED_ON_REV41
+                    and _parse_fw_rev(self.version_text) == 41):
+                return self._write_refused(
+                    "%s cannot be written on this firmware — the console answers "
+                    "FAILED every time (verified on rev 41). The bike computes it "
+                    "from its 'x10' sibling against a gearing-dependent ceiling, "
+                    "which is why it moves on its own when the sprockets change."
+                    % name)
             if not self.connected:
                 return self._write_refused("not connected to the bike")
             if not self.logged_in:
@@ -4553,10 +4632,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         "  1. a full backup of ALL current settings is saved to the "
                         "session folder,\n"
                         "  2. the change is sent, then read back to VERIFY it took.\n\n"
-                        "Afterward, that row shows '↺ Reset' to put it back to the last "
-                        "full read. Proceed?"
+                        "Afterward, that row shows '↺ Put back %s' — this value, "
+                        "the one it holds right now. Proceed?"
                         % (self._unverified_hw_note(), name, label, old_val, new_val,
-                           effect, risk, notes))
+                           effect, risk, notes, old_val))
                 if not messagebox.askokcancel("Confirm write", text):
                     return
 
@@ -4602,6 +4681,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
 
                 def done2(r2):
                     got, verified, verify_dump, said_kind, said, moved = r2
+                    # setdefault, not assignment: a second write to the same row
+                    # must keep the ORIGINAL pre-value, or Reset would only undo
+                    # the last step of several.
+                    self._user_wrote.setdefault(name, old_val)
+                    # ...and if this write put the row back where it started,
+                    # there is nothing left to undo. AFTER the setdefault, and on
+                    # the main thread: this block first landed in job2, where it
+                    # ran before the pre-value existed and touched GUI state from
+                    # a worker.
+                    if verified and first_number(got) == first_number(
+                            self._user_wrote.get(name, "")):
+                        self._user_wrote.pop(name, None)
+                    for _mn, _mo, _mnw in moved:
+                        self._moved_by.setdefault(_mn, name)
                     self._ingest_settings(verify_dump)   # current now reflects the write
                     # A write can move settings the user never touched. Said
                     # first and always, verified or not: at the bike this went

@@ -102,7 +102,7 @@ def test_full_flow(app):
     # write blocked without the unlock toggle -> value unchanged from the last read
     app._write_value("spfront", "22")
     app.update()
-    assert not app._row_differs_from_baseline("spfront")     # refused
+    assert app._put_back_value("spfront") is None            # refused
 
     # unlock and write for real — the write is async (send -> verify -> ingest), so
     # wait for the read-back value to land; then the row differs from the last read
@@ -111,7 +111,7 @@ def test_full_flow(app):
     app._write_value("spfront", "22")
     assert _pump(app, lambda: first_number(
         app.settings.get("spfront", {}).get("value", "")) == "22")
-    assert app._row_differs_from_baseline("spfront")
+    assert first_number(app._put_back_value("spfront")) == "20"
     assert os.path.exists(os.path.join(app.logger.dir, "writes_journal.txt"))
     backups = [f for f in os.listdir(app.logger.dir)
                if f.startswith("settings_backup")]
@@ -1021,7 +1021,10 @@ def test_write_confirm_explains_backup_verify_revert(app, monkeypatch):
     app._write_value("spfront", "22")
     assert _pump(app, lambda: seen)                    # the confirm fired
     low = seen[-1].lower()
-    assert "backup" in low and "verify" in low and "reset" in low
+    # item 16: the affordance is "Put back <value>", and the confirm dialog
+    # names the value it will put back rather than "the last full read"
+    assert "backup" in low and "verify" in low
+    assert "put back 20" in low
 
 
 def test_writes_reset_to_default(app, monkeypatch):
@@ -1040,8 +1043,8 @@ def test_writes_reset_to_default(app, monkeypatch):
     app.unlock_var.set(True)
     app._write_value("spfront", "22")
     assert _pump(app, lambda: first_number(app.settings["spfront"]["value"]) == "22")
-    assert app._row_differs_from_baseline("spfront")
-    assert "Reset" in app.tree.item("spfront", "values")[4]      # inline affordance
+    assert first_number(app._put_back_value("spfront")) == first_number(base)
+    assert "Put back" in app.tree.item("spfront", "values")[4]   # inline affordance
 
     # click the action cell (#5) with no pending -> resets to the last-read value
     monkeypatch.setattr(app.tree, "identify_row", lambda y: "spfront")
@@ -1051,7 +1054,7 @@ def test_writes_reset_to_default(app, monkeypatch):
         x = y = 5
     app._writes_action_click(E())
     assert _pump(app, lambda: first_number(app.settings["spfront"]["value"]) == base)
-    assert not app._row_differs_from_baseline("spfront")         # back to default
+    assert app._put_back_value("spfront") is None                # nothing left to undo
 
 
 def test_safe_disconnect_resets_to_clean_slate(app):
@@ -1083,6 +1086,7 @@ def test_safe_disconnect_resets_to_clean_slate(app):
     app.update()
     assert not app.connected and not app.baseline_done
     assert app._baseline_settings == {}
+    assert app._user_wrote == {} and app._moved_by == {}
     assert app.analyze_session is None
     assert str(app.cmd_cells["status"].cget("bg")) == str(app._cell_bg)  # cleared
     assert app.baseline_heavy_var.get() is False
@@ -1773,7 +1777,10 @@ def test_instructions_text_matches_current_baseline_behavior():
                   "connect & probe", "revert button", "quick reads"):
         assert stale not in low, "stale instruction term: %s" % stale
     assert "pull ride log from bike" in low        # correct Rides source (off the bike)
-    assert "reset to restore" in low               # writes revert via inline ↺ Reset
+    # item 16: the affordance names the value and its provenance - "restore"
+    # implied known-good, and the last full read is not that
+    assert "put back" in low                       # writes undo via Put back
+    assert "moved by your" in low                  # the bike's own changes are marked
 
 
 def test_safety_text_reflects_eeprom_read_and_new_blocks():
@@ -3746,3 +3753,155 @@ def test_a_setting_the_firmware_refuses_is_not_offered_as_a_write(
     msg = str(infos[-1])
     assert "cannot be written on this firmware" in msg
     assert "DERIVED" in msg
+
+
+def test_the_refused_setting_gate_has_no_back_door(app, monkeypatch):
+    """The gate guarded STAGING only, and the Reset action calls _write_value
+    directly - so the exact bike-day sequence (write spfront, watch an _allow
+    row drift, click Reset) still sent a write the console answers FAILED to.
+
+    _write_value is the choke point every caller passes through.
+    """
+    asked = []
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: asked.append(a) or True)
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: None)
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: None)
+
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: len(app.settings) >= 30)
+    app.unlock_var.set(True)
+
+    sent = []
+    monkeypatch.setattr(app.transport, "write_setting",
+                        lambda *a, **k: sent.append(a) or "SUCCESS")
+
+    # straight at the choke point, the way Reset reaches it
+    app._write_value("maxcustregcotq_allow", "55")
+    assert not sent, "a write the firmware refuses reached the wire"
+    assert not asked, "it should not even ask to confirm"
+
+
+def test_launching_in_simulator_mode_says_so_without_touching_the_toggle(app):
+    """`openmbb --sim` painted no badge and no title tag, because
+    _refresh_sim_badge ran only from the toggle. That IS the bike-day scenario:
+    a simulator window left open and mistaken for the bike."""
+    # the app fixture builds with sim=True and never touches the checkbox
+    assert app.sim_var.get() is True
+    for _ in range(20):
+        app.update()
+    assert "SIMULATOR" in app.title(), app.title()
+
+
+def test_every_refresh_button_uses_the_same_lone_port_rule(app, monkeypatch):
+    """Three Refresh buttons had three private lambdas; two filled the dropdown
+    and left the field blank, which is the trap the Connect tab just fixed."""
+    app.port_var.set("")
+    app._pick_lone_port(["COM9"])
+    assert app.port_var.get() == "COM9"
+
+    app.port_var.set("COM3")
+    app._pick_lone_port(["COM9"])
+    assert app.port_var.get() == "COM3"      # never overrules a choice
+
+    app.port_var.set("")
+    app._pick_lone_port(["COM3", "COM9"])
+    assert app.port_var.get() == ""          # never picks between two
+
+
+# --- what Reset means (item 16) ---------------------------------------------
+
+def _writes_ready(app):
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: len(app.settings) >= 30)
+    app.unlock_var.set(True)
+
+
+def test_a_row_the_bike_moved_is_never_offered_as_your_change(app, monkeypatch):
+    """THE bike-day failure. After a spfront write, four regen rows the BIKE had
+    moved differed from the clean-read snapshot, so the tool offered '↺ Reset'
+    on each - and the rider spent three writes trying to undo a change he had
+    never made, every one refused by the console.
+    """
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: None)
+    infos = []
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: infos.append(a))
+    _writes_ready(app)
+
+    real = app.transport.exec_command
+    calls = {"set": 0}
+
+    def doctored(cmd, *a, **k):
+        out = real(cmd, *a, **k)
+        if cmd == "set":
+            calls["set"] += 1
+            if calls["set"] >= 2:
+                out = chr(10).join(
+                    ln.replace(" 90", " 91", 1) if ln.strip().startswith("sprear")
+                    else ln for ln in out.splitlines())
+        return out
+
+    monkeypatch.setattr(app.transport, "exec_command", doctored)
+    app._write_value("spfront", "22")
+    assert _pump(app, lambda: "sprear" in app._moved_by)
+
+    # the row the BIKE moved offers no write, and says who moved it
+    assert app._put_back_value("sprear") is None
+    action = app.tree.item("sprear", "values")[4]
+    assert "moved by your spfront write" in action
+    assert "Put back" not in action
+
+    # clicking it explains rather than writing
+    sent = []
+    monkeypatch.setattr(app.transport, "write_setting",
+                        lambda *a, **k: sent.append(a) or "SUCCESS")
+    monkeypatch.setattr(app.tree, "identify_row", lambda y: "sprear")
+    monkeypatch.setattr(app.tree, "identify_column", lambda x: "#5")
+
+    class _E:
+        x = y = 1
+    app._writes_action_click(_E())
+    assert not sent, "clicking a bike-moved row must not write"
+    assert infos and "changed by the bike" in str(infos[-1])
+
+
+def test_two_writes_to_one_row_put_back_the_original_value(app, monkeypatch):
+    """Reset must undo everything you did to a row, not just the last step."""
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: None)
+    _writes_ready(app)
+
+    # each write reads the full `set` dump twice (pre-read + verify), so the
+    # default pump window is not enough for two writes back to back
+    app._write_value("spfront", "21")
+    assert _pump(app, lambda: first_number(
+        app.settings["spfront"]["value"]) == "21", timeout=180)
+    app._write_value("spfront", "22")
+    assert _pump(app, lambda: first_number(
+        app.settings["spfront"]["value"]) == "22", timeout=180)
+
+    assert first_number(app._put_back_value("spfront")) == "20"
+
+
+def test_a_row_that_drifted_without_a_write_offers_nothing(app):
+    """The predicate this replaced fired on any difference from the last clean
+    read - which is how a value the Zero app wrote ninety seconds earlier became
+    a 'restore' target."""
+    _writes_ready(app)
+    app.settings["sprear"]["value"] = "91"       # drifted, never written by us
+    app._render_write_row("sprear")
+    assert app._put_back_value("sprear") is None
+    assert app.tree.item("sprear", "values")[4] == ""

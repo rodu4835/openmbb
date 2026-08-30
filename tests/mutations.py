@@ -484,6 +484,26 @@ MUTATIONS = [
      '''            if name in REFUSED_ON_REV41 and _parse_fw_rev(self.version_text) == 41:''',
      '''            if False:''',
      "tests/test_gui_flow.py::test_a_setting_the_firmware_refuses_is_not_offered_as_a_write"),
+
+    # item 18b - the gate's back door and the launch tag
+    ("writes: move the firmware-refusal gate back to staging only",
+     "src/openmbb/gui.py",
+     '''            if (name in REFUSED_ON_REV41
+                    and _parse_fw_rev(self.version_text) == 41):''',
+     '''            if False:''',
+     "tests/test_gui_flow.py::test_the_refused_setting_gate_has_no_back_door"),
+
+    ("simulator: stop painting the badge at launch",
+     "src/openmbb/gui.py",
+     '''            self.after(0, self._refresh_sim_badge)''',
+     '''            pass''',
+     "tests/test_gui_flow.py::test_launching_in_simulator_mode_says_so_without_touching_the_toggle"),
+
+    ("port: let the shared rule overrule a port already chosen",
+     "src/openmbb/gui.py",
+     '''            if len(ports) == 1 and not (self.port_var.get() or "").strip():''',
+     '''            if len(ports) == 1:''',
+     "tests/test_gui_flow.py::test_every_refresh_button_uses_the_same_lone_port_rule"),
 ]
 
 
