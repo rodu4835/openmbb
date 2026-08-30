@@ -392,6 +392,12 @@ MUTATIONS = [
      '''                        self.logger.journal_write(
                             mname, mold, mnew, None,
                             said="moved by the %s write" % name)''',
+     'tests/test_gui_flow.py::test_a_write_that_moves_other_settings_says_so'),
+
+    ("journal: let an observed change wear the console-said label",
+     "src/openmbb/transport.py",
+     '        line = "%s | %s | %s -> %s | OBSERVED (not requested) - %s\\n" % (',
+     '        line = "%s | %s | %s -> %s | PENDING [console said: %s]\\n" % (',
      'tests/test_gui_flow.py::test_the_journal_never_puts_our_words_in_the_console_s_mouth'),
 
     ("journal: report an empty read-back as a value the bike reports",

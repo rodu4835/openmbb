@@ -3528,6 +3528,15 @@ def test_a_write_that_moves_other_settings_says_so(app, monkeypatch):
     assert victim in joined
     assert "The bike did this, not OpenMBB" in joined
 
+    # ...and the audit file records it as OBSERVED, in OUR words. Reverting this
+    # call site to journal_write(said=...) would put OpenMBB's sentence in the
+    # console's mouth and stamp an unrequested change PENDING - which is what
+    # the review caught, and what the unit test alone could not see.
+    journal = open(app.logger.journal_path, encoding="utf-8").read()
+    assert "OBSERVED (not requested)" in journal
+    assert victim in journal
+    assert "console said" not in journal
+
 
 def test_the_journal_never_puts_our_words_in_the_console_s_mouth(tmp_path):
     """Item 15's own fix committed item 15's sin one layer down: a collateral
