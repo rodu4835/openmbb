@@ -4512,39 +4512,81 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     # changed — the on-disk journal is the audit trail the design leans
                     # on (the UI's revert is now the inline '↺ Reset' on the row).
                     self.logger.journal_write(name, old_val, new_val, ok=None)  # PENDING
-                    self.transport.write_setting(name, new_val, idle_timeout=2.5)
+                    # The reply is KEPT. It used to be discarded, and the dialog
+                    # then asserted "the console reported SUCCESS" over a wire
+                    # that had said FAILED.
+                    reply = self.transport.write_setting(name, new_val,
+                                                         idle_timeout=2.5)
+                    said_kind, said = parsers.console_write_result(reply)
                     verify = self.transport.exec_command("set", idle_timeout=4.0,
                                                          max_time=120.0)
                     live2, _ = parse_settings_dump(verify)
                     got = live2.get(name, {}).get("value", "")
                     verified = first_number(got) == first_number(new_val)
-                    self.logger.journal_write(name, old_val, new_val, verified)
-                    return got, verified, verify
+                    # Both dumps were already read, so the collateral diff is
+                    # free: writing spfront moved four regen settings nobody
+                    # touched, and the revert did not put them back.
+                    # `dump` is the pre-write full read from job(); parse it
+                    # here because job()'s own `live` is not in this scope.
+                    live_before, _ = parse_settings_dump(dump)
+                    moved = parsers.settings_diff(live_before, live2,
+                                                 ignore=(name,))
+                    self.logger.journal_write(name, old_val, new_val, verified,
+                                              got=got,
+                                              said=said if said_kind == "failed"
+                                              else None)
+                    for mname, mold, mnew in moved:
+                        self.logger.journal_write(
+                            mname, mold, mnew, None,
+                            said="changed by the %s write, not requested" % name)
+                    return got, verified, verify, said_kind, said, moved
 
                 def done2(r2):
-                    got, verified, verify_dump = r2
+                    got, verified, verify_dump, said_kind, said, moved = r2
                     self._ingest_settings(verify_dump)   # current now reflects the write
+                    # A write can move settings the user never touched. Said
+                    # first and always, verified or not: at the bike this went
+                    # unreported and the rider's brake regen sat at 90% instead
+                    # of 77% until it was restored by hand.
+                    if moved:
+                        messagebox.showwarning(APP_NAME,
+                            "Your %s write also changed %d other setting(s) that "
+                            "you did not ask for:\n\n%s\n\nThe bike did this, "
+                            "not OpenMBB. Undoing %s may NOT put them back — "
+                            "check them before you ride."
+                            % (name, len(moved),
+                               "\n".join("  %s: %s -> %s" % m for m in moved),
+                               name))
                     if not verified:
-                        # B1: distinguish a SILENT CLAMP (read-back UNCHANGED from the
-                        # pre-write value) from a changed-but-wrong read-back. The
-                        # console can reply "SUCCESS" yet keep the old value — verified
-                        # live 2026-07-12: maxcustspmph caps at the factory 89 mph.
-                        if first_number(got) == first_number(old_val):
+                        # What the console SAID is quoted, never asserted. This
+                        # branch used to state "the console reported SUCCESS"
+                        # literally - and said it at a bike over a reply that
+                        # read FAILED.
+                        if said_kind == "failed":
                             messagebox.showwarning(APP_NAME,
-                                "The console reported SUCCESS, but %s read back as %r — "
-                                "UNCHANGED from before your write. Your value of %r did "
-                                "not stick; this setting appears to be capped or rejected "
-                                "at this level. (No harm done — the bike kept its "
-                                "previous value.)" % (name, got, new_val))
+                                "The bike REFUSED this write. The console said:\n\n"
+                                "    %s\n\n%s is still %r. Nothing was changed."
+                                % (said, name, got))
+                        elif first_number(got) == first_number(old_val):
+                            messagebox.showwarning(APP_NAME,
+                                "%s did not change: it still reads %r, the value it "
+                                "had before your write of %r.%s (No harm done — the "
+                                "bike kept its previous value.)"
+                                % (name, got, new_val,
+                                   ("\n\nThe console said: %s" % said)
+                                   if said else ""))
                         else:
-                            # changed, but not to what we asked — the row now shows
-                            # '↺ Reset'; point the user at it (esp. booleans, whose
-                            # accepted token on rev 41 is unverified).
+                            # A third value: the bike took the command and chose
+                            # its own figure. Naming that is more use than
+                            # calling it a mismatch - the whitelist already
+                            # documents this for maxcustspmph (102 -> 89).
                             messagebox.showwarning(APP_NAME,
-                                "Read-back mismatch for %s: you wrote %r but the bike "
-                                "reports %r. That row now shows '↺ Reset' — click it to "
-                                "restore the last-read value (%s)."
-                                % (name, new_val, got, old_val))
+                                "The bike set %s to %r, not the %r you asked for — "
+                                "it clamped or adjusted the value.%s\n\nThe journal "
+                                "records %r as what the bike now reports."
+                                % (name, got, new_val,
+                                   ("\n\nThe console said: %s" % said)
+                                   if said else "", got))
                         try:
                             self.tree.selection_set(name)
                             self.tree.see(name)

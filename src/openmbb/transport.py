@@ -200,9 +200,26 @@ class SessionLogger:
         with self._lock, open(self.journal_path, "a", encoding="utf-8") as f:
             f.write(line)
 
-    def journal_write(self, name, old, new, ok):
+    def journal_write(self, name, old, new, ok, got=None, said=None):
+        """Record a write. `got` is what the bike actually read back.
+
+        Without `got` this file recorded only the REQUEST:
+
+            22:07:33 | maxcustspmph | 85 -> 102 | PENDING
+            22:07:35 | maxcustspmph | 85 -> 102 | UNVERIFIED
+
+        - while the motorcycle sat at 89, and nothing here said so. For a file
+        whose whole purpose is recording what a human authorised and what
+        happened, half of that was missing, and the answer to "what is this bike
+        set to now?" had to be reconstructed from the raw log. `said` carries the
+        console's own words when it refused.
+        """
         # ok=None -> PENDING (intent journaled BEFORE the write reaches the wire)
         status = "PENDING" if ok is None else ("VERIFIED" if ok else "UNVERIFIED")
+        if got is not None and str(got) != str(new):
+            status += " (bike reports %s)" % got
+        if said:
+            status += " [console said: %s]" % said
         line = "%s | %s | %s -> %s | %s\n" % (
             _dt.datetime.now().isoformat(timespec="seconds"),
             name, old, new, status)

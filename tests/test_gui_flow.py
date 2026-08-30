@@ -1994,8 +1994,16 @@ def test_write_unchanged_readback_reports_clamp(app, monkeypatch):
     app._write_value("spfront", "22")
     assert _pump(app, lambda: warned)                        # the clamp warning fired
     msg = str(warned[-1]).lower()
-    assert "unchanged" in msg and ("did not stick" in msg or "capped" in msg)
-    assert "mismatch" not in msg                             # NOT the generic wording
+    # The clamp case keeps its own wording, distinct from the generic mismatch.
+    assert "did not change" in msg and "'20'" in msg and "'22'" in msg
+    assert "clamped or adjusted" not in msg       # NOT the third-value wording
+    # And the guarantee this item exists for: the reply here is the stub string
+    # "no-op", which says neither SUCCESS nor FAILED - so the tool must not claim
+    # the console said anything. It used to assert "the console reported
+    # SUCCESS" here unconditionally, and at a real bike said exactly that over a
+    # wire that read FAILED.
+    assert "console reported" not in msg
+    assert "the console said" not in msg
 
 
 def test_write_changed_but_wrong_readback_points_to_reset(app, monkeypatch):
@@ -2034,8 +2042,9 @@ def test_write_changed_but_wrong_readback_points_to_reset(app, monkeypatch):
     app._write_value("spfront", "22")
     assert _pump(app, lambda: warned)
     msg = str(warned[-1]).lower()
-    assert "mismatch" in msg                                 # generic branch
-    assert "unchanged" not in msg
+    # the bike chose its own value: naming that beats calling it a mismatch
+    assert "clamped or adjusted" in msg
+    assert "did not change" not in msg
 
 
 def test_connect_while_busy_does_not_reset_state(app):
@@ -3432,3 +3441,89 @@ def test_a_clean_capture_adds_no_beyond_pack_note_to_either_surface(app, tmp_pat
     tab = _beyond_tab_rows(app, session)
     for surface, name in ((page, "the saved page"), (tab, "the Condition tab")):
         assert "does not cover this" not in surface, name
+
+
+# --- the write path reports outcome, not intent (item 15) -------------------
+
+def test_a_refused_write_quotes_the_console_instead_of_contradicting_it(
+        app, monkeypatch):
+    """At the bike on 2026-08-29 the tool said "The console reported SUCCESS"
+    while this was on the wire:
+
+        TX 'set maxcustregcotq_allow 55'
+        RX 'FAILED  maxcustregcotq_allow could not be set to 55'
+
+    The string was emitted literally and the reply - which write_setting returns
+    - was thrown away. The bike was honest and the tool put words in its mouth,
+    on the write path.
+    """
+    warned = []
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: warned.append(a))
+
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: len(app.settings) >= 30)
+
+    monkeypatch.setattr(
+        app.transport, "write_setting",
+        lambda *a, **k: "FAILED  spfront could not be set to 22")
+    app.unlock_var.set(True)
+    app._write_value("spfront", "22")
+    assert _pump(app, lambda: warned)
+
+    msg = str(warned[-1])
+    assert "REFUSED" in msg
+    assert "FAILED spfront could not be set to 22" in msg   # the console's words
+    assert "SUCCESS" not in msg                             # never the opposite
+
+
+def test_a_write_that_moves_other_settings_says_so(app, monkeypatch):
+    """Writing spfront on the reference bike changed four regen settings nobody
+    touched, and reverting spfront did not put them back - the rider's brake
+    regen sat at 90% instead of 77% until it was restored by hand. Both dumps
+    were already read; nothing looked at them."""
+    warned = []
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **k: warned.append(a))
+
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._baseline()
+    assert _pump(app, lambda: app.baseline_done, timeout=120)
+    app._login()
+    assert _pump(app, lambda: app.logged_in)
+    assert _pump(app, lambda: len(app.settings) >= 30)
+
+    # doctor the SECOND `set` read so an untouched row comes back changed
+    real = app.transport.exec_command
+    calls = {"set": 0}
+    victim = "sprear"
+
+    def doctored(cmd, *a, **k):
+        out = real(cmd, *a, **k)
+        if cmd == "set":
+            calls["set"] += 1
+            if calls["set"] >= 2:
+                out = out.replace("sprear", "sprear", 1)
+                lines = []
+                for ln in out.splitlines():
+                    if ln.strip().startswith(victim):
+                        ln = ln.replace(" 90", " 91", 1)
+                    lines.append(ln)
+                out = chr(10).join(lines)
+        return out
+
+    monkeypatch.setattr(app.transport, "exec_command", doctored)
+    app.unlock_var.set(True)
+    app._write_value("spfront", "22")
+    assert _pump(app, lambda: warned)
+
+    joined = " ".join(str(w) for w in warned)
+    assert "also changed" in joined
+    assert victim in joined
+    assert "The bike did this, not OpenMBB" in joined

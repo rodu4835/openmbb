@@ -788,6 +788,61 @@ def parse_runtime(text):
     return out
 
 
+#: What rev 41 says after a `set`. Verified on the wire 2026-08-29:
+#:   'SUCCESS  maxcustspmph set to 102'
+#:   'FAILED  maxcustregcotq_allow could not be set to 55'
+_WRITE_OK_RE = re.compile(r"^\s*SUCCESS\b(.*)$", re.M)
+_WRITE_FAIL_RE = re.compile(r"^\s*FAILED\b(.*)$", re.M)
+
+
+def console_write_result(reply):
+    """What the console SAID about a write: ("success"|"failed", its own words).
+
+    Returns (None, None) when the reply carries neither word - which is a real
+    answer and must stay distinguishable from both. The tool used to assert "the
+    console reported SUCCESS" on any unverified write, and at the bike it said
+    that over a reply that read FAILED. Nothing here infers: it reports the
+    console's line or reports nothing.
+
+    The console's own sentence is returned so a surface can QUOTE it rather than
+    paraphrase. `FAILED  maxcustregcotq_allow could not be set to 55` explains
+    the refusal better than any inference drawn from a read-back diff.
+    """
+    text = str(reply or "")
+    for kind, rx in (("failed", _WRITE_FAIL_RE), ("success", _WRITE_OK_RE)):
+        m = rx.search(text)
+        if m:
+            said = ("%s %s" % (kind.upper(), m.group(1).strip())).strip()
+            return kind, " ".join(said.split())
+    return None, None
+
+
+def settings_diff(before, after, ignore=()):
+    """Names whose value moved between two parsed `set` dumps.
+
+    Writing `spfront` on the reference bike changed four regen settings nobody
+    touched, and reverting `spfront` did not put them back - the rider's brake
+    regen sat at 90% instead of 77% until it was restored by hand. The write
+    model assumed a write is local; the bike disagrees.
+
+    Both dumps are already read on every write, so this costs nothing and needs
+    no model of WHICH settings interact - which matters, because the behaviour is
+    not uniform: `maxcustspmph` writes have no cross-effects at all, and
+    `maxcustsprpm` tracked `spfront` and returned on its own.
+    """
+    moved = []
+    for key, info in (after or {}).items():
+        if key in ignore:
+            continue
+        was = (before or {}).get(key)
+        if not was:
+            continue
+        old_v, new_v = was.get("value"), (info or {}).get("value")
+        if old_v != new_v:
+            moved.append((key, old_v, new_v))
+    return sorted(moved)
+
+
 def parse_sevcon(text):
     """The `sevcon` block: the motor controller's own view of itself.
 

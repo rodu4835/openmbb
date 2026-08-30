@@ -362,6 +362,26 @@ MUTATIONS = [
      '''        if False:
             return None''',
      "tests/test_sevcon.py::test_a_hex_fault_count_is_unreadable_not_zero"),
+
+    # item 15 - the write path says what happened, not what it asked for
+    ("write: discard the console reply again, so a refusal cannot be quoted",
+     "src/openmbb/gui.py",
+     '''                    said_kind, said = parsers.console_write_result(reply)''',
+     '''                    said_kind, said = None, None''',
+     'tests/test_gui_flow.py::test_a_refused_write_quotes_the_console_instead_of_contradicting_it'),
+
+    ("write: stop parsing SUCCESS/FAILED out of the console's reply",
+     "src/openmbb/parsers.py",
+     '''    for kind, rx in (("failed", _WRITE_FAIL_RE), ("success", _WRITE_OK_RE)):''',
+     '''    for kind, rx in ():''',
+     'tests/test_gui_flow.py::test_a_refused_write_quotes_the_console_instead_of_contradicting_it'),
+
+    ("write: stop diffing the dumps, so collateral changes go unreported",
+     "src/openmbb/gui.py",
+     '''                    moved = parsers.settings_diff(live_before, live2,
+                                                 ignore=(name,))''',
+     '''                    moved = []''',
+     'tests/test_gui_flow.py::test_a_write_that_moves_other_settings_says_so'),
 ]
 
 
