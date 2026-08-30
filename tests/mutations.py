@@ -411,6 +411,28 @@ MUTATIONS = [
      '''                    unknown = not str(got).strip()''',
      '''                    unknown = False''',
      'tests/test_gui_flow.py::test_an_empty_read_back_is_reported_as_unknown_not_as_a_bike_action'),
+
+    # item 19 - the coast-regen refusal was folklore
+    ("coast regen: restore the unsourced refusal of 0",
+     "src/openmbb/safety.py",
+     "    return _v_int_range(0, 100)(v)",
+     '''    ok, msg = _v_int_range(0, 100)(v)
+    if ok and int(str(v).strip()) == 0:
+        return False, "refused"
+    return ok, msg''',
+     "tests/test_safety_transport.py::test_validators"),
+
+    ("coast regen: drop the warning, so 0 passes unremarked",
+     "src/openmbb/safety.py",
+     '''                   if str(v).strip() == "0" else None)),''',
+     '''                   if False else None)),''',
+     "tests/test_safety_transport.py::test_validators"),
+
+    ("coast regen: let the removed fishtail claim back into shipped text",
+     "README.md",
+     "- Validators: coast regen accepts 0-100;",
+     "- Validators: coast regen of exactly 0 is refused (fishtail risk);",
+     "tests/test_safety_transport.py::test_no_shipped_text_still_claims_the_coast_regen_fishtail_hazard"),
 ]
 
 

@@ -78,13 +78,30 @@ def _v_int_range(lo, hi):
 
 
 def _v_coast_regen(v):
-    ok, msg = _v_int_range(0, 100)(v)
-    if not ok:
-        return ok, msg
-    if int(str(v).strip()) == 0:
-        return False, ("exactly 0%% coast regen is refused: 0%% coasting regen "
-                       "can cause fishtailing in low traction. Use a low nonzero value.")
-    return True, ""
+    """Coast regen is a plain 0-100 percentage. It used to refuse exactly 0.
+
+    The refusal claimed "0% coasting regen can cause fishtailing in low
+    traction". It came in with v0.3.0 - this project's first commit, before it
+    could verify anything - cited no source, and three things now stand against
+    it:
+
+      * It was internally incoherent. It accepted 1 and refused 0, and there is
+        no dynamics cliff between them; this setting's own effect text says low
+        values give free coasting. A gate that admits 1 and refuses 0 encodes a
+        superstition, not a hazard.
+      * The physics reads backwards. Coast regen applies decelerating torque
+        through the REAR wheel, so MORE of it is what demands traction. At 0 the
+        wheel freewheels and contributes no regen braking at all.
+      * Zero's own app writes 0. Observed on the wire 2026-08-29, as a side
+        effect of a max-speed change, without comment - so the project's
+        hardest refusal on this setting was contradicted by the manufacturer's
+        software on the owner's own motorcycle.
+
+    None of that establishes 0 is SAFE, and the warning below claims no such
+    thing. It states what changes and who else does it. An unsourced hazard is
+    not evidence, and neither is its absence.
+    """
+    return _v_int_range(0, 100)(v)
 
 
 def _v_yes_no(v):
@@ -132,8 +149,16 @@ WRITE_WHITELIST = {
         "Custom mode: coast regen (% of allowed)",
         "Off-throttle (coast) regen in Custom mode, % of allowed (real name: "
         "maxcustregcotq_allow). Low values = free coasting for efficiency.",
-        "SAFE, but exactly 0 is refused (fishtail risk in low traction).",
-        _v_coast_regen, None),
+        "SAFE - factory-supported range. 0 disables coast regen entirely; "
+        "the write flow says so before you confirm.",
+        _v_coast_regen,
+        lambda v: ("0 disables off-throttle regen completely: the bike will "
+                   "freewheel when you roll off instead of slowing, which "
+                   "changes the deceleration you are used to. Zero's own app "
+                   "also writes 0 in some flows, so this is a supported value "
+                   "rather than a dangerous one - but ride carefully until you "
+                   "have felt it."
+                   if str(v).strip() == "0" else None)),
     "maxcustregbrtq_allow": (
         "Custom mode: brake regen (% of allowed)",
         "Regen applied when the brake switch triggers, in Custom mode (real name: "

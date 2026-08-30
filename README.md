@@ -380,7 +380,7 @@ accident:
   where each guard, what it protects, and the cost of changing it are written
   down. Typed into the raw Console, `set <guard> <value>` is treated like any
   other blocklisted command: the **type `confirm`** dialog, not a hard wall.
-- Validators: coast regen of exactly 0 is refused (fishtail risk);
+- Validators: coast regen accepts 0-100; writing exactly 0 warns that it disables off-throttle regen;
   `noregenstopped No` warns; range limits on every numeric.
 - A mid-session **reboot** (boot banner) or a **silent** console is detected and
   surfaced — login state is re-locked rather than trusted.

@@ -124,9 +124,11 @@ def selftest():
     out = tr.exec_command("login tpsreport")
     check("login ok", "logged in" in out.lower())
     # logged in (name now in the dump), the gated write path still validates the
-    # value (0% coast regen refused)
+    # value. This used to write 0 coast regen, which was refused on an unsourced
+    # fishtail claim (item 19). It now tests the REAL bound: the validator still
+    # guards the range, it just stopped inventing a hazard inside it.
     try:
-        tr.write_setting("maxcustregcotq_allow", "0")
+        tr.write_setting("maxcustregcotq_allow", "101")
         check("write_setting validates value", False)
     except BlockedCommandError:
         check("write_setting validates value", True)
@@ -138,8 +140,15 @@ def selftest():
     check("revert verified (spfront=20)", first_number(s3["spfront"]["value"]) == "20")
 
     print("validators:")
-    check("coast regen 0 refused", not _v_coast_regen("0")[0])
-    check("coast regen 6 accepted", _v_coast_regen("6")[0])
+    # 0 is a supported value (item 19): the refusal was unsourced folklore,
+    # and Zero's own app writes 0. The write flow warns instead.
+    check("coast regen 0 accepted with a warning",
+          _v_coast_regen("0")[0]
+          and WRITE_WHITELIST["maxcustregcotq_allow"][4]("0") is not None)
+    check("coast regen 6 accepted, unwarned",
+          _v_coast_regen("6")[0]
+          and WRITE_WHITELIST["maxcustregcotq_allow"][4]("6") is None)
+    check("coast regen 101 refused", not _v_coast_regen("101")[0])
     check("maxcustsp 103 refused", not WRITE_WHITELIST["maxcustspmph"][3]("103")[0])
     check("noregenstopped No warns", WRITE_WHITELIST["noregenstopped"][4]("No") is not None)
 

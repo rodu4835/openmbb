@@ -425,8 +425,11 @@ def test_raw_set_write_refused_even_after_login():
 def test_write_setting_validates_value():
     tr = make_transport()
     tr.exec_command("login tpsreport")
+    # item 19: 0 is a supported value now, so the REFUSAL moved to the real
+    # bound. The validator still guards the range; it just stopped inventing a
+    # hazard inside it.
     with pytest.raises(BlockedCommandError):
-        tr.write_setting("maxcustregcotq_allow", "0")     # fishtail guard
+        tr.write_setting("maxcustregcotq_allow", "101")   # out of range
     with pytest.raises(BlockedCommandError):
         tr.write_setting("spfront", "999")          # out of range
     with pytest.raises(BlockedCommandError):
@@ -685,8 +688,15 @@ def test_quiet_error_distinguishes_awake_console():
 
 
 def test_validators():
-    assert not _v_coast_regen("0")[0]           # fishtail guard
+    # item 19: 0 is accepted and WARNED, not refused. The refusal claimed a
+    # fishtail hazard, was unsourced since v0.3.0, accepted 1 while refusing 0,
+    # and was contradicted on the wire by Zero's own app writing 0.
+    assert _v_coast_regen("0")[0]
     assert _v_coast_regen("6")[0]
+    assert not _v_coast_regen("101")[0]         # the real bound still holds
+    _warn = WRITE_WHITELIST["maxcustregcotq_allow"][4]
+    assert _warn("0") and "disables off-throttle regen" in _warn("0")
+    assert _warn("6") is None
     assert not WRITE_WHITELIST["maxcustspmph"][3]("103")[0]
     assert WRITE_WHITELIST["noregenstopped"][4]("No") is not None
 
@@ -767,3 +777,33 @@ def test_one_timeout_table_not_two_call_sites():
     assert timeouts_for("bms") == (2.5, 60.0)
     # keyed on the FIRST TOKEN, like the transport's own classification
     assert timeouts_for("  EventLogDump  ") == (45.0, 900.0)
+
+
+def test_no_shipped_text_still_claims_the_coast_regen_fishtail_hazard():
+    """The refusal is gone from the code; it must be gone from what a user reads.
+
+    The claim lived in five places - safety.py twice, gui.py, README.md, and
+    info.html twice (once lowercased in the search attribute, once proper-case
+    in the visible panel). info.html has no test tying it to safety.py, which is
+    exactly how a removed claim kept shipping in the help.
+
+    safety.py's own docstring is exempt and deliberately so: it records WHY the
+    refusal was dropped, and a project that deletes its reasoning along with its
+    mistakes cannot be audited.
+    """
+    import os
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    shipped = [
+        os.path.join(root, "src", "openmbb", "assets", "info.html"),
+        os.path.join(root, "src", "openmbb", "gui.py"),
+        os.path.join(root, "README.md"),
+    ]
+    for path in shipped:
+        with open(path, encoding="utf-8") as f:
+            text = f.read().lower()
+        assert "fishtail" not in text, path
+        assert "0 is refused" not in text, path
+
+    # and the validator agrees with the text
+    assert _v_coast_regen("0")[0]

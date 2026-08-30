@@ -229,7 +229,7 @@ The regen and thermal guards are shown READ-ONLY in the Writes tab. Writable
 settings there are limited to speedo/gearing, custom-mode speed/torque/regen, and
 a few gauge/charge options — each with an effect + risk note and value limits, and
 the guided path backs up, verifies and journals every change. Coast regen of
-exactly 0 is refused (fishtail risk).
+exactly 0 disables it entirely (the write flow warns).
 """
 
 
