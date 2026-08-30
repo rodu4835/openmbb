@@ -11,12 +11,18 @@ current: what to do next, what needs a motorcycle, and what was deliberately not
 Opus sessions. Queue items below are scaffolded for direct pickup — files, the change,
 the tests, and the mutation each test must catch.
 
-**State:** v0.24.1 released; HEAD is `38cb656`, pushed, CI green both OSes
-(612+5 per OS; the Windows runner hit the transient Tcl read fault and the
-retry+warning machinery handled it in public view). Items 1–6, 5b and 8
-shipped. 617 tests locally, 0 skipped; 34 mutation entries, 34/34. The item-6
-review is DONE (two lenses, 16 findings: 5 for the release gate below, 4
-filed, 7 clean) — v0.25.0 ships when 6c and 6d land.
+**State:** v0.25.0 released. **The bike day happened (2026-08-29)** — first real
+hardware since v0.22.x, and everything built in v0.23–v0.25 met a motorcycle at
+once: the 45 s idle window returned `8301 of 8301` entries with zero
+`TRUNCATED`, `HEAVY READ CONSENTED` reached a real journal, `capture_format: 1`
+stamped, and the four-link write chain passed a real write in both directions.
+**Five real captures now**, and a 4th capacity point: 17.92 → 17.92 → 17.83 →
+**18.00 Ah**, spread 0.9%, no measurable degradation.
+
+It also produced **eleven findings**, filed as items 15–18 and two decisions
+below. The theme is one sentence: **the tool models intent well and outcome
+poorly** — it records what it asked for and never reconciles it with what
+happened. Most are unreachable from the simulator by construction.
 
 **The organising constraint, sharpened:** only one motorcycle has ever been measured, and
 the code has now largely caught up with what one bike's data can teach. The next unit of
@@ -502,6 +508,107 @@ repo is unscanned by design — worth remembering, not changing.
 
 ---
 
+## From the bike day, 2026-08-29
+
+### 15. Outcome vs intent — the write path says what it asked for, never what happened ← **NEXT**
+
+Four findings, one shape, and the highest-value work on this board. Every one
+was invisible to the simulator.
+
+**(a) The tool asserted what the console said, and was wrong.** On a refused
+write it told the rider *"The console reported SUCCESS, but … read back as
+'54'"*. What was on the wire:
+
+    [21:50:04] TX 'set maxcustregcotq_allow 55'
+    [21:50:05] RX 'FAILED  maxcustregcotq_allow could not be set to 55'
+
+`gui.py:4534` emits that string **literally**, choosing the branch on a
+read-back comparison alone and never inspecting the reply. The bike was honest;
+the tool put words in its mouth. This is the class of claim the project polices
+everywhere else (there is a test asserting "did not answer" never reaches a
+user) — and it is on the WRITE path.
+*Fix:* never assert what the console reported — quote it or say nothing. And
+`transport.write_setting` **returns** the reply, so the `FAILED` text was in the
+caller's hand: surface it instead of inferring "capped or rejected" from a diff.
+
+**(b) A write changed four settings the user never touched, and the revert did
+not undo them.** Proven on the wire, one second apart:
+
+    21:48:25  spfront 20 │ cotqx10  50 │ cotq_allow 55 │ brtqx10  70 │ brtq_allow 77
+    21:48:53  TX 'set spfront 21'  →  SUCCESS
+    21:48:55  spfront 21 │ cotqx10  60 │ cotq_allow 54 │ brtqx10 100 │ brtq_allow 90
+
+Reverting `spfront` restored it and `maxcustsprpm` — and left all four regen
+values changed. The rider's Custom brake regen went 77% → 90% and stayed there
+until restored by hand. The write model assumes writes are local; they are not.
+*Fix, and it is 90% built:* a full `set` dump is already read before and after
+every write. **Diff them and report every setting that moved.** Not universal —
+`maxcustspmph` writes have no cross-effects (verified against 2026-07-12), and
+`maxcustsprpm` tracked and returned on its own. Which is why reporting the diff
+beats modelling the rule.
+
+**(c) `writes_journal.txt` records the request, not the result.**
+
+    22:07:33 | maxcustspmph | 85 -> 102 | PENDING
+    22:07:35 | maxcustspmph | 85 -> 102 | UNVERIFIED
+
+The bike is at **89**, and nothing in the journal says so. For a file whose
+purpose is recording what a human authorised and what happened, half is missing.
+*Fix:* `journal_write` takes the read-back value and records it.
+
+**(d) The whitelist documents the clamp and the verifier never consults it.**
+The entry already says *"the console accepts up to 102 and reports SUCCESS, yet
+silently clamps back to 89 (verified live)"*. The tool knows 102→89 is the
+expected outcome and reports it as a mismatch. *Fix:* when the read-back differs
+from the request, say **"the bike clamped this to 89"** and journal 89.
+
+A measured negative worth keeping: reading the cap from `sevcon`'s
+`Max Eco Speed` was tested and **refuted** — the field tracks the *active ride
+mode* (89 → 80 when Custom was set to 80), so it mirrors configuration rather
+than declaring the machine's ceiling. It is also labelled "Eco" while reporting
+the active mode. Keep the validator at the console's 20–102; hardcoding 89 would
+bake one motorcycle into a platform-wide whitelist.
+
+### 16. `↺ Reset` appears on rows the user never wrote
+
+`_row_differs_from_baseline`'s docstring says *"the user has changed this
+setting"*; it means "differs from the last clean full read", which is not the
+same thing. Two failures followed: **(a)** after the `spfront` write, Reset
+appeared on two regen rows the *bike* had changed, sending the rider into three
+futile writes the bike refused; **(b)** after a clamped write it offered to
+"restore the last-read value (85)" — a transient the Zero app had written ninety
+seconds earlier, so clicking it would have destroyed a correct restoration.
+"Last read" is treated as "known good" and was neither.
+
+### 17. Three things that read badly at an actual motorcycle
+
+- **The COM port is not auto-selected if the app opens before the cable.**
+  `_refresh_ports` repopulates the dropdown but never sets `port_var`, and the
+  error text — *"click Refresh after plugging in the cable"* — is an incomplete
+  remedy: you must Refresh **and then pick**. Auto-select when the field is
+  blank and exactly one port appears (the rule the constructor already uses).
+- **The Risk column truncates mid-word**: `SAFE, but exactly 0 is refus`. On the
+  screen whose whole job is telling you what a write will do.
+- **Two version traps, neither visible from the GUI.** `pip install -e` updates
+  the venv, not the frozen build the Start Menu launches — the evening's first
+  pull was taken on **v0.21.0** without anyone noticing, and only
+  `session_meta.txt` revealed it. And a `--sim` window is indistinguishable from
+  a real one at a glance: a full rehearsal ran against the simulator first. Wants
+  a persistent SIMULATOR banner and a version line on the Connect tab.
+
+### 18. Two whitelisted settings cannot be written on rev 41 at all
+
+`maxcustregcotq_allow` and `maxcustregbrtq_allow` return `FAILED`, reproducibly
+(three attempts), while being offered in the Writes tab with risk gradings.
+Almost certainly **derived** values — computed from the `x10` setting against a
+gearing-dependent ceiling, which is why they moved on their own when `spfront`
+moved. Confirmed in reverse: when the Zero app set coast regen back to 55%,
+`maxcustregcotqx10` returned to 50 by itself. That is 2 of 14 whitelist entries
+that cannot work on this firmware. Mark them unwritable, or explain why they are
+offered.
+
+---
+
 ## At a bike — the data-acquisition plan
 
 Everything hardware-blocked, consolidated from six scattered locations (including the
@@ -527,7 +634,19 @@ Nothing since v0.22.x has touched hardware. One visit, one contactor event, in o
    the capture — that is the `_resync` field test, otherwise covered by queue item 7.
 5. *Calendar-gated:* any `bms` read **after 1 Nov 2026** (level 0, zero cost) settles
    whether the −7 h clock rendering follows US DST (−8 h after the change).
-6. *Someday:* a deliberate ride below the 13% logged floor answers what displayed 0%
+6. **Ride, THEN read `sevcon`.** The controller temperature row has never carried
+   a real measurement: the bike was parked and keyed on, and the "ride peak"
+   figures are key-on idle readings that drifted 27→28 C over 45 minutes of
+   sitting. The 2026-08-19 capture reports the identical pair, which is also weak
+   evidence for a stuck field — worth watching. Zero contactor cost.
+7. **Is `maxcustregcotqx10` writable at all?** Never attempted. It is the gating
+   unknown for whether the tool could restore what item 15(b) shows it changes.
+   Wants a written expectation BEFORE the attempt.
+8. **The isolation follow-up — about the motorcycle, not the software.**
+   478 kOhm against a healthy figure in the megohms, a live sample of 19 kOhm,
+   and one isolation event logged 08/29/2026 21:10:41, twenty minutes before the
+   capture. This is the bike telling its owner something.
+9. *Someday:* a deliberate ride below the 13% logged floor answers what displayed 0%
    means; shares its contactor event with the next routine capture. Costs riding time,
    not budget.
 
@@ -564,6 +683,24 @@ posted.** Posting it is Ron's, not Claude's.
 ---
 
 ## Open decisions, not tasks
+
+- **Is the coast-regen safety rationale inverted?** `safety.py:80` refuses
+  exactly 0% because *"0% coasting regen can cause fishtailing in low traction"*.
+  Coast regen applies decelerating torque through the REAR wheel, so *more* regen
+  is what breaks traction; at 0% the wheel freewheels and contributes no regen
+  braking at all. And on 2026-08-29 the **Zero app itself set that value to 0**
+  without comment, so the project's hardest refusal on this setting is
+  contradicted by the manufacturer's own software. Flagged, not fixed: it is a
+  vehicle-dynamics claim inside a safety gate and wants a source, not a confident
+  edit.
+- **Does a non-pack row belong in the pack verdict's LEVEL?** On the bike-day
+  capture the headline read *"Walk away, or get the pack checked before you buy"*
+  driven by the **isolation resistance** row, with three of four pack checks
+  `unknown` for want of ride data. That is the mirror image of what 6c decided:
+  6c moved fault rows into notes that do NOT move the level, while isolation was
+  already a check that DOES. The boundary is now inconsistent, and the field
+  found it first. Either isolation becomes a beyond-the-pack note too, or 6c's
+  rule needs restating to say which non-pack findings are load-bearing and why.
 
 - **The −100 °C sentinel on ride/charge samples** — latent (zero occurrences in 5 real
   logs); the fix needs a semantics decision (drop field / drop sample / consumer
