@@ -437,7 +437,7 @@ MUTATIONS = [
     # item 20 - the headline names its driver and counts what it could not answer
     ("headline: stop naming the check that earned the verdict",
      "src/openmbb/condition.py",
-     '''    named = [c["name"] for c in (checks or []) if c.get("level") == level]''',
+     '''    named = [_label(c) for c in (checks or []) if c.get("level") == level]''',
      '''    named = []''',
      "tests/test_condition.py::test_the_headline_names_the_check_that_earned_it"),
 
