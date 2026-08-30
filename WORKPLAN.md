@@ -11,8 +11,9 @@ current: what to do next, what needs a motorcycle, and what was deliberately not
 Opus sessions. Queue items below are scaffolded for direct pickup — files, the change,
 the tests, and the mutation each test must catch.
 
-**State:** v0.25.0 released; **15 commits unpushed**, tree clean, 648 tests
-passing with 0 skipped, **60/60 mutation entries catching**. Every bike-day
+**State:** **v0.26.0 released** 2026-08-30 — tagged, CI green on both OSes,
+all three binaries published. Tree clean, 648 tests passing with 0 skipped,
+**60/60 mutation entries catching**. Every bike-day
 finding is closed (items 15–20b) and each was reviewed adversarially before
 landing — three of those reviews found real defects, twice in a fix that had
 just been made for the same class of problem.
@@ -35,9 +36,11 @@ and not results; a safety refusal that had shipped for 22 versions turned out
 to be unsourced folklore contradicted by the manufacturer's own app; and the
 write confirm dialog told a rider a value was refused while the app sent it.
 
-**Next:** tag v0.26.0 (held deliberately — the stack is CI-validated but a
-release publishes binaries, and Ron's call), then items 7 and 9–14, then
-**At a bike**, which is now the binding constraint again.
+**Next:** items 7, 9–14, 18c, 21–24, then **At a bike**, which is the binding
+constraint. **Item 23 is the exception worth noting** — opt-in calibration
+sharing is the only queued item that attacks the one-bike ceiling without a
+second motorcycle in the garage, which is why it is filed as a feature rather
+than deferred with the hardware items.
 
 **The organising constraint, sharpened:** only one motorcycle has ever been measured, and
 the code has now largely caught up with what one bike's data can teach. The next unit of
@@ -709,6 +712,171 @@ count means.
 
 ---
 
+### 23. Opt-in calibration sharing — the redacted-capture contribution path
+
+**Why this is not just another queue item.** Every threshold in this tool is one
+part measurement and one part chemistry reasoning, because one motorcycle has
+ever been measured. `derate_profile` and `cell_sag` describe rather than grade;
+6b needs a second odometer; the module-connect rename, the BattTemp dialect and
+displayed 0% all need another bike. **This is the only item that attacks that
+ceiling without a second motorcycle in the garage.**
+
+**The shape.** The app prepares a redacted bundle locally, shows the owner a
+diff of exactly what is being sent, and opens their BROWSER at a pre-filled
+GitHub issue. They attach the file themselves.
+
+**Mechanism decided — no in-app uploader, and this is not to be relitigated.**
+`webbrowser.open` is already the sanctioned outbound mechanism and
+`test_no_network.py:101` records why: *"not a request BY OpenMBB — the browser
+makes it, and the program never learns the result."* An opt-in uploader would
+downgrade `## Privacy` from a property to a default, and the test from a
+guarantee to a configuration check, for a tool people plug into bikes they are
+considering buying. The browser handoff gets the same data for about twenty
+seconds more friction.
+
+**Prior art in the tree.** `_export_share_safe` (`gui.py:1346`) and
+`openmbb redact` already exist, and `redact_session` re-scans its own output and
+destroys the bundle rather than ship one it cannot vouch for. This item is a
+diff viewer, an issue template, four small code changes and one new command —
+not a new subsystem.
+
+#### Governance decisions (settled 2026-08-30 by a five-lens review with three
+adversarial critics; the reasoning is worth re-reading before implementing)
+
+- **Retention: hold the bundle until read, then extract or discard — same day.**
+  Not "indefinite", not a calendar. A calendar deletion is executed on a day
+  attention is absent by definition; extraction happens on a day it is present.
+  Auditability survives because the thing that must be re-derivable in 2031 is
+  the extract, not the bundle — and if a threshold depends on it, the excerpt is
+  a committed public fixture that outlives the maintainer.
+- **Published counts are counts of SUBMISSIONS, not bikes.** Redaction strips
+  exactly the identifiers that would distinguish two captures of one bike from
+  two bikes. "7 bikes" is a claim the policy's own redaction rule makes
+  unverifiable. This was the sharpest catch in the review: the headline honesty
+  number was itself unbackable.
+- **Ask a consent question, not an ownership question.** *"Your bike, or one
+  whose owner said yes?"* — not *"is this your bike"*. An ownership refusal is
+  defeated by a checkbox, and it costs the buyer-inspection population, which is
+  where the degraded packs are. A buyer in a driveway can ask.
+- **Bad news routes to the private security-advisory channel, never the thread.**
+  See structural flag 1 below.
+- **The word "anonymous" never appears**, and the warning names what REMAINS —
+  the note, the settings dump, the machine clock, the full event log — not what
+  was removed. The current success dialog's *"carries no VIN or serial number"*
+  is precisely true and reads as an all-clear.
+- **Pre-committed refusals**, written down in advance so they cannot be talked
+  out of later: no sale, no transfer, no VIN lookup, no contacting an owner or
+  buyer or seller, no expert role in a dispute, no exception process — and if
+  Zero, an insurer or a dealer group asks, the answer is no, with no arrangement
+  under which it becomes yes.
+- **No private mirror repo.** One folder, one machine, encrypted, outside every
+  synced path and every git worktree.
+
+#### Structural flags found by the review
+
+1. **The bad-news channel collides with the intake channel.** Committing to tell
+   someone their pack is failing, when the only channel back is the public
+   issue thread, publishes *"your battery is dying"* under their handle next to
+   a model and year — exactly what redaction exists to prevent. Route it through
+   the GitHub advisory channel `SECURITY.md` already documents; say only *"I've
+   sent you something privately"* in the thread.
+2. **Publication precedes review and nothing reverses it.** The maintainer sees
+   the file last. So the load-bearing sentence must live in the **pre-filled
+   issue body**, not only in a linked document — that body is the only text
+   guaranteed to be on screen at the moment of attachment.
+3. **The GitHub-account requirement is the biggest cut in the funnel** and is
+   never priced as one. Zero owners are not developers. Worth knowing before
+   concluding the feature failed for policy reasons.
+4. **Do not put the share CTA at the end of the Inspect-a-bike wizard.** That
+   puts the ask in the seller's driveway, mid-transaction, aimed at the party
+   with less power. Keep the two apart in the UI and in time, and write the
+   reason in a code comment so a future contributor does not helpfully connect
+   them.
+5. **A received bundle carries no evidence it was ever redacted** —
+   `redact_session` returns its report to the caller and writes nothing into the
+   destination. The sending end has the discipline; the receiving end has none.
+6. **`rev41_postlogin_set.txt:31–32` prints the MBB serial and the VIN on
+   adjacent lines** (`bms` and `sevcon` print theirs too). *"Just paste your
+   settings dump"* is never safe advice, and any paste path needs
+   `find_pii_shapes` — which takes a plain string, so it is a reuse.
+
+#### Minimum viable version
+
+1. `SHARING.md` — ~250 reader-facing words, plus a maintainer-commitments block
+   that sits in nobody's path. Linked from README `## Privacy` and the template.
+2. `.github/ISSUE_TEMPLATE/calibration-capture.yml` — two required checkboxes,
+   one optional fixture tick, three questions (model, year, **why you captured
+   this**: routine / evaluating one I might buy / it is misbehaving — the third
+   is the only defence against selection bias poisoning a small corpus).
+3. Four code changes: a single named ZIP (`gui.py:1362` currently writes
+   `src + "-shared"` beside the original and opens a window showing both —
+   picking wrong publishes everything, irreversibly); `REDACTION.txt` written
+   into the bundle *before* the verification loop so it is scanned like
+   everything else; `session_note.txt` shown first and in full in the diff
+   viewer; the success dialog naming the scan's scope and what remains, with the
+   diff viewer behind a button rather than an instruction with no tool behind it.
+4. `openmbb check-shared <path>` — archive-safety pass first (reject absolute
+   paths, `..`, symlinks, absurd expansion ratios, control characters in member
+   names; **refuse, do not sanitise** — same contract as `redact_session`), then
+   `find_pii_shapes`, then append one ledger line and print the running count.
+   This is the item that converts three unkeepable promises into byproducts of a
+   command run for the maintainer's own benefit. It ships before intake opens.
+5. Three test edits: the issue-new URL in `ALLOWED_URL_PREFIXES`; an assertion
+   that **no capture-derived bytes reach the URL** (not a count, not a firmware
+   rev — query strings are transmitted); and a gate test failing if any tracked
+   path outside `tests/fixtures/` carries a `# command:` header or a
+   capture-shaped directory name — redaction placeholders are deliberately
+   shape-safe, so a whole redacted bundle committed today passes every existing
+   test.
+6. `IF-I-STOP.md` — delete the intake folder, leave the public repo alone, and
+   **do not read the captures or act on anything in them.** A non-technical
+   executor triaging safety data is worse than silence.
+
+**Tripwires, printed by `check-shared` so they are noticed rather than
+remembered:** more than 20 held, or more than 5 in a month, means this
+arrangement has stopped being adequate.
+
+**Also required in the same commit:** widen the README's outbound enumeration
+(lines 46–50 name three Help-menu items as the only outbound things; a File-menu
+share is a fourth, and the first URL the app *composes* rather than quotes),
+preserving the exact strings `test_no_network.py` asserts on.
+
+**Residual risk, stated rather than solved:** a third party whose bike was
+captured without consent and who has no GitHub account **cannot reach the
+maintainer** — a right written down with no channel built. And the feature may
+simply not produce enough bikes; if so the honest move is to say the tool is
+still calibrated on one motorcycle, **not** to lower the two-submission floor.
+That is where the pressure to break the policy will actually come from.
+
+---
+
+### 24. The condition report prints the session folder's name — and the fix is blocked on provenance
+
+Two defects that must be fixed in this order.
+
+**24a. Move the simulator marker into `session_meta.txt`.** `_write_session_meta`
+(`gui.py:3884`) records `capture_format`, `app_version`, `firmware_rev` and
+`power_mode` — and nothing about the simulator. The `_sim` / `_listen` tags live
+in the **folder name** (`sessions.py:26`), which is what `gui.py:5598` reads to
+exclude them from trends. So a clean condition report can be produced from the
+shipped simulator and handed to a buyer as that bike's page, and nothing in the
+report says otherwise.
+
+**24b. Then stop printing the basename.** `report.py:150` prints
+`"  capture  : %s" % session.name`, and `sessions.py:86` sets `name` from the
+folder basename. The report is the artifact actually handed to a stranger, and
+its PII gate is `find_pii_shapes` — which looks for four motorcycle shapes and
+would report clean over `Daves-FXS-preinspection-2026`. Print a normalised
+identity (timestamp plus firmware rev), or filter to `[A-Za-z0-9_-]` with a
+length cap.
+
+**Why the order matters:** 24b deletes the only marker separating simulator
+output from bike output in a report someone might hand a buyer. Doing it first
+would trade a privacy leak for a provenance hole. 24a makes the report's own
+docstring — *"a dated page fit to hand a buyer"* — true for the first time.
+
+---
+
 ## From the bike day, 2026-08-29
 
 ### 15. ~~Outcome vs intent~~ — implemented (`f6aff37`, **unpushed pending 15b**)
@@ -1004,6 +1172,10 @@ One line per ship, newest first; the full reasoning is the commit message.
 
 | what | commit / tag |
 |---|---|
+| **v0.26.0** — the tool stopped speaking for the motorcycle: console reply quoted, every write diffs the settings dump, journal records outcome not intent, coast-regen folklore removed after 22 versions, `↺ Reset` means "before YOUR write" | tag `v0.26.0` |
+| **v0.25.0** — verdict headline names its driver and admits its unanswered count; sevcon parsed and its odometer refused; the two-surface mirror; skips made structural | tag `v0.25.0` |
+| **v0.24.1** — the sharing path hardened: refusals reach the person, the consent record masks both halves | tag `v0.24.1` |
+| **v0.24.0** — `--selftest` restored, capture-format stamp with three ways of vouching, mutation manifest became a thing you can run | tag `v0.24.0` |
 | Unmeasured ride-log stretch disclosed; baseline chosen by timestamp not filename | `d49fa37` |
 | Nine interrogated fixtures from real captures; property corpus 430→616 lines | `ea9ac5c` |
 | Four fuzz-only parser root causes closed; −100 sentinel decision left open, stated | `99b2c07` |
