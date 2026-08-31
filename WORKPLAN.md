@@ -11,9 +11,10 @@ current: what to do next, what needs a motorcycle, and what was deliberately not
 Opus sessions. Queue items below are scaffolded for direct pickup — files, the change,
 the tests, and the mutation each test must catch.
 
-**State:** **v0.26.0 released** 2026-08-30 — tagged, CI green on both OSes,
-all three binaries published. Tree clean, 648 tests passing with 0 skipped,
-**60/60 mutation entries catching**. Every bike-day
+**State:** v0.26.0 released 2026-08-30 (tagged, CI green both OSes, three
+binaries published), **plus 10 unpushed commits** clearing the whole engineering
+queue. Tree clean, **698 tests passing with 0 skipped**, **94/94 mutation
+entries catching**. Every bike-day
 finding is closed (items 15–20b) and each was reviewed adversarially before
 landing — three of those reviews found real defects, twice in a fix that had
 just been made for the same class of problem.
@@ -36,11 +37,21 @@ and not results; a safety refusal that had shipped for 22 versions turned out
 to be unsourced folklore contradicted by the manufacturer's own app; and the
 write confirm dialog told a rider a value was refused while the app sent it.
 
-**Next:** items 7, 9–14, 18c, 21–24, then **At a bike**, which is the binding
-constraint. **Item 23 is the exception worth noting** — opt-in calibration
-sharing is the only queued item that attacks the one-bike ceiling without a
-second motorcycle in the garage, which is why it is filed as a feature rather
-than deferred with the hardware items.
+**The engineering queue is empty** as of 2026-08-30. Items 7, 9–14, 18c,
+21–22, 23a and 24 all shipped in one stack: **698 tests passing with 0
+skipped** (was 648), **94/94 mutation entries catching**. What remains is
+**23b** — opening intake for shared captures, which is a personal
+commitment rather than an engineering task and is held deliberately — and **At a bike**, which needs a motorcycle.
+
+**The full manifest run earned its keep twice.** It found a test that could not
+fail (item 6d's local hex guard, superseded by item 13 and coarser than what
+replaced it) and six anchors this stack had moved out from under. Neither was
+visible to the per-item runs.
+
+**Next:** an adversarial review of the whole stack before any release — three such
+reviews in this project have each found real defects, twice inside a fix that
+had just been made for the same class of problem. Then **At a bike**, which is
+the binding constraint and has been since v0.23.
 
 **The organising constraint, sharpened:** only one motorcycle has ever been measured, and
 the code has now largely caught up with what one bike's data can teach. The next unit of
@@ -409,7 +420,7 @@ list is non-empty, or a bike with stored faults reads clean in the list view.
 
 
 
-### 7. Golden transcripts and richer port fakes — **reduced to ~3 h** (2026-08-30)
+### 7. ~~The clamping port~~ — **shipped** (`6edec18`, reduced scope)
 
 **Scope cut to the one path with a real failure behind it.** A clamping port — a
 fake that answers `SUCCESS` and reads back the old value *through the transport*
@@ -463,7 +474,7 @@ made them *skipped*, because `pytest.raises(fail.Exception)` does not match
 skip happens here" may not let a skip escape, or the skip is what reports the
 result. All three now catch it explicitly.
 
-### 9. Journal a write at the transport, not only in the GUI
+### 9. ~~Journal a write at the transport, not only in the GUI~~ — **shipped** (`6edec18`)
 
 Found while fixing item 1. `journal_write` is called only from `gui.py`, so a
 write driven through `transport.write_setting` by a script or a REPL reaches the
@@ -481,7 +492,7 @@ explicitly walking through the GUI's write flow, not `write_setting`'s contract.
   one write cannot produce two records. **Mutation:** journal only in the GUI →
   a headless-write test finds an empty journal.
 
-### 10. One decoder for everything that reads a capture
+### 10. ~~One decoder for everything that reads a capture~~ — **shipped** (`4e4e6e9`)
 
 The sprint gave `redact` a BOM-aware decoder and the loaders none, so the two
 halves of the tool now disagree about what they can read (review, reproduced):
@@ -495,7 +506,7 @@ decodes UTF-8 only.
   the baseline read. `redact._decode_text` is the model. Mutation: force the
   helper back to UTF-8-only → a UTF-16 fixture capture loses its commands.
 
-### 11. A refused capture must be visible everywhere it is absent
+### 11. ~~A refused capture must be visible everywhere it is absent~~ — **shipped** (`eeccf8b`)
 
 Three surfaces now silently omit what they cannot read: `library.scan` (filed
 under item 2), and both Charts trend loaders (`gui.py:5360`, `gui.py:5446` —
@@ -509,7 +520,7 @@ overstated — the dialogs do, the loops don't.)
   OpenMBB"). Reachable only via future-format or damaged meta today, which is
   why it is filed rather than in the v0.24.1 bundle.
 
-### 12. Sessions that never get a meta file never state their format
+### 12. ~~Sessions that never get a meta file never state their format~~ — **shipped** (`eeccf8b`)
 
 The stamp writer lives on the full-pull path (`gui._write_session_meta`), so
 listen captures, connect-without-pull sessions, and selftest sessions carry no
@@ -522,7 +533,7 @@ version would be read as format 1 by an older tool.
   keeps enriching it with firmware/power-mode as now (which also intersects
   item 9 — both are "move the record down to where every caller passes").
 
-### 13. `num()` accepts a hex prefix and reads its leading zero
+### 13. ~~`num()` accepts a hex prefix~~ — **shipped** (`4e4e6e9`, `197f153`)
 
 `num("0x1C")` → 0.0, in every parser that uses `num`/`all_nums`. Item 6d
 refuses it locally in the one *graded* field; this item is the survey: which
@@ -530,7 +541,7 @@ fields across all parsers can meet a hex token on real firmware, and whether
 the garble guard should refuse `0x` outright the way it refuses split decimals.
 `num` also lacks the split-digit-run guard `_unit_number` has — same survey.
 
-### 14. The simulator's sevcon block predates the parser
+### 14. ~~The simulator's sevcon block predates the parser~~ — **shipped** (`4e4e6e9`)
 
 `SIM_SEVCON`'s labels miss every fault/operational/firmware needle, so a sim
 session renders **no Sevcon row** — the demo mode never shows the feature it
@@ -577,7 +588,7 @@ just `SAFE`), harmless; the constructor picks the *first* of several ports
 while Refresh picks none, so "the same rule" was an overclaim; and `41f0246`'s
 message says it committed CRLF assets when it touched only the manifest.
 
-### 18c. Filed from the same review
+### 18c. ~~Filed from the same review~~ — **shipped** (`6edec18`)
 
 - **The title tag tracks the checkbox, not the live connection.** Untick
   Simulator while connected to the sim and the tag drops mid-session. The
@@ -712,7 +723,7 @@ One note, not a fix: under an isolation-driven headline the 6c note still says
 read the stack as coherent; recorded here so the next wording pass considers
 "covers the battery system" instead.
 
-### 21. The audit file's two record types disagree about masking
+### 21. ~~The audit file's two record types disagree about masking~~ — **shipped** (`6edec18`)
 
 `journal_observed` masks registered secrets; `journal_write` never has and
 still does not, while `journal_consent` spells the rule out. A setting write is
@@ -720,7 +731,7 @@ name/old/new — low leak risk — but the rule should be one rule. Route all th
 through the same masked writer; one test that a redacted secret in a value is
 `****` in every record type.
 
-### 22. The unanswered count's denominator moves with the bike
+### 22. ~~The unanswered count's denominator moves with the bike~~ — **shipped** (`6edec18`)
 
 *"2 of 4 checks unanswered"* counts the checks that happened to EXIST — and
 isolation/warning rows exist only when they fire. The same evidence reads
@@ -741,7 +752,7 @@ original defect relabelled rather than fixed.
 
 ---
 
-### 23. Opt-in calibration sharing — the redacted-capture contribution path
+### 23. Opt-in calibration sharing — **23a shipped** (`9dd9c23`), **23b held**
 
 **Split, and half of it is held (Ron, 2026-08-30).**
 
@@ -896,7 +907,7 @@ That is where the pressure to break the policy will actually come from.
 
 ---
 
-### 24. The condition report prints the session folder's name — and the fix is blocked on provenance
+### 24. ~~The condition report prints the session folder's name~~ — **shipped** (`9d786f2`, `bd10e00`)
 
 Two defects that must be fixed in this order.
 
@@ -1218,6 +1229,11 @@ One line per ship, newest first; the full reasoning is the commit message.
 
 | what | commit / tag |
 |---|---|
+| The record follows the enforcement down: a scripted write is journalled, one masked writer, the scorecard stops moving with the bike, the clamping port | `6edec18` |
+| A refused capture is named wherever it is absent; every session stamps its format from the moment its folder exists | `eeccf8b` |
+| One decoder for everything that reads a capture; `num()` refuses hex and split digit runs; the simulator shows the Sevcon feature it exists to demo | `4e4e6e9` |
+| The export writes one named ZIP somewhere else entirely, and can show its work — whole-bundle diff viewer, a dialog that stops reading as an all-clear | `9dd9c23` |
+| The page handed to a stranger stopped printing the folder's own name; provenance moved into the meta file first | `9d786f2` |
 | **v0.26.0** — the tool stopped speaking for the motorcycle: console reply quoted, every write diffs the settings dump, journal records outcome not intent, coast-regen folklore removed after 22 versions, `↺ Reset` means "before YOUR write" | tag `v0.26.0` |
 | **v0.25.0** — verdict headline names its driver and admits its unanswered count; sevcon parsed and its odometer refused; the two-surface mirror; skips made structural | tag `v0.25.0` |
 | **v0.24.1** — the sharing path hardened: refusals reach the person, the consent record masks both halves | tag `v0.24.1` |
