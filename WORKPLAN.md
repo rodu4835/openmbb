@@ -48,10 +48,10 @@ fail (item 6d's local hex guard, superseded by item 13 and coarser than what
 replaced it) and six anchors this stack had moved out from under. Neither was
 visible to the per-item runs.
 
-**Next:** an adversarial review of the whole stack before any release — three such
-reviews in this project have each found real defects, twice inside a fix that
-had just been made for the same class of problem. Then **At a bike**, which is
-the binding constraint and has been since v0.23.
+**Next:** the review ran (2026-08-30, Fable) and the pattern held a fourth
+time — 1 critical, 5 major, ~13 minor, four of the six heavyweight findings
+inside this stack's own fixes. **Item 25 is the scaffolded fix pass; nothing is
+pushed until it lands.** Then **At a bike**.
 
 **The organising constraint, sharpened:** only one motorcycle has ever been measured, and
 the code has now largely caught up with what one bike's data can teach. The next unit of
@@ -931,6 +931,176 @@ length cap.
 output from bike output in a report someone might hand a buyer. Doing it first
 would trade a privacy leak for a provenance hole. 24a makes the report's own
 docstring — *"a dated page fit to hand a buyer"* — true for the first time.
+
+---
+
+### 25. The stack review's fix pass *(review 2026-08-30, Fable; 30-agent adversarial pass + independent trace)*
+
+**Verdict on `8f39a67..HEAD`: NOT ready to push.** One critical, five major,
+~13 minor, 8 notes. The pattern held a **fourth** time — and sharpened: four of
+the six heavyweight findings are inside fixes this same stack made for the same
+class of problem. Every finding below was independently verified by an
+adversarial agent that reproduced or traced it end to end; two were downgraded
+in verification and the downgrades were accepted.
+
+#### CRITICAL — must land before push
+
+**25a. A real bike keeps the `[SIMULATOR — NOT YOUR BIKE]` title.**
+`_refresh_sim_badge` is called from exactly two places: `__init__` and the
+checkbox toggle — never from the connect `done()` handler (where `connected`
+flips True) or from `_reset_session_state`. `_connected_to_simulator()` answers
+correctly in both directions; nothing re-asks it when the answer changes.
+Sequence: rehearse on the sim, untick the box (tag correctly stays), disconnect,
+connect the real cable → the title shows SIMULATOR over a live real-bike
+session. **Real writes read as rehearsal — the dangerous direction**, on the one
+indicator 18c made visible from every tab. The status-bar `lbl_sim` goes stale
+by the same omission, so both indicators lie together.
+- **Fix:** call `_refresh_sim_badge()` from the connect `done()` handler and
+  from `_reset_session_state`. One call fixes both indicators.
+- **Test:** connect sim → untick → disconnect → connect real port (ScriptedPort)
+  → title carries no SIMULATOR; and the reverse direction. Mutation: remove the
+  done() call → the test fails.
+
+#### MAJOR — must land before push
+
+**25b. A dangling PENDING for a write that never reached the wire.**
+The token and name-in-dump guards run before the PENDING journal line, but the
+value whitelist (`command_blocked`, transport.py:442) and the control-char /
+non-ASCII hygiene run inside `exec_command` — after it. A validator-refused
+value journals PENDING then raises: a permanent record whose documented meaning
+is "the bike may have changed" over a write that provably never touched the
+wire. **The shipped selftest plants one on every run** (cli.py deliberately
+writes `maxcustregcotq_allow 101` to prove validation). Reproduced live.
+- **Fix (decided):** catch `BlockedCommandError` around the send inside
+  `write_setting`, journal an explicit `REFUSED BEFORE THE WIRE — <reason>`
+  record through `_journal`, and re-raise. NOT a pre-duplicated validation call
+  — two copies of the checks would drift; one source of truth, and the journal
+  gets MORE honest (the refusal is recorded, closing the PENDING).
+- **Test:** headless refused write → journal shows PENDING + REFUSED, no
+  UNVERIFIED; the selftest's journal carries the pair. Mutation: drop the
+  except → orphan-PENDING test fails.
+
+**25c. A damaged format claim now reads as ABSENT.**
+`read_text` tries utf-16 before the lenient fallback, and Python's BOM-less
+utf-16 accepts almost any even-length bytes — so a UTF-8 `session_meta.txt`
+carrying `capture_format: 2` plus ONE corrupt byte decodes "successfully" into
+CJK garbage, the regex misses, and `capture_format()` returns 1 where the old
+`errors="replace"` reader preserved the claim and REFUSED. The exact false pass
+the stamp's own docstring promises to prevent, reintroduced by item 10. Also
+swallows `source:`/`time:` the same way.
+- **Fix (decided):** BOM-gate the utf-16 branch in `redact.decode_text` itself
+  (accept utf-16 only when the raw starts with FF FE / FE FF) — both halves
+  stay on one decoder, which was item 10's entire point. Real utf-16 files from
+  Notepad/PowerShell carry the BOM; `encode('utf-16')` in every fixture emits
+  it, so nothing legitimate is lost.
+- **Test:** even-length damaged utf-8 meta claiming format 2 →
+  CaptureFormatError; existing utf-16 tests keep passing. Mutation: drop the
+  BOM gate → the damaged-claim test fails.
+
+**25d. The trend loaders never adopted the meta-first rule.**
+Both chart loops still filter with `name.endswith(("_sim", "_listen"))` while
+library/report/sessions went meta-first with counter tolerance. So: a RENAMED
+sim capture (meta says `source: simulator`) is bannered SIMULATOR DATA on the
+report, marked [SIM] in the library — and plotted into "your bike's real
+history" on the charts; a legacy `..._sim_1` collision folder ditto. The
+surfaces now answer "is this from a bike?" differently for the same folder,
+and the docstring at the loop promises an exclusion the code no longer delivers.
+- **Fix:** both loops ask `sessions.not_from_a_bike(folder)` (cheap meta read,
+  before the expensive `load_session`).
+- **Test:** renamed-sim-capture and `_sim_1` folders excluded from both trend
+  loaders. Mutation: revert one loop to endswith → test fails.
+
+**25e. The diff viewer renders a false statement for every file after Done.**
+The viewer is a sibling Toplevel reading from the temp dir; the result dialog's
+`done()` rmtrees that dir but leaves the viewer open. Click any file afterwards
+→ "(not text this export can read — it was left out of the bundle)" for files
+that ARE in the zip being sent — in the one window built to establish what is
+being shared. The branch's intended meaning is also unreachable (an undecodable
+file aborts the whole export), so it can ONLY ever lie.
+- **Fix:** `done()` also destroys `self._diff_win` if open; reword the orphan
+  branch to state what actually happened ("this preview is gone — the working
+  copy was cleaned up; the file IS in the zip") or drop it for a re-open guard.
+- **Test:** dialog Done with viewer open → viewer is gone (or shows no false
+  claim). Mutation: remove the destroy → test fails.
+
+**25f. The stamp-enrichment test cannot fail.**
+`test_the_pull_path_enriches_the_stamp_without_losing_it` hand-writes the
+"enriched" meta via `save_named` and asserts keys in its own literal. Delete the
+`time:` line from `gui._write_session_meta` — the clock-offset machinery loses
+the machine half of its instant, `capture_identity` degrades — and the test
+stays green. No other test covers the gap; no mutation entry names it.
+- **Fix:** a real test in test_gui_flow.py (where `app` lives): connect, call
+  `_write_session_meta`, assert `capture_format:`/`time:`/`app_version:` all
+  present in the REWRITTEN file. Retire or repoint the vacuous half. Mutation:
+  drop the `time:` line from `_write_session_meta` → the new test fails.
+
+#### MINOR — ride along in the same pass
+
+1. **SUMMARY_VERSION 4 → 5** (library.py). Item 22 changed the cached headline
+   STRING; the un-bumped cache serves the old denominator wording from disk
+   (reproduced via `deep_verdict`). Downgraded from major in verification — the
+   only current reader renders level + beyond_pack, both unchanged — but the
+   version comment's own promise is violated. One line plus a comment.
+2. **Refused-capture wording lies about the cause** (library window, chart, and
+   empty-chart branches): all say "written by a newer OpenMBB", but
+   `CaptureFormatError` also fires for a damaged/non-integer stamp. Say "written
+   by a newer OpenMBB, or the stamp is damaged" — or thread the error's own
+   sentence through.
+3. **A zip saved INTO the capture folder breaks later exports** — the next
+   export finds an unscannable .zip and aborts (RuntimeError → "please report
+   this"). Refuse a destination inside the source folder, like redact already
+   refuses for directories.
+4. **The chosen zip FILENAME is never scanned for identifier shapes** — the
+   folder-name guard this replaced checked; run `find_pii_shapes` over the
+   basename and refuse, same contract.
+5. **Renamed-for-PII files show "going exactly as it is"** in the diff viewer —
+   the no-changes note prints above the rename warning when the CONTENT is
+   unchanged but the NAME was redacted. Suppress the note when out_name differs.
+6. **redact silently omits files that fail the os read** (`skipped`) — bundle
+   and dialog never mention them; surface the count next to the existing
+   unscanned handling.
+7. **Journal token collision** — a registered secret equal to a structural
+   token ("PENDING", a setting name) corrupts record structure when whole-line
+   masking replaces it. New exposure from item 21's widening. Mask only the
+   variable fields? No — keep one writer, but note the risk in _journal's
+   docstring and refuse add_redaction of pure structural tokens (≤3 chars
+   already refused? verify) — smallest honest fix wins here.
+8. **ClampingPort's reply lacks the SUCCESS prefix** the real console used on
+   the bike day — make the fake say `SUCCESS` the way the wire did, so the
+   trap being tested is the literal trap.
+9. **README:435** — the session_meta field list is now false for listen/selftest
+   captures (no firmware/power); README:448 still warns the export carries the
+   folder name (the zip export removed that).
+10. **Literal `\u` escapes** added to gui.py by eeccf8b right after 8fc980f
+    banned them — normalise (the library-window strings around the refused
+    line).
+11. **OK-branch headline** still says "checks went unanswered" where the harsh
+    branches now say "pack checks unanswered" — align the wording.
+12. **WORKPLAN 23b** still claims the export "currently writes src + -shared";
+    23a shipped the fix — update the held item's premise.
+13. **Stale mtime comment** above the capture-time ordering in
+    `_render_compare`.
+
+#### NOTES — filed, no action gated
+
+Temp bundle lingers in %TEMP% if the app dies before Done; "N replaced across M
+files" counts distinct identifiers not per-file replacements; new code uses the
+deprecated `_decode_text` alias; WORKPLAN says 10 unpushed commits (11); item 20
+quotes the pre-22 headline; sessions.py convention 5 predates `source:`; item
+6's shipped hash is wrong (pre-existing); the "hands back the read-back"
+mutation entry proves less than its label.
+
+#### What was checked and found sound (68 clean checks, the load-bearing ones)
+
+One PENDING + one outcome per GUI write, put-back included; the journaled `old`
+is byte-identical to the pre-stack GUI's; ConsoleReboot/Quiet mid-write leaves
+the PENDING whose meaning IS "may have changed"; thread-topology of
+known_settings/last_write; whole-line masking breaks no consumer; the five
+rewritten write tests genuinely drive the real path; verify-read timing
+unchanged; level semantics under item 22 provably identical to before; the
+guards' order ahead of the wire unchanged; heavy consent untouched; the
+unredacted capture never copied into the temp dir or the zip; Warn.TLabel
+configured on both theme backends.
 
 ---
 
