@@ -303,7 +303,16 @@ Two things worth keeping from the build:
   load-bearing.
 - **The controller's odometer is not the bike's mileage** — see below.
 
-### 6b. What constant does the Sevcon odometer assume? *(second-bike question, premise corrected)*
+### 6b. ~~What constant does the Sevcon odometer assume?~~ — **off the queue** (2026-08-30)
+
+**Decided: this is not a work item, and it never was one.** The measurement is
+done and the wrong explanation is already corrected in the file. The remaining
+question — is the constant the same on every bike — **changes no code either
+way**, because the refusal-to-print stands regardless. And it costs nothing to
+answer: the *At a bike* plan already reads both odometers on any pull (see the
+`sevcon`-vs-`stats` step below), so it rides with data being collected anyway.
+Kept here as the record; it occupies no queue slot.
+
 
 The ratio is real and exact — sevcon/MBB odometer = **2.3752** on all three
 captures, to four decimals across ~1,100 km — but the first explanation
@@ -400,7 +409,18 @@ list is non-empty, or a bike with stored faults reads clean in the list view.
 
 
 
-### 7. Golden transcripts and richer port fakes (~1.5 days)
+### 7. Golden transcripts and richer port fakes — **reduced to ~3 h** (2026-08-30)
+
+**Scope cut to the one path with a real failure behind it.** A clamping port — a
+fake that answers `SUCCESS` and reads back the old value *through the transport*
+— is precisely what the motorcycle did on 2026-08-29, and nothing at port level
+can reproduce it today. Build that, with its transcript golden.
+
+The paced port (3,840 B/s) and the no-prompt dump port are **re-filed as
+speculative**: nothing has ever failed either way, and `SimPort._respond` always
+appending a prompt is a known limitation rather than an observed defect. Reopen
+either the first time something fails that way.
+
 
 As previously filed, one claim corrected by the review: the silent clamp is *not*
 entirely untested — a GUI-level clamp-warning test has existed since v0.20.0. The real
@@ -707,12 +727,38 @@ isolation/warning rows exist only when they fire. The same evidence reads
 "2 of 3" on a bike with healthy isolation and "2 of 4" on one with a fault, so
 the number is not a fixed scorecard. Decide: count only the three pack checks
 in the fraction and name conditional rows separately, or say "N of the M
-checks this capture could run". The former is more honest about what the
-count means.
+checks this capture could run".
+
+**Decided (Ron, 2026-08-30): the fraction counts the three pack checks only.**
+`Weakest cell vs pack`, `Lowest cell under load` and `Cell spread at rest` are
+added unconditionally (each with an `unknown` fallback), so a fraction over
+those three is a **stable scorecard** — "2 of 3" means the same thing on every
+bike, and two reports become comparable. Conditional rows are **named in the
+headline, never counted**: the headline already names its driver as of item 20,
+so an unanswered isolation check is stated rather than folded into a denominator
+that moves. The rejected option keeps M varying bike to bike, which is the
+original defect relabelled rather than fixed.
 
 ---
 
 ### 23. Opt-in calibration sharing — the redacted-capture contribution path
+
+**Split, and half of it is held (Ron, 2026-08-30).**
+
+**23a — build now.** Three changes that improve the export path this project
+already ships, and that are worth making whether or not anybody ever contributes
+a capture: the **diff viewer** (whole bundle, file by file, `session_note.txt`
+first and in full), the **single named ZIP** in place of a sibling folder beside
+the original, and a **success dialog that stops reading as an all-clear** —
+naming what was scanned for and what remains, with the diff viewer behind a
+button. None of these commits anyone to anything.
+
+**23b — held, fully scoped.** `SHARING.md`, the issue template and
+`openmbb check-shared` open intake, and intake is a personal commitment —
+retention, deletion requests, the pre-committed refusals — not an engineering
+task. Everything needed to build it is recorded below; the decision to open it
+is a separate one, to be taken deliberately rather than as a side effect of
+finishing 23a.
 
 **Why this is not just another queue item.** Every threshold in this tool is one
 part measurement and one part chemistry reasoning, because one motorcycle has
