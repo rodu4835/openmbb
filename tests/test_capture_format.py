@@ -91,7 +91,13 @@ def test_a_same_microsecond_collision_keeps_the_tag_at_the_end(tmp_path):
     finally:
         _tr._dt = saved
     assert a.dir != b.dir, "the collision path did not run"
+    # Assert the NAME SHAPE, not just the reading of it. _NOT_A_BIKE_RE
+    # deliberately tolerates a trailing counter so that folders an older build
+    # already wrote still read correctly - which means a not_from_a_bike()
+    # assertion alone stays green with this fix reverted. The mutation runner
+    # caught exactly that.
     for d in (a.dir, b.dir):
+        assert os.path.basename(d).endswith("_sim"), os.path.basename(d)
         assert sessions.not_from_a_bike(d), d
 
 
