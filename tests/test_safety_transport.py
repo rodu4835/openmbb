@@ -56,10 +56,13 @@ class ClampingPort(SimPort):
         if self.ceiling is not None:
             m = re.search(r"-?\d+(?:\.\d+)?", str(val))
             if m and float(m.group(0)) > self.ceiling:
-                # stored capped, ANSWERED as though it took what was asked
+                # Stored capped, ANSWERED as though it took what was asked - and
+                # answered with the word the real console used on 2026-08-29, so
+                # the trap under test is the literal trap: a reply that parses
+                # as SUCCESS over a value the bike did not keep.
                 kept = str(val).replace(m.group(0), str(self.ceiling), 1)
                 self._settings[name][1] = kept
-                return "  %s set to %s" % (name, val)
+                return "SUCCESS  %s set to %s" % (name, val)
         return SimPort._apply_write(self, name, val)
 
 
@@ -708,6 +711,46 @@ def test_a_headless_write_is_journalled_without_a_gui(tmp_path):
     # the outcome too, not just the request - and exactly once each
     assert text.count("PENDING") == 1
     assert sum(text.count(w) for w in ("VERIFIED", "UNVERIFIED")) == 1
+
+
+def test_a_refused_write_closes_its_own_pending_line(tmp_path):
+    """25b, from the stack review. The PENDING line is written before
+    exec_command applies the value whitelist, so a refused value left a PENDING
+    with nothing closing it - and an unresolved PENDING is documented as "the
+    write may have reached the bike". It provably did not.
+
+    The shipped selftest triggers this on every run: cli.py deliberately writes
+    a rejected value to prove the validator fires.
+    """
+    tr = make_transport()
+    tr.exec_command("login tpsreport")
+    tr.exec_command("set")
+
+    with pytest.raises(BlockedCommandError):
+        tr.write_setting("spfront", "999")      # outside the whitelist range
+
+    text = open(tr.logger.journal_path, encoding="utf-8").read()
+    assert text.count("PENDING") == 1
+    assert text.count("REFUSED BEFORE THE WIRE") == 1
+    # NOT unverified: that word means the write reached the wire and could not
+    # be confirmed, which is the opposite of what happened
+    assert "UNVERIFIED" not in text
+    assert "must be between" in text, "the refusal did not carry its reason"
+
+
+def test_a_refused_write_never_reaches_the_wire(tmp_path):
+    # the record above must describe a bike that was genuinely never asked
+    tr, port = make_transport_with_port()
+    tr.exec_command("login tpsreport")
+    tr.exec_command("set")
+    before = port.written if hasattr(port, "written") else b""
+
+    with pytest.raises(BlockedCommandError):
+        tr.write_setting("spfront", "999")
+
+    after = port.written if hasattr(port, "written") else b""
+    assert b"set spfront 999" not in after
+    assert after == before, "something reached the wire after the refusal"
 
 
 def test_the_transport_hands_back_the_read_back_it_already_did(tmp_path):

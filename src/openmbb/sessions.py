@@ -25,7 +25,9 @@ from . import redact
 #:   2. the folder-name stamp shape, which is how captures are ordered
 #:   3. `NNN_` latest-wins, when one command was run more than once
 #:   4. which `settings_baseline*` is authoritative (see `_newest_baseline`)
-#:   5. the `_sim` / `_listen` name tags, which mark data that is NOT from a bike
+#:   5. the `_sim` / `_listen` name tags, which mark data that is NOT from a
+#:      bike - now the FALLBACK for captures written before `source:` existed;
+#:      see session_source, which reads the meta file first
 #:   6. what `# command:` means as a dict key
 #:
 #: Raising this obliges you, in the same commit, to write either the branch that

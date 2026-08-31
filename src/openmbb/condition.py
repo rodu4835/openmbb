@@ -801,8 +801,8 @@ def _headline(level, answered, total, checks=None):
     if level == "unknown":
         return "Cannot tell from this capture - it does not contain the evidence"
     if answered < total:
-        return ("Nothing wrong in what this capture could measure - but %d of %d "
-                "checks went unanswered" % (total - answered, total))
+        return ("Nothing wrong in what this capture could measure - but %d of "
+                "%d pack checks went unanswered" % (total - answered, total))
     return "Nothing in this capture looks wrong with the pack"
 
 

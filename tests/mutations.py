@@ -827,6 +827,71 @@ def not_from_a_bike(folder):''',
                     self._respond("  %s set to %s" % (name, val))''',
      "tests/test_safety_transport.py::"
      "test_a_silent_clamp_is_caught_at_the_transport"),
+
+    # item 25 - the stack review's fix pass
+    ("25a: stop repainting the simulator tag on connect",
+     "src/openmbb/gui.py",
+     '''                self._refresh_sim_badge()
+                self._probe_log("PROMPT OK — connected.\\n")''',
+     '''                self._probe_log("PROMPT OK — connected.\\n")''',
+     "tests/test_gui_flow.py::"
+     "test_the_tag_repaints_when_the_connection_changes"),
+
+    ("25b: let a refused write leave its PENDING dangling",
+     "src/openmbb/transport.py",
+     '''        except BlockedCommandError as e:
+            self.logger.journal_refused(name, old, value, e)
+            raise''',
+     '''        except BlockedCommandError:
+            raise''',
+     "tests/test_safety_transport.py::"
+     "test_a_refused_write_closes_its_own_pending_line"),
+
+    ("25c: guess at utf-16 without a BOM again",
+     "src/openmbb/redact.py",
+     '''        if enc == "utf-16" and not raw.startswith(_UTF16_BOMS):
+            continue''',
+     '''        if False:
+            continue''',
+     "tests/test_capture_format.py::"
+     "test_a_damaged_claim_is_refused_rather_than_read_as_absent"),
+
+    ("25d: filter the trend by folder name again",
+     "src/openmbb/gui.py",
+     '''                    if sessions.not_from_a_bike(folder):''',
+     '''                    if name.endswith(("_sim", "_listen")):''',
+     "tests/test_gui_flow.py::"
+     "test_the_trend_charts_exclude_simulator_data_the_way_everything_else_does"),
+
+    ("25e: let the diff viewer outlive the copy it reads",
+     "src/openmbb/gui.py",
+     '''                diff = getattr(self, "_diff_win", None)
+                if diff is not None:''',
+     '''                diff = getattr(self, "_diff_win", None)
+                if False:''',
+     "tests/test_gui_flow.py::"
+     "test_the_diff_viewer_does_not_outlive_the_copy_it_reads"),
+
+    ("25f: drop the clock from the pull path's rewritten stamp",
+     "src/openmbb/gui.py",
+     '''                    "time: %s" % _dt.datetime.now().isoformat(timespec="seconds"),''',
+     '''                    "app_version: %s" % __version__,''',
+     "tests/test_gui_flow.py::"
+     "test_the_pull_path_rewrite_keeps_every_key_the_base_stamp_established"),
+
+    ("25 minor: save the bundle inside the capture again",
+     "src/openmbb/gui.py",
+     '''            if redact_mod.same_or_inside(zip_path, src):''',
+     '''            if False:''',
+     "tests/test_gui_flow.py::"
+     "test_the_export_refuses_a_destination_inside_the_capture"),
+
+    ("25 minor: stop scanning the chosen file name for identifiers",
+     "src/openmbb/gui.py",
+     '''            leaks = redact_mod.find_pii_shapes(os.path.basename(zip_path))''',
+     '''            leaks = []''',
+     "tests/test_gui_flow.py::"
+     "test_the_export_refuses_a_file_name_carrying_an_identifier"),
 ]
 
 

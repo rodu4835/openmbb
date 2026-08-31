@@ -253,6 +253,26 @@ class SessionLogger:
             _dt.datetime.now().isoformat(timespec="seconds"),
             str(cmd).strip(), str(consent).strip()))
 
+    def journal_refused(self, name, old, new, why):
+        """A write this program refused before anything reached the wire.
+
+        Not `journal_write(ok=False)`: that is UNVERIFIED, which this file
+        defines as a write that DID reach the wire and could not be confirmed
+        afterwards. A refusal is the opposite fact - the bike was never asked -
+        and an audit file that spells the two the same way is one a reader has
+        to guess at.
+
+        It exists because the PENDING line is written before `exec_command`
+        applies the value whitelist and the control-character checks, so a
+        refused value used to leave a PENDING with no closing line at all. An
+        unresolved PENDING is documented as "the write may have reached the
+        bike"; claiming that over a write that provably did not is the kind of
+        false uncertainty this file is kept to prevent.
+        """
+        self._journal("%s | %s | %s -> %s | REFUSED BEFORE THE WIRE - %s\n" % (
+            _dt.datetime.now().isoformat(timespec="seconds"),
+            name, old, new, str(why).strip()))
+
     def journal_observed(self, name, old, new, because):
         """A setting that MOVED without being asked to.
 
@@ -623,9 +643,20 @@ class Transport:
         # 7479947 moved it down.
         old = ((self.known_settings or {}).get(name) or {}).get("value", "")
         self.logger.journal_write(name, old, value, ok=None)      # PENDING
-        reply = self.exec_command("set %s %s" % (name, value),
-                                  idle_timeout=idle_timeout, max_time=max_time,
-                                  _write_ok=True)
+        # The value whitelist and the control-character checks live inside
+        # exec_command, which is BELOW this line - so a refusal there used to
+        # leave the PENDING with nothing closing it, and an unresolved PENDING
+        # is documented as "the write may have reached the bike". It provably
+        # did not. Recorded rather than re-validated here: a second copy of the
+        # guard list would drift from the first, and one source of truth is why
+        # those checks live down there in the first place.
+        try:
+            reply = self.exec_command("set %s %s" % (name, value),
+                                      idle_timeout=idle_timeout,
+                                      max_time=max_time, _write_ok=True)
+        except BlockedCommandError as e:
+            self.logger.journal_refused(name, old, value, e)
+            raise
         said_kind, said = console_write_result(reply)
         # Read back HERE, and hand the result to the caller: the GUI used to
         # re-read `set` itself, and doing it in both places would double the

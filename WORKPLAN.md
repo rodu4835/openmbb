@@ -12,8 +12,8 @@ Opus sessions. Queue items below are scaffolded for direct pickup — files, the
 the tests, and the mutation each test must catch.
 
 **State:** v0.26.0 released 2026-08-30 (tagged, CI green both OSes, three
-binaries published), **plus 10 unpushed commits** clearing the whole engineering
-queue. Tree clean, **698 tests passing with 0 skipped**, **94/94 mutation
+binaries published), **plus the unpushed stack** clearing the whole engineering
+queue and the review's fix pass on top of it. Tree clean, **698 tests passing with 0 skipped**, **94/94 mutation
 entries catching**. Every bike-day
 finding is closed (items 15–20b) and each was reviewed adversarially before
 landing — three of those reviews found real defects, twice in a fix that had
@@ -632,9 +632,12 @@ test fails. Commit message records the provenance.
 **Decided (Fable, 2026-08-30).** The bike-day capture headlined *"Walk away, or
 get the pack checked"* driven by the isolation row. On the pull taken
 **without the event log** (`2026-08-29_212001`, the v0.21.0 pull) two of four
-checks were unknown and the headline now prints "(2 of 4 checks unanswered)";
+checks were unknown and the headline printed "(2 of 4 checks unanswered)";
 on the full capture (`213006`) all four are answered and the headline carries
-no count. Two earlier tellings got this wrong — "three" in the first draft,
+no count. **Item 22 later changed that fraction** — it counts the three
+fixed pack checks now and says so ("2 of 3 pack checks unanswered"), because a
+denominator that moved with the bike's faults made two reports incomparable.
+The reasoning below is unchanged; only the number it produces moved. Two earlier tellings got this wrong — "three" in the first draft,
 and "the bike-day capture" as if there were one — and a review checked the
 captures both times. The field called it an overshoot. The resolution is NOT to
 demote isolation:
@@ -865,13 +868,16 @@ adversarial critics; the reasoning is worth re-reading before implementing)
    one optional fixture tick, three questions (model, year, **why you captured
    this**: routine / evaluating one I might buy / it is misbehaving — the third
    is the only defence against selection bias poisoning a small corpus).
-3. Four code changes: a single named ZIP (`gui.py:1362` currently writes
-   `src + "-shared"` beside the original and opens a window showing both —
-   picking wrong publishes everything, irreversibly); `REDACTION.txt` written
-   into the bundle *before* the verification loop so it is scanned like
-   everything else; `session_note.txt` shown first and in full in the diff
-   viewer; the success dialog naming the scan's scope and what remains, with the
-   diff viewer behind a button rather than an instruction with no tool behind it.
+3. Four code changes — **three of them shipped in 23a** (`9dd9c23`): the
+   single named ZIP built in a temp directory, `session_note.txt` first and in
+   full in the diff
+   viewer, and the success dialog naming the scan's scope and what remains with
+   the diff viewer behind a button. **Still open:** `REDACTION.txt` written into
+   the bundle *before* the verification loop, so the bundle carries its own
+   evidence of having been redacted and that evidence is itself scanned. It
+   dropped out of the 23a build without a decision recorded — the stack
+   review caught the gap. It belongs with intake, not before it: a bundle nobody
+   is sending needs no receipt.
 4. `openmbb check-shared <path>` — archive-safety pass first (reject absolute
    paths, `..`, symlinks, absurd expansion ratios, control characters in member
    names; **refuse, do not sanitise** — same contract as `redact_session`), then

@@ -432,8 +432,9 @@ tests/           pytest suite (safety/transport/config/analysis + GUI flow)
 
 Everything lands in `<save-base>/openmbb-sessions/<timestamp>_<port>/`:
 `session_raw.log` (every byte, timestamped), one file per command,
-`session_meta.txt` (capture format, timestamp, app version, firmware rev, power
-mode), `settings_baseline_*.txt` — including the `_postlogin_` one, which is the
+`session_meta.txt` (capture format, timestamp, app version, and — once a
+full pull has run — firmware rev, power mode and what it was captured
+from), `settings_baseline_*.txt` — including the `_postlogin_` one, which is the
 authoritative pre-change backup — `settings_backup_*.txt` (auto, pre-write), and
 `writes_journal.txt` (every setting write, and every consented heavy read). Add a
 note or open a session in the **Library** and two more appear:
@@ -444,8 +445,10 @@ cached verdict.
 and does not cover. **File → Export share-safe copy…** strips the VIN and the
 MBB, module and Sevcon serials, re-scans everything it writes, and destroys the
 copy rather than give you one it cannot vouch for. It looks for **those
-identifier shapes and nothing else** — so your own `session_note.txt` goes as you
-wrote it, and so does the folder name. Read them first.
+identifier shapes and nothing else** — so your own `session_note.txt` goes
+as you wrote it. Read it first: the export offers to show you every file, line
+by line, before you send anything. The bundle is a single timestamped `.zip`
+and carries nothing from the capture folder's own name.
 
 The `capture_format:` line states the layout a folder was written in. A copy of
 OpenMBB that meets a **newer** format refuses to read it rather than guess at

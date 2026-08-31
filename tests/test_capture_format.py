@@ -55,10 +55,15 @@ def test_every_session_states_its_format_from_the_moment_it_exists(tmp_path, tag
     assert capture_format(lg.dir) == CAPTURE_FORMAT
 
 
-def test_the_pull_path_enriches_the_stamp_without_losing_it(tmp_path):
-    """The full pull rewrites this file. Nothing the base stamp established may
-    disappear when it does - a capture that stated its format at 12:00 and
-    stopped stating it at 12:05 is worse than one that never did."""
+def test_a_rewritten_meta_file_keeps_the_keys_it_was_given(tmp_path):
+    """save_named's round-trip, which is all this can prove.
+
+    It was called test_the_pull_path_enriches_the_stamp_without_losing_it and
+    it never touched the pull path: the "enriched" meta below is a literal this
+    test writes and then reads back, so no change to gui._write_session_meta
+    could ever affect it. The stack review caught that. The real one lives in
+    test_gui_flow.py, where the `app` fixture can drive the actual rewrite.
+    """
     from openmbb.transport import SessionLogger
 
     lg = SessionLogger(base_dir=str(tmp_path), tag="COM3")
@@ -111,6 +116,44 @@ def test_a_utf16_stamp_from_the_future_is_refused_not_read_as_absent(tmp_path):
                        % (CAPTURE_FORMAT + 1))
     with pytest.raises(CaptureFormatError):
         capture_format(str(d))
+
+
+def test_a_damaged_claim_is_refused_rather_than_read_as_absent(tmp_path):
+    """25c, from the stack review. Python's BOM-less utf-16 accepts almost any
+    even-length bytes, so a UTF-8 meta carrying a legible `capture_format: 2`
+    plus ONE corrupt byte decoded "successfully" into CJK garbage: the regex
+    missed, and the capture read as format 1 and was believed.
+
+    That is the exact false pass the stamp exists to prevent, reached through
+    the decoder item 10 introduced to make the two halves of the tool agree.
+    """
+    d = tmp_path / "cap"
+    d.mkdir()
+    (d / "001_bms.txt").write_bytes(b"# command: bms\n\nPack Voltage : 113.2\n")
+    body = ("capture_format: %d\nsource: simulator\n" % (CAPTURE_FORMAT + 1))
+    raw = body.encode("utf-8") + b"\xff"
+    if len(raw) % 2:                      # the dangerous case is EVEN length
+        raw += b"\n"
+    (d / "session_meta.txt").write_bytes(raw)
+
+    with pytest.raises(CaptureFormatError):
+        capture_format(str(d))
+    # ...and the rest of the file is still legible, not garbage
+    assert sessions.session_source(str(d)) == "simulator"
+
+
+def test_a_utf16_file_without_a_bom_is_not_guessed_at(tmp_path):
+    # the guard is the BOM, not the encoding name: ASCII byte pairs never form
+    # surrogates, so an unguarded utf-16 attempt "succeeds" on almost anything
+    from openmbb import redact as _redact
+
+    plain = b"capture_format: 1\ntime: 2026-08-29T14:30:22\n"
+    text, enc = _redact.decode_text(plain)
+    assert enc == "utf-8-sig", enc
+    bom16 = "capture_format: 1\n".encode("utf-16")
+    assert bom16[:2] in (b"\xff\xfe", b"\xfe\xff")
+    text16, enc16 = _redact.decode_text(bom16)
+    assert enc16 == "utf-16" and "capture_format: 1" in text16
 
 
 def test_one_stray_byte_does_not_cost_the_whole_capture(tmp_path):

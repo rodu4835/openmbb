@@ -1876,6 +1876,40 @@ def test_the_session_meta_records_what_it_was_captured_from(app):
     assert sessions.not_from_a_bike(app.logger.dir)
 
 
+def test_the_pull_path_rewrite_keeps_every_key_the_base_stamp_established(app):
+    """25f, from the stack review. SessionLogger stamps capture_format/time/
+    app_version when the folder is created; the pull REWRITES that file with
+    firmware and power mode added. Nothing the base stamp established may
+    vanish in the rewrite - a capture that stated its format at 12:00 and
+    stopped stating it at 12:05 is worse than one that never did.
+
+    The test that claimed this hand-wrote the enriched meta itself and could
+    not fail. This one drives gui._write_session_meta, so deleting a line from
+    it fails here.
+    """
+    from openmbb import sessions
+
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    meta = os.path.join(app.logger.dir, "session_meta.txt")
+    base = open(meta, encoding="utf-8").read()
+    assert "capture_format:" in base and "time:" in base
+
+    app._write_session_meta("  - Mode                   : Stopped")
+
+    after = open(meta, encoding="utf-8").read()
+    for key in ("capture_format:", "time:", "app_version:"):
+        assert key in after, "%s vanished in the pull-path rewrite" % key
+    # ...and the enrichment actually happened
+    assert "power_mode: Stopped" in after
+    # the readers that depend on those keys still answer
+    assert sessions.capture_format(app.logger.dir) == sessions.CAPTURE_FORMAT
+    assert sessions._session_date(app.logger.dir), (
+        "the clock-offset machinery lost the machine half of its instant")
+    label, _banner = sessions.capture_identity(app.logger.dir)
+    assert label != "(not recorded)"
+
+
 def test_a_new_capture_states_the_format_it_was_written_in(app):
     """The reader half is in tests/test_capture_format.py; this is the writer.
 
@@ -3381,6 +3415,83 @@ def test_the_diff_viewer_shows_every_file_with_the_note_first(app, tmp_path):
     win.destroy()
 
 
+def test_the_diff_viewer_does_not_outlive_the_copy_it_reads(
+        app, monkeypatch, tmp_path):
+    """25e, from the stack review. The viewer is a sibling Toplevel reading out
+    of the temp working copy; the result dialog's Done deleted that copy and
+    destroyed only itself. Clicking any file afterwards printed "left out of the
+    bundle" over files that ARE in the zip being sent - in the one window built
+    to establish exactly what is being shared.
+    """
+    import tkinter.filedialog as fd
+    from tkinter import ttk
+
+    src = _tiny_capture(tmp_path / "captures", "2026-08-29_143022_1_COM3")
+    out = tmp_path / "bundle.zip"
+    monkeypatch.setattr(fd, "askdirectory", lambda *a, **k: src)
+    monkeypatch.setattr(fd, "asksaveasfilename", lambda *a, **k: str(out))
+
+    app._export_share_safe()
+    win = app._share_win
+    app.update()
+
+    # open the viewer, then finish with the dialog
+    buttons = [w for w in _descendants(win) if isinstance(w, ttk.Button)]
+    show = [b for b in buttons if "what changed" in str(b.cget("text")).lower()]
+    assert show, "no diff button"
+    show[0].invoke()
+    app.update()
+    viewer = app._diff_win
+    assert viewer.winfo_exists()
+
+    done = [b for b in buttons if str(b.cget("text")).strip().lower() == "done"]
+    assert done, "no Done button"
+    done[0].invoke()
+    app.update()
+
+    assert not viewer.winfo_exists(), (
+        "the viewer outlived the working copy it reads - every file would now "
+        "claim it was left out of the bundle")
+
+
+def test_the_export_refuses_a_destination_inside_the_capture(
+        app, monkeypatch, tmp_path):
+    """A .zip left inside the capture is unreadable as text, so the NEXT export
+    of that folder aborts with "please report this" - the export refusing its
+    own output."""
+    import tkinter.filedialog as fd
+
+    src = _tiny_capture(tmp_path / "captures", "2026-08-29_143022_1_COM3")
+    inside = os.path.join(src, "bundle.zip")
+    monkeypatch.setattr(fd, "askdirectory", lambda *a, **k: src)
+    monkeypatch.setattr(fd, "asksaveasfilename", lambda *a, **k: inside)
+
+    app._errors.clear()
+    app._export_share_safe()
+
+    assert app._errors, "it wrote the bundle into the capture"
+    assert "inside the capture" in str(app._errors[-1])
+    assert not os.path.exists(inside)
+
+
+def test_the_export_refuses_a_file_name_carrying_an_identifier(
+        app, monkeypatch, tmp_path):
+    # the folder-name guard this replaced checked exactly this
+    import tkinter.filedialog as fd
+
+    src = _tiny_capture(tmp_path / "captures", "2026-08-29_143022_1_COM3")
+    named = str(tmp_path / ("%s.zip" % _SHARE_VIN))
+    monkeypatch.setattr(fd, "askdirectory", lambda *a, **k: src)
+    monkeypatch.setattr(fd, "asksaveasfilename", lambda *a, **k: named)
+
+    app._errors.clear()
+    app._export_share_safe()
+
+    assert app._errors, "a bundle was named after an identifier"
+    assert "identifier" in str(app._errors[-1])
+    assert not os.path.exists(named)
+
+
 def test_the_success_dialog_says_what_remains_not_just_what_was_removed(
         app, monkeypatch, tmp_path):
     """The old text - "every file was re-scanned and carries no VIN or serial
@@ -3409,6 +3520,64 @@ def test_the_success_dialog_says_what_remains_not_just_what_was_removed(
     assert any("what changed" in l.lower() for l in labels), \
         "'have a look yourself' needs a tool behind it"
     win.destroy()
+
+
+def test_the_tag_repaints_when_the_connection_changes(app, monkeypatch):
+    """25a, the critical the stack review found. 18c made the tag ASK the
+    transport and left nothing to re-ask it: _refresh_sim_badge ran only from
+    __init__ and the checkbox handler. So the bike-day sequence -
+
+        rehearse on the simulator -> untick the box -> disconnect ->
+        plug in the cable -> connect the real port
+
+    - left [SIMULATOR - NOT YOUR BIKE] over a live real-bike session. Real
+    writes reading as rehearsal is the dangerous direction, on the one
+    indicator that exists because that confusion already happened at a
+    motorcycle.
+    """
+    from openmbb.transport import Transport
+
+    # Stale the indicators first. __init__ already paints the tag, so asserting
+    # it is present after a connect proves nothing about the connect - which is
+    # exactly how the missing call survived review.
+    app.title("OpenMBB - stale from a previous session")
+    app.lbl_sim.config(text="")
+
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    assert "SIMULATOR" in app.title(), "connect did not repaint the tag"
+    assert "SIMULATOR" in str(app.lbl_sim.cget("text")), (
+        "connect did not repaint the status-bar indicator")
+
+    app.sim_var.set(False)          # "the NEXT connect uses a real port"
+    app._refresh_sim_badge()
+    assert "SIMULATOR" in app.title(), "the tag dropped while still on the sim"
+
+    # ...disconnect, then connect something that is NOT a SimPort
+    app._reset_session_state()
+    assert "SIMULATOR" not in app.title(), (
+        "the tag survived a disconnect with the checkbox already off")
+
+    class _RealPort:            # anything that is not a SimPort
+        in_waiting = 0
+
+        def read(self, n=1):
+            return b""
+
+        def write(self, data):
+            return len(data)
+
+        def close(self):
+            pass
+
+    app.transport = Transport(_RealPort(), app.logger)
+    app.connected = True
+    app._refresh_sim_badge()
+    assert "SIMULATOR" not in app.title(), (
+        "a REAL bike is labelled as the simulator - real writes read as "
+        "rehearsal")
+    assert "SIMULATOR" not in str(app.lbl_sim.cget("text")), (
+        "the status-bar indicator lies even though the title does not")
 
 
 def test_the_simulator_tag_follows_the_connection_not_the_checkbox(app):
@@ -3483,8 +3652,69 @@ def test_the_library_lists_what_it_has_and_names_what_it_could_not_read(
     app.update()
     blob = " ".join(_all_label_text(win))
 
-    assert "not listed" in blob and "newer OpenMBB" in blob
+    assert "not listed" in blob
+    assert "format stamp" in blob, (
+        "the line must say WHY the capture could not be read")
     win.destroy()
+
+
+def _sim_capture(root, name, meta_source="simulator"):
+    """A capture whose META says simulator, under a name of our choosing."""
+    d = os.path.join(str(root), name)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "001_bms.txt"), "w", encoding="utf-8") as f:
+        f.write("# command: bms\n\nPack Voltage : 113.2\nPack SOC : 96%\n")
+    with open(os.path.join(d, "002_stats.txt"), "w", encoding="utf-8") as f:
+        f.write("# command: stats\n\nOdometer : 6155 km\n")
+    with open(os.path.join(d, "session_meta.txt"), "w", encoding="utf-8") as f:
+        f.write("capture_format: 1\ntime: 2026-08-29T14:30:22\n"
+                + ("source: %s\n" % meta_source if meta_source else ""))
+    return d
+
+
+def test_the_trend_charts_exclude_simulator_data_the_way_everything_else_does(
+        app, monkeypatch, tmp_path):
+    """25d, from the stack review. Items 24 and 11 moved "is this from a bike?"
+    onto sessions.not_from_a_bike - meta first, name tag as fallback - and the
+    library and the report both adopted it. The two chart loops kept testing the
+    NAME.
+
+    So a RENAMED simulator capture was bannered SIMULATOR DATA on the report,
+    marked [SIM] in the library, and plotted into "your bike's real history" on
+    the charts. Same folder, two answers.
+    """
+    from openmbb import sessions
+
+    root = tmp_path / "openmbb-sessions"
+    root.mkdir()
+    renamed = _sim_capture(root, "my-first-rehearsal")      # no _sim in the name
+    legacy = _sim_capture(root, "2026-08-29_143022_1_sim_1", meta_source=None)
+    monkeypatch.setattr(type(app), "_session_root", lambda self: str(root))
+    app._trend_cache = None
+
+    rows = app._load_trend_sessions()
+
+    plotted = {r[1] for r in rows}
+    assert "my-first-rehearsal" not in plotted, (
+        "a renamed simulator capture was plotted as real bike history")
+    assert "2026-08-29_143022_1_sim_1" not in plotted, (
+        "a legacy collision folder rejoined the trend line")
+    # and the surfaces agree about both
+    for folder in (renamed, legacy):
+        assert sessions.not_from_a_bike(folder), folder
+
+
+def test_a_real_capture_still_reaches_the_trend(app, monkeypatch, tmp_path):
+    # the exclusion has to let real data through, or it proves nothing
+    root = tmp_path / "openmbb-sessions"
+    root.mkdir()
+    _sim_capture(root, "2026-08-28_090000_1_COM3", meta_source="COM3")
+    monkeypatch.setattr(type(app), "_session_root", lambda self: str(root))
+    app._trend_cache = None
+
+    rows = app._load_trend_sessions()
+
+    assert {r[1] for r in rows} == {"2026-08-28_090000_1_COM3"}
 
 
 def test_the_trend_loader_counts_what_it_could_not_read(app, monkeypatch,
@@ -3522,7 +3752,8 @@ def test_the_chart_caption_names_the_captures_it_left_out(app):
 
     blob = _canvas_text(cv)
     assert "2 real pulls" in blob, blob      # the chart did draw
-    assert "1 not shown" in blob and "newer OpenMBB" in blob
+    assert "1 not shown" in blob
+    assert "stamp" in blob, "the caption must say why the capture is missing"
 
 
 def test_a_chart_with_nothing_left_to_draw_says_why(app):

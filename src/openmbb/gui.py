@@ -1409,6 +1409,27 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if not zip_path:
                 shutil.rmtree(work, ignore_errors=True)
                 return
+            if redact_mod.same_or_inside(zip_path, src):
+                # A .zip left inside the capture is unreadable as text, so the
+                # NEXT export of that folder aborts with "please report this" -
+                # the export refusing its own output. redact already refuses a
+                # destination inside the source; this is the same rule for the
+                # file the user picks.
+                shutil.rmtree(work, ignore_errors=True)
+                messagebox.showerror(
+                    APP_NAME, "Nothing was written.\n\nSaving the copy inside "
+                    "the capture folder would make every later export of that "
+                    "capture fail. Choose somewhere outside:\n%s" % src)
+                return
+            leaks = redact_mod.find_pii_shapes(os.path.basename(zip_path))
+            if leaks:
+                # the folder-name guard this replaced checked exactly this
+                shutil.rmtree(work, ignore_errors=True)
+                messagebox.showerror(
+                    APP_NAME, "Nothing was written.\n\nThat file name carries "
+                    "an identifier (%s). Choose another."
+                    % ", ".join(sorted({l for l, _t in leaks})))
+                return
             try:
                 self._zip_folder(dst, zip_path)
             except OSError as e:
@@ -1472,6 +1493,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             row.pack(fill="x")
 
             def done():
+                # The diff viewer reads out of `work`. Deleting the working copy
+                # while that window is still open left it printing "left out of
+                # the bundle" over every file in the zip - so it goes first.
+                diff = getattr(self, "_diff_win", None)
+                if diff is not None:
+                    try:
+                        if diff.winfo_exists():
+                            diff.destroy()
+                    except Exception:
+                        pass
+                    self._diff_win = None
                 shutil.rmtree(work, ignore_errors=True)
                 try:
                     win.destroy()
@@ -1598,8 +1630,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                                       "for names, places or people — only for "
                                       "the VIN and serial numbers.\n\n", "warn")
                 if a is None or b is None:
-                    txt.insert("end", "(not text this export can read — it was "
-                                      "left out of the bundle)\n", "warn")
+                    # NOT "left out of the bundle": an unreadable file aborts the
+                    # whole export (redact refuses to vouch for a bundle holding
+                    # one), so every file in `pairs` was read and written. The
+                    # only way to land here is a path that has gone since - the
+                    # working copy cleaned up under an open window. Say that.
+                    txt.insert("end",
+                               "(this preview is no longer available — the "
+                               "working copy was cleaned up. The file IS in the "
+                               "zip; export again to look at it.)\n", "warn")
                     txt.config(state="disabled")
                     return
                 al, bl = a.splitlines(), b.splitlines()
@@ -1615,10 +1654,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             txt.insert("end", x + "\n", "was")
                         if y is not None:
                             txt.insert("end", y + "\n", "now")
-                if not changed:
-                    txt.insert("1.0", "nothing in this file matched an identifier "
-                                      "— it is going exactly as it is\n\n",
-                               "note")
+                if not changed and src_name == out_name:
+                    # only when the NAME survived too: a file renamed for an
+                    # identifier is emphatically not going as it is
+                    txt.insert("1.0", "nothing in this file's CONTENTS matched an "
+                                      "identifier\n\n", "note")
                 head.config(text="%s  —  %d line(s) changed"
                                  % (out_name, changed))
                 txt.config(state="disabled")
@@ -1978,15 +2018,16 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     messagebox.showinfo(
                         APP_NAME,
                         "%d capture%s in:\n%s\n\n...cannot be read by this "
-                        "build \u2014 written by a newer OpenMBB. Update OpenMBB "
-                        "rather than assume the folder is empty."
+                        "build — written by a newer OpenMBB, or the format "
+                        "stamp is damaged. Update OpenMBB rather than assume "
+                        "the folder is empty."
                         % (len(refused), "" if len(refused) == 1 else "s", root))
                     return
                 messagebox.showinfo(APP_NAME, "No saved sessions yet in:\n%s" % root)
                 return
             surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
             win = tk.Toplevel(self)
-            win.title("%s \u2014 Session library" % APP_NAME)
+            win.title("%s — Session library" % APP_NAME)
             win.geometry("860x480")
             win.configure(bg=surface)
             win.transient(self)
@@ -2001,8 +2042,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 # otherwise read as the whole library
                 ttk.Label(
                     outer, style="Warn.TLabel", wraplength=800,
-                    text="%d capture%s not listed \u2014 written by a newer "
-                         "OpenMBB than this one (%s)"
+                    text="%d capture%s not listed — this build cannot "
+                         "read the format stamp (%s)"
                          % (len(refused), "" if len(refused) == 1 else "s",
                             ", ".join(sorted(refused)[:3])
                             + (", \u2026" if len(refused) > 3 else ""))
@@ -2071,7 +2112,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             tree.bind("<<TreeviewSelect>>", on_select)
             ent.bind("<Return>", save_note)
             ttk.Button(nrow, text="Save note", command=save_note).pack(side="left")
-            ttk.Label(outer, text="A note travels with the capture folder \u2014 "
+            ttk.Label(outer, text="A note travels with the capture folder — "
                                   "\"before the re-gear\", \"after the firmware "
                                   "update\".",
                       style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
@@ -2432,7 +2473,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 "  Released      : %s\n"
                 # where a suspicious user looks, and the one line here they can
                 # check for themselves
-                "  Network       : none \u2014 OpenMBB makes no requests\n"
+                "  Network       : none — OpenMBB makes no requests\n"
                 "  Repo          : github.com/rodu4835/openmbb\n"
                 "  License       : MIT (no warranty)\n\n"
                 "Personal diagnostic tool for your own vehicle. Not affiliated\n"
@@ -2593,6 +2634,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.transport = None
             self.logger = None
             self.connected = False
+            # ...and once more here: with no transport left to ask, the tag
+            # falls back to the checkbox, which is the honest answer for a
+            # session that has not started yet.
+            self._refresh_sim_badge()
             self.baseline_done = False
             self.logged_in = False
             self.version_text = ""
@@ -3187,6 +3232,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 self.logger, self.transport = logger, tr
                 self.connected = True
                 self.version_text = ver
+                # The tag asks the TRANSPORT what it is connected to (18c), and
+                # this is the moment that answer changes. Without this call it
+                # keeps whatever the checkbox last painted: connect a real bike
+                # after a simulator rehearsal and the title still reads
+                # [SIMULATOR - NOT YOUR BIKE] over live hardware, which is the
+                # dangerous direction - real writes read as rehearsal.
+                self._refresh_sim_badge()
                 self._probe_log("PROMPT OK — connected.\n")
                 self._probe_log(ver)
                 self._refresh_dash_header()   # surface the firmware rev in the header
@@ -4856,7 +4908,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _write_refused(self, why):
             messagebox.showwarning(
                 APP_NAME,
-                "Write refused \u2014 %s.\n\nEvery write on this bike needs all "
+                "Write refused — %s.\n\nEvery write on this bike needs all "
                 "four: a connection, a login, a settings backup that parses, and "
                 "the master UNLOCK WRITES gate. The backup is the only undo a "
                 "write has." % why)
@@ -5876,9 +5928,14 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             (mtime, name, bms, stats), cached so a chart resize doesn't re-read the
             folders each frame. Invalidated when a new pull is saved (see _baseline).
 
-            Simulator (`_sim`) and cable-test (`_listen`) folders are EXCLUDED — the
-            trend line is your bike's real history, and a --sim rehearsal saves fake
-            bms/stats that would otherwise poison it (owner)."""
+            Simulator and cable-test captures are EXCLUDED — the trend line is
+            your bike's real history, and a --sim rehearsal saves fake bms/stats
+            that would otherwise poison it (owner). Asked of
+            `sessions.not_from_a_bike`, which reads `source:` from the meta file
+            and falls back to the name tags: this loop used to test the NAME
+            only, so a renamed simulator capture (the report banners it, the
+            library marks it [SIM]) was plotted here as real history, and so was
+            a legacy `..._sim_1` collision folder."""
             cached = getattr(self, "_trend_cache", None)
             if cached is not None:
                 return cached
@@ -5886,10 +5943,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             try:
                 root, names = self._recent_sessions(limit=60)
                 for name in reversed(names):     # oldest first
-                    if name.endswith(("_sim", "_listen")):
+                    folder = os.path.join(root, name)
+                    if sessions.not_from_a_bike(folder):
                         continue                 # not real-hardware data
                     try:
-                        folder = os.path.join(root, name)
                         s = sessions.load_session(folder)
                         out.append((library_mod._captured_at(folder, s), name,
                                     parsers.parse_bms(s.cmd("bms")),
@@ -5978,7 +6035,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             try:
                 root, names = self._recent_sessions(limit=60)
                 real = [n for n in reversed(names)
-                        if not n.endswith(("_sim", "_listen"))]
+                        if not sessions.not_from_a_bike(os.path.join(root, n))]
                 for name in real[-self._LOG_TREND_LIMIT:]:
                     try:
                         folder = os.path.join(root, name)
@@ -6042,8 +6099,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if refused:
                     self._chart_msg(
                         cv, "%d capture%s here cannot be read by this build — "
-                            "written by a newer OpenMBB.\n\nUpdate OpenMBB "
-                            "rather than trust a partial trend."
+                            "written by a newer OpenMBB, or with a damaged "
+                            "format stamp.\n\nUpdate OpenMBB rather than trust "
+                            "a partial trend."
                             % (len(refused), "" if len(refused) == 1 else "s"))
                     return
                 self._chart_msg(cv, "No saved sessions with this metric in this range."
@@ -6074,7 +6132,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 # omission is invisible exactly where it matters most. It rides
                 # on the caption the chart already carries, so it cannot be
                 # mistaken for a data point or hidden behind one.
-                note += " · %d not shown (newer OpenMBB)" % len(refused)
+                note += " · %d not shown (unreadable stamp)" % len(refused)
             self._chart_note(cv, ("SIMULATED · " + note) if synthetic else note)
 
         def _render_charts(self):
@@ -6342,9 +6400,12 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             self.txt_compare.config(state="normal")
             self.txt_compare.delete("1.0", "end")
             self.txt_compare.config(state="disabled")
-            # order oldest->newest by folder mtime (works for any folder name);
-            # stable sort keeps insertion order when mtimes tie/are unavailable.
-            # the capture's own date, not the folder's mtime - see _recent_sessions
+            # Order oldest->newest by the capture's OWN date, not the folder's
+            # mtime: writing a verdict cache into a capture folder, or copying a
+            # capture between machines, rewrites mtime and would reorder a
+            # comparison that is supposed to be a timeline. See
+            # _recent_sessions, which makes the same argument. A stable sort
+            # keeps insertion order when two captures share a date.
             ordered = sorted(self.compare_list,
                              key=lambda s: library_mod._captured_at(s.dir, s))
             self._compare_out("Comparing %d session(s), oldest -> newest:"

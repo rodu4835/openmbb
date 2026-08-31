@@ -37,7 +37,12 @@ SUMMARY_FILE = "session_summary.json"
 #: 4: the verdict headline changed wording (it now names the check that
 #: earned it), and this file caches that STRING - so an un-bumped cache would
 #: keep serving "get the pack checked" until a capture's fingerprint changed.
-SUMMARY_VERSION = 4
+#: 5: item 22 changed the headline again - the unanswered fraction counts the
+#: three fixed pack checks now and says so ("2 of 3 pack checks unanswered"),
+#: where it used to count whatever rows existed. Same reason as 4, and the
+#: stack review caught that the bump had been missed: a v0.26.0 cache passes
+#: the version gate and serves the old denominator wording verbatim.
+SUMMARY_VERSION = 5
 
 
 # --- notes -------------------------------------------------------------------

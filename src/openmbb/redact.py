@@ -130,14 +130,32 @@ class Redactor:
 _TEXT_ENCODINGS = ("utf-8-sig", "utf-16")
 
 
+#: UTF-16 is tried ONLY behind one of these. Python's BOM-less "utf-16" assumes
+#: little-endian and accepts almost any even-length byte string - ASCII pairs
+#: never form surrogates - so an unguarded attempt turns a UTF-8 file with one
+#: corrupt byte into fluent CJK garbage rather than refusing it. Every real
+#: UTF-16 capture carries a BOM: Notepad and PowerShell write one, and
+#: str.encode("utf-16") emits one.
+_UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
+
+
 def decode_text(raw):
     """Decode `raw` (BOM-aware, UTF-8 then UTF-16), or None if neither works.
 
     Public because `sessions` reads captures through it too. There was a
     decoder here and a different one there, and the two halves of the tool
     disagreed about what a capture is - see sessions.read_text.
+
+    The UTF-16 attempt is BOM-gated. Without that guard a damaged UTF-8
+    session_meta.txt decoded "successfully" as UTF-16 into garbage, so a
+    `capture_format: 2` claim that was PRESENT read as absent and the capture
+    was believed as format 1 - the exact false pass the stamp exists to
+    prevent, reached through the decoder that was supposed to make the two
+    halves agree.
     """
     for enc in _TEXT_ENCODINGS:
+        if enc == "utf-16" and not raw.startswith(_UTF16_BOMS):
+            continue
         try:
             return raw.decode(enc), enc
         except (UnicodeDecodeError, ValueError):
@@ -147,6 +165,12 @@ def decode_text(raw):
 
 #: the name this had while it was private; kept so nothing has to change at once
 _decode_text = decode_text
+
+
+def same_or_inside(a, b):
+    """True if path `a` is `b` or sits inside it. Public: the GUI asks it too,
+    to keep a chosen zip destination out of the capture it came from."""
+    return _same_or_inside(a, b)
 
 
 def _same_or_inside(a, b):
