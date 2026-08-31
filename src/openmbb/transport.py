@@ -135,6 +135,15 @@ class SessionLogger:
                 path, n = (os.path.join(root, "%s_%d_%s" % (stamp, n, tag)),
                            n + 1)
         self.dir = path
+        # Every session states its format, from the moment its folder exists.
+        # The fuller stamp is written by the full-pull path, which listen
+        # captures, connect-without-pull sessions and selftest runs never reach
+        # - so the insurance excluded exactly the capture shape a646b7c had just
+        # promoted to first-class. Absent-means-1 keeps those readable today; on
+        # the day the format bumps, an unstamped listen capture from the NEWER
+        # build would be read as format 1 by an older tool, which is the silent
+        # wrong answer the stamp exists to refuse.
+        self._write_base_meta()
         self.raw_path = os.path.join(self.dir, "session_raw.log")
         self.journal_path = os.path.join(self.dir, "writes_journal.txt")
         self._seq = 0
@@ -143,6 +152,29 @@ class SessionLogger:
         # the life of the session - not just the one command that supplied it.
         # A late echo caught by a later command's drain is masked too.
         self.redactions = set()
+
+    def _write_base_meta(self):
+        """The minimum a reader needs: what format, and when.
+
+        Deliberately not the firmware rev or the power mode - those are known
+        only after a pull, and this runs when the folder is made. The pull path
+        rewrites this file with those added; nothing here may be lost when it
+        does.
+        """
+        from . import __version__
+        from .sessions import CAPTURE_FORMAT
+        try:
+            with open(os.path.join(self.dir, "session_meta.txt"), "w",
+                      encoding="utf-8", newline="") as f:
+                f.write("OpenMBB session metadata\n"
+                        "capture_format: %d\n"
+                        "time: %s\n"
+                        "app_version: %s\n"
+                        % (CAPTURE_FORMAT,
+                           _dt.datetime.now().isoformat(timespec="seconds"),
+                           __version__))
+        except OSError:
+            pass          # a session that cannot stamp itself still logs
 
     def add_redaction(self, secret):
         if secret:

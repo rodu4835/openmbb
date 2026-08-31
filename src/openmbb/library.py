@@ -130,12 +130,18 @@ def _event_log_text(session):
     return parsers.event_log_text(session)
 
 
-def scan(root, limit=60):
+def scan(root, limit=60, refused=None):
     """Summaries for the captures under `root`, newest first.
 
     A folder that will not parse, or that holds no command output at all, is
     skipped rather than allowed to empty or clutter the list — one bad capture in
     a save directory should not hide the others.
+
+    A capture this build must NOT read is different from one it cannot parse,
+    and is appended to `refused` (if given) rather than only skipped. Silently
+    dropping it presents the remaining captures as the whole library, which is
+    the shape this project keeps having to fix: the omission is invisible
+    exactly when it matters most.
     """
     try:
         names = [d for d in os.listdir(root)
@@ -152,6 +158,10 @@ def scan(root, limit=60):
     for name in names[:limit]:
         try:
             row = summarize(os.path.join(root, name))
+        except sessions.CaptureFormatError:
+            if refused is not None:
+                refused.append(name)
+            continue
         except Exception:
             continue
         if not row["commands"]:

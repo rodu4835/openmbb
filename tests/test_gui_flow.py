@@ -3391,6 +3391,137 @@ def test_the_success_dialog_says_what_remains_not_just_what_was_removed(
     win.destroy()
 
 
+# ----------------------------------- item 11: a refused capture stays visible
+
+def _future_capture(root, name="2026-08-29_143022_1_COM3"):
+    """A capture stamped one format ahead - one this build must not read."""
+    from openmbb import sessions as _s
+
+    d = os.path.join(str(root), name)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "001_bms.txt"), "w", encoding="utf-8") as f:
+        f.write("# command: bms\n\nPack Voltage : 113.2\n")
+    with open(os.path.join(d, "session_meta.txt"), "w", encoding="utf-8") as f:
+        f.write("capture_format: %d\n" % (_s.CAPTURE_FORMAT + 1))
+    return d
+
+
+def test_the_library_says_a_capture_is_missing_rather_than_looking_empty(
+        app, monkeypatch, tmp_path):
+    """"No saved sessions yet" over a folder that HAS captures - all of them
+    unreadable by this build - is the worst version of the silence item 11
+    exists to close."""
+    root = tmp_path / "openmbb-sessions"
+    root.mkdir()
+    _future_capture(root)
+    monkeypatch.setattr(type(app), "_session_root", lambda self: str(root))
+    said = []
+    from openmbb import dialogs as mb
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: said.append(a))
+
+    app._open_session_library()
+
+    assert said, "the library said nothing at all"
+    blob = " ".join(str(x) for x in said[-1])
+    assert "newer OpenMBB" in blob
+    assert "No saved sessions yet" not in blob
+
+
+def test_the_library_lists_what_it_has_and_names_what_it_could_not_read(
+        app, monkeypatch, tmp_path):
+    import tkinter as tk
+
+    root = tmp_path / "openmbb-sessions"
+    root.mkdir()
+    _future_capture(root, "2026-08-29_143022_1_COM3")
+    # ...and one this build CAN read, so the window opens with a row in it
+    good = os.path.join(str(root), "2026-08-28_090000_1_COM3")
+    os.makedirs(good)
+    with open(os.path.join(good, "001_bms.txt"), "w", encoding="utf-8") as f:
+        f.write("# command: bms\n\nPack Voltage : 113.2\n")
+    monkeypatch.setattr(type(app), "_session_root", lambda self: str(root))
+
+    app._open_session_library()
+    win = [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)][-1]
+    app.update()
+    blob = " ".join(_all_label_text(win))
+
+    assert "not listed" in blob and "newer OpenMBB" in blob
+    win.destroy()
+
+
+def test_the_trend_loader_counts_what_it_could_not_read(app, monkeypatch,
+                                                        tmp_path):
+    # the chart presented "pack over time" with an undisclosed hole in it
+    root = tmp_path / "openmbb-sessions"
+    root.mkdir()
+    _future_capture(root)
+    monkeypatch.setattr(type(app), "_session_root", lambda self: str(root))
+    app._trend_cache = None
+
+    app._load_trend_sessions()
+
+    assert app._trend_refused == ["2026-08-29_143022_1_COM3"]
+
+
+def _canvas_text(cv):
+    return " ".join(cv.itemcget(i, "text") for i in cv.find_all()
+                    if cv.type(i) == "text")
+
+
+def test_the_chart_caption_names_the_captures_it_left_out(app):
+    """A trend presented as "pack over time" with a capture silently missing is
+    the failure this project keeps finding: the omission is invisible exactly
+    where it matters most."""
+    cv = app.chart_canvas
+    app._trend_cache = [(1_760_000_000.0, "a", {"cycles": 100}, {}),
+                        (1_760_600_000.0, "b", {"cycles": 104}, {})]
+    app._trend_refused = ["2026-08-29_143022_1_COM3"]
+    app.chart_range.set("All")
+    cv.delete("all")
+
+    app._render_session_trend(cv, "Trend: charge cycles")
+    app.update()
+
+    blob = _canvas_text(cv)
+    assert "2 real pulls" in blob, blob      # the chart did draw
+    assert "1 not shown" in blob and "newer OpenMBB" in blob
+
+
+def test_a_chart_with_nothing_left_to_draw_says_why(app):
+    # every capture refused: the chart must not read as "you have no data"
+    cv = app.chart_canvas
+    app._trend_cache = []
+    app._trend_refused = ["a", "b"]
+    app.chart_range.set("All")
+    # sim mode synthesizes a year of points when there are fewer than two real
+    # ones, which is a different (labelled) path - this is the real empty chart
+    app.sim_var.set(False)
+    cv.delete("all")
+
+    app._render_session_trend(cv, "Trend: charge cycles")
+    app.update()
+
+    blob = _canvas_text(cv)
+    assert "cannot be read by this build" in blob
+    assert "No saved sessions with this metric" not in blob
+
+
+def test_a_chart_with_no_refusals_says_nothing_about_them(app):
+    # the note has to be absent when it should be, or it means nothing
+    cv = app.chart_canvas
+    app._trend_cache = [(1_760_000_000.0, "a", {"cycles": 100}, {}),
+                        (1_760_600_000.0, "b", {"cycles": 104}, {})]
+    app._trend_refused = []
+    app.chart_range.set("All")
+    cv.delete("all")
+
+    app._render_session_trend(cv, "Trend: charge cycles")
+    app.update()
+
+    assert "not shown" not in _canvas_text(cv)
+
+
 # --- the two condition surfaces ---------------------------------------------
 
 def _mirror_log():

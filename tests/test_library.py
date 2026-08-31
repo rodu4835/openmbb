@@ -5,8 +5,11 @@ as a pass, and a note must stay with the capture it describes rather than in a
 central file that a copied folder leaves behind.
 """
 
+import io
 import json
 import os
+
+from openmbb import sessions as _sessions
 
 from openmbb import library
 
@@ -127,3 +130,43 @@ def test_the_list_is_ordered_by_capture_time_not_by_folder_mtime(tmp_path):
 
 def test_scanning_somewhere_that_is_not_there_is_empty_not_an_error(tmp_path):
     assert library.scan(str(tmp_path / "nope")) == []
+
+
+# ------------------------------------------- item 11: a refusal is not a skip
+
+def _refused_capture(root, name="2026-08-29_143022_1_COM3"):
+    """A folder this build must NOT read - stamped one format in the future."""
+    d = os.path.join(str(root), name)
+    os.makedirs(d, exist_ok=True)
+    with io.open(os.path.join(d, "001_bms.txt"), "w", encoding="utf-8") as fh:
+        fh.write("# command: bms\n\nPack Voltage : 113.2\n")
+    with io.open(os.path.join(d, "session_meta.txt"), "w", encoding="utf-8") as fh:
+        fh.write("capture_format: %d\n" % (_sessions.CAPTURE_FORMAT + 1))
+    return d
+
+
+def test_scan_names_a_capture_it_must_not_read(tmp_path):
+    """Dropping it silently presents the remaining captures as the whole
+    library, which is the shape this project keeps having to fix: the omission
+    is invisible exactly when it matters."""
+    _refused_capture(tmp_path)
+    refused = []
+    rows = library.scan(str(tmp_path), refused=refused)
+    assert rows == []
+    assert refused == ["2026-08-29_143022_1_COM3"]
+
+
+def test_scan_still_skips_a_folder_that_is_merely_unparseable(tmp_path):
+    # a refusal is a different thing from a folder that is not a capture, and
+    # only the first is worth telling anybody about
+    d = tmp_path / "junk"
+    d.mkdir()
+    (d / "holiday.txt").write_text("nothing\n", encoding="utf-8")
+    refused = []
+    assert library.scan(str(tmp_path), refused=refused) == []
+    assert refused == []
+
+
+def test_scan_without_the_out_param_behaves_exactly_as_before(tmp_path):
+    _refused_capture(tmp_path)
+    assert library.scan(str(tmp_path)) == []

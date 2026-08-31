@@ -1968,8 +1968,20 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
         def _open_session_library(self):
             from . import dialogs
             root = self._session_root()
-            rows = library_mod.scan(root)
+            refused = []
+            rows = library_mod.scan(root, refused=refused)
             if not rows:
+                # "no saved sessions yet" over a folder holding captures this
+                # build must not read is the worst version of the silence this
+                # item exists to close.
+                if refused:
+                    messagebox.showinfo(
+                        APP_NAME,
+                        "%d capture%s in:\n%s\n\n...cannot be read by this "
+                        "build \u2014 written by a newer OpenMBB. Update OpenMBB "
+                        "rather than assume the folder is empty."
+                        % (len(refused), "" if len(refused) == 1 else "s", root))
+                    return
                 messagebox.showinfo(APP_NAME, "No saved sessions yet in:\n%s" % root)
                 return
             surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
@@ -1984,6 +1996,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                       style="Heading.TLabel").pack(anchor="w", pady=(0, 2))
             ttk.Label(outer, text=root, style="Muted.TLabel",
                       wraplength=800).pack(anchor="w", pady=(0, 10))
+            if refused:
+                # named on the window, not counted in silence: the list would
+                # otherwise read as the whole library
+                ttk.Label(
+                    outer, style="Warn.TLabel", wraplength=800,
+                    text="%d capture%s not listed \u2014 written by a newer "
+                         "OpenMBB than this one (%s)"
+                         % (len(refused), "" if len(refused) == 1 else "s",
+                            ", ".join(sorted(refused)[:3])
+                            + (", \u2026" if len(refused) > 3 else ""))
+                ).pack(anchor="w", pady=(0, 10))
 
             body = ttk.Frame(outer)
             body.pack(fill="both", expand=True)
@@ -5848,7 +5871,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             cached = getattr(self, "_trend_cache", None)
             if cached is not None:
                 return cached
-            out = []
+            out, refused = [], []
             try:
                 root, names = self._recent_sessions(limit=60)
                 for name in reversed(names):     # oldest first
@@ -5860,12 +5883,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                         out.append((library_mod._captured_at(folder, s), name,
                                     parsers.parse_bms(s.cmd("bms")),
                                     parsers.parse_stats(s.cmd("stats"))))
+                    except sessions.CaptureFormatError:
+                        # counted, not swallowed: a trend line with an
+                        # undisclosed hole in it is worse than one that says a
+                        # capture is missing
+                        refused.append(name)
                     except Exception:
                         pass
             except Exception:
                 out = []
             out.sort(key=lambda r: r[0])         # oldest -> newest by capture time
             self._trend_cache = out
+            self._trend_refused = refused
             return out
 
         # date-range windows for the Trend charts (relative to the newest pull, so a
@@ -5934,7 +5963,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             cached = getattr(self, "_log_trend_cache", None)
             if cached is not None:
                 return cached
-            out = []
+            out, refused = [], []
             try:
                 root, names = self._recent_sessions(limit=60)
                 real = [n for n in reversed(names)
@@ -5952,12 +5981,15 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             "charge_index_ah": cap["median_ah"] if cap else None,
                             "cell_deviation_mv": dev["median_mv"] if dev else None,
                         }))
+                    except sessions.CaptureFormatError:
+                        refused.append(name)
                     except Exception:
                         pass
             except Exception:
                 out = []
             out.sort(key=lambda r: r[0])
             self._log_trend_cache = out
+            self._log_trend_refused = refused
             return out
 
         def _chart_note(self, cv, text):
@@ -5992,8 +6024,17 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             if len(pts) < 2 and self.sim_var.get():
                 pts = self._sim_trend_points(metric, is_temp, tu)
                 synthetic = True
+            refused = (getattr(self, "_log_trend_refused", None) if log_metric
+                       else getattr(self, "_trend_refused", None)) or []
             pts = self._apply_chart_range(pts)
             if not pts:
+                if refused:
+                    self._chart_msg(
+                        cv, "%d capture%s here cannot be read by this build — "
+                            "written by a newer OpenMBB.\n\nUpdate OpenMBB "
+                            "rather than trust a partial trend."
+                            % (len(refused), "" if len(refused) == 1 else "s"))
+                    return
                 self._chart_msg(cv, "No saved sessions with this metric in this range."
                                 + ("\n\nThis one is read out of the event log, so "
                                    "it only appears for pulls taken with "
@@ -6016,6 +6057,13 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 "" if len(pts) == 1 else "s", self.chart_range.get())
             if log_metric:
                 note += " · an index, not capacity"
+            if refused:
+                # A trend presented as "pack over time" with a capture silently
+                # missing is the failure this project keeps finding: the
+                # omission is invisible exactly where it matters most. It rides
+                # on the caption the chart already carries, so it cannot be
+                # mistaken for a data point or hidden behind one.
+                note += " · %d not shown (newer OpenMBB)" % len(refused)
             self._chart_note(cv, ("SIMULATED · " + note) if synthetic else note)
 
         def _render_charts(self):

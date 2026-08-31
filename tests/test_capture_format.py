@@ -35,6 +35,48 @@ def _capture(tmp_path, name, meta=None):
     return str(d)
 
 
+# --------------------------------------------- item 12: every session stamps
+#
+# The stamp writer lived on the full-pull path, so listen captures,
+# connect-without-pull sessions and selftest runs carried no meta file at all -
+# the insurance excluded exactly the capture shape a646b7c had promoted to
+# first-class.
+
+@pytest.mark.parametrize("tag", ["listen", "selftest", "COM3"])
+def test_every_session_states_its_format_from_the_moment_it_exists(tmp_path, tag):
+    from openmbb.transport import SessionLogger
+
+    lg = SessionLogger(base_dir=str(tmp_path), tag=tag)
+    meta = os.path.join(lg.dir, "session_meta.txt")
+    assert os.path.isfile(meta), "a session with no meta file cannot say what it is"
+    text = open(meta, encoding="utf-8").read()
+    assert "capture_format: %d" % CAPTURE_FORMAT in text
+    assert "app_version:" in text and "time:" in text
+    assert capture_format(lg.dir) == CAPTURE_FORMAT
+
+
+def test_the_pull_path_enriches_the_stamp_without_losing_it(tmp_path):
+    """The full pull rewrites this file. Nothing the base stamp established may
+    disappear when it does - a capture that stated its format at 12:00 and
+    stopped stating it at 12:05 is worse than one that never did."""
+    from openmbb.transport import SessionLogger
+
+    lg = SessionLogger(base_dir=str(tmp_path), tag="COM3")
+    before = open(os.path.join(lg.dir, "session_meta.txt"), encoding="utf-8").read()
+    # what the pull path writes (gui._write_session_meta), same keys plus more
+    lg.save_named("session_meta.txt",
+                  "OpenMBB session metadata\n"
+                  "capture_format: %d\n"
+                  "time: 2026-08-29T14:30:22\n"
+                  "app_version: 9.9.9\n"
+                  "firmware_rev: 41\n"
+                  "power_mode: Stopped\n" % CAPTURE_FORMAT)
+    after = open(os.path.join(lg.dir, "session_meta.txt"), encoding="utf-8").read()
+    for key in ("capture_format:", "time:", "app_version:"):
+        assert key in before and key in after, key
+    assert capture_format(lg.dir) == CAPTURE_FORMAT
+
+
 # ----------------------------------------------------------- one decoder
 #
 # a646b7c gave `redact` a BOM-aware decoder and left the loaders on UTF-8 only,

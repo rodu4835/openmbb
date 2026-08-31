@@ -188,6 +188,11 @@ def _accent_labels(root, ui):
     style.configure("Muted.TLabel", foreground=dim)
     style.configure("Accent.TLabel", font=(ui, 12, "bold"), foreground=accent)
     style.configure("Good.TLabel", font=(ui, 12, "bold"), foreground=good)
+    # Good.TLabel had no counterpart, so anything wanting to say "this is not
+    # right" either shouted in Accent (which reads as a heading) or fell back to
+    # plain body text with no style at all - an unconfigured ttk style name is
+    # not an error, it just silently looks normal.
+    style.configure("Warn.TLabel", foreground=PALETTE["warn"])
 
 
 def _apply_clam(root, ui):

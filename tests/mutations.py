@@ -685,6 +685,76 @@ def not_from_a_bike(folder):''',
      '''_SIM_SEVCON_ODO_KM = 6155.0''',
      "tests/test_sevcon.py::"
      "test_the_simulated_odometer_reproduces_the_measured_ratio"),
+
+    # item 11 - a refused capture is named wherever it is absent
+    ("library: swallow a refused capture again",
+     "src/openmbb/library.py",
+     '''        except sessions.CaptureFormatError:
+            if refused is not None:
+                refused.append(name)
+            continue''',
+     '''        except sessions.CaptureFormatError:
+            continue''',
+     "tests/test_library.py::test_scan_names_a_capture_it_must_not_read"),
+
+    ("library window: drop the line naming what was not listed",
+     "src/openmbb/gui.py",
+     '''            if refused:
+                # named on the window, not counted in silence: the list would
+                # otherwise read as the whole library''',
+     '''            if False:
+                # named on the window, not counted in silence: the list would
+                # otherwise read as the whole library''',
+     "tests/test_gui_flow.py::"
+     "test_the_library_lists_what_it_has_and_names_what_it_could_not_read"),
+
+    ("library window: call an all-refused folder empty again",
+     "src/openmbb/gui.py",
+     '''                if refused:
+                    messagebox.showinfo(
+                        APP_NAME,
+                        "%d capture%s in:''',
+     '''                if False:
+                    messagebox.showinfo(
+                        APP_NAME,
+                        "%d capture%s in:''',
+     "tests/test_gui_flow.py::"
+     "test_the_library_says_a_capture_is_missing_rather_than_looking_empty"),
+
+    ("trend: swallow a refused capture again",
+     "src/openmbb/gui.py",
+     '''                    except sessions.CaptureFormatError:
+                        # counted, not swallowed: a trend line with an
+                        # undisclosed hole in it is worse than one that says a
+                        # capture is missing
+                        refused.append(name)''',
+     '''                    except sessions.CaptureFormatError:
+                        pass''',
+     "tests/test_gui_flow.py::"
+     "test_the_trend_loader_counts_what_it_could_not_read"),
+
+    ("chart: stop naming the captures the trend left out",
+     "src/openmbb/gui.py",
+     '''                note += " \u00b7 %d not shown (newer OpenMBB)" % len(refused)''',
+     '''                pass''',
+     "tests/test_gui_flow.py::"
+     "test_the_chart_caption_names_the_captures_it_left_out"),
+
+    ("chart: let an all-refused chart read as no data",
+     "src/openmbb/gui.py",
+     '''                if refused:
+                    self._chart_msg(''',
+     '''                if False:
+                    self._chart_msg(''',
+     "tests/test_gui_flow.py::test_a_chart_with_nothing_left_to_draw_says_why"),
+
+    # item 12 - every session states its format from the moment it exists
+    ("sessions: leave listen and selftest captures unstamped again",
+     "src/openmbb/transport.py",
+     '''        self._write_base_meta()''',
+     '''        pass''',
+     "tests/test_capture_format.py::"
+     "test_every_session_states_its_format_from_the_moment_it_exists"),
 ]
 
 
