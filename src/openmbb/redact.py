@@ -249,7 +249,7 @@ def redact_session(src_dir, dst_dir, overwrite=False):
     os.makedirs(dst_dir)
 
     red = Redactor()
-    written, skipped, unscanned = [], [], []
+    written, skipped, unscanned, pairs = [], [], [], []
     for name in sorted(os.listdir(src_dir)):
         src = os.path.join(src_dir, name)
         if not os.path.isfile(src):
@@ -274,6 +274,10 @@ def redact_session(src_dir, dst_dir, overwrite=False):
                   encoding="utf-8", newline="") as f:
             f.write(red.text(body))
         written.append(out_name)
+        # the source name too: a file whose NAME carried an identifier is
+        # written under a different one, so a caller showing the two side by
+        # side cannot pair them up by name alone
+        pairs.append((name, out_name))
     if unscanned:
         shutil.rmtree(dst_dir, ignore_errors=True)
         raise RuntimeError(
@@ -311,6 +315,7 @@ def redact_session(src_dir, dst_dir, overwrite=False):
         "skipped": skipped,
         "unscanned": [],          # anything unscannable aborted the export above
         "identifiers_replaced": len(red.mapping),
+        "pairs": pairs,
         "by_kind": {lab: sum(1 for k in red.kinds.values() if k == lab)
                     for lab, _rx in SHAPES
                     if any(k == lab for k in red.kinds.values())},

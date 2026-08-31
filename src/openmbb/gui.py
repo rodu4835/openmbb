@@ -1351,6 +1351,8 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             byte that crossed the wire. The export re-scans everything it writes
             and refuses to produce a bundle it cannot vouch for.
             """
+            import shutil
+            import tempfile
             from tkinter import filedialog
             base = config.get_log_dir()
             src = filedialog.askdirectory(
@@ -1359,13 +1361,25 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if os.path.isdir(os.path.join(base, "openmbb-sessions")) else base)
             if not src:
                 return
-            dst = os.path.normpath(src.rstrip("\\/")) + "-shared"
-            if os.path.exists(dst) and not messagebox.askokcancel(
-                    APP_NAME, "%s already exists.\n\nReplace it?" % dst):
-                return
+            src = os.path.normpath(src.rstrip("\\/"))
+            # A timestamp, never the source folder's name. `src + "-shared"`
+            # left two near-identical FOLDERS side by side and opened a window
+            # showing both, and picking the wrong one publishes the VIN and
+            # every byte that crossed the wire. It also named the bundle after
+            # the source, so a folder called after a person carried that name
+            # into the file being handed over - and the export's own guard
+            # catches identifier SHAPES, which a person's name is not.
+            stamp = _dt.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            # Built somewhere else entirely and zipped afterwards, so a
+            # half-written bundle never appears next to the capture at all -
+            # and so a REFUSAL never asks somebody where to save a file that is
+            # not going to exist.
+            work = tempfile.mkdtemp(prefix="openmbb-share-")
+            dst = os.path.join(work, "openmbb-share-%s_REDACTED" % stamp)
             try:
                 rep = redact_mod.redact_session(src, dst, overwrite=True)
             except RuntimeError as e:
+                shutil.rmtree(work, ignore_errors=True)
                 # verification failed: the partial bundle has already been removed
                 messagebox.showerror(
                     APP_NAME, "Nothing was written.\n\n%s\n\nPlease report this — "
@@ -1373,6 +1387,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     "redaction rules need widening before anything is shared." % e)
                 return
             except ValueError as e:
+                shutil.rmtree(work, ignore_errors=True)
                 # A refusal about the REQUEST rather than the data: the chosen
                 # source is not a capture, or the destination would sit inside
                 # the capture or carry an identifier in its name. Uncaught, this
@@ -1382,20 +1397,239 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     APP_NAME, "Nothing was written.\n\n%s" % e)
                 return
             except OSError as e:
+                shutil.rmtree(work, ignore_errors=True)
                 messagebox.showerror(APP_NAME, "Could not write the copy:\n\n%s" % e)
                 return
-            kinds = ", ".join("%s x%d" % (k, v) for k, v in rep["by_kind"].items())
-            messagebox.showinfo(
-                APP_NAME,
-                "Share-safe copy written to:\n%s\n\n%d files, %d identifier(s) "
-                "replaced%s.\n\nEvery file was re-scanned and carries no VIN or "
-                "serial number. Have a look yourself before sending it anywhere."
-                % (dst, rep["files"], rep["identifiers_replaced"],
-                   " (" + kinds + ")" if kinds else ""))
+            zip_path = filedialog.asksaveasfilename(
+                title="Save the share-safe copy as",
+                initialdir=os.path.dirname(src),
+                initialfile="openmbb-share-%s_REDACTED.zip" % stamp,
+                defaultextension=".zip",
+                filetypes=[("Zip archive", "*.zip")])
+            if not zip_path:
+                shutil.rmtree(work, ignore_errors=True)
+                return
             try:
-                open_in_file_manager(dst)
+                self._zip_folder(dst, zip_path)
+            except OSError as e:
+                shutil.rmtree(work, ignore_errors=True)
+                messagebox.showerror(
+                    APP_NAME, "The copy was made but could not be packed:\n\n%s" % e)
+                return
+            kinds = ", ".join("%s x%d" % (k, v) for k, v in rep["by_kind"].items())
+            self._share_result_dialog(src, dst, work, zip_path, rep, kinds)
+
+        def _zip_folder(self, folder, zip_path):
+            """Pack `folder` into `zip_path`, one directory deep."""
+            import zipfile
+            root = os.path.basename(os.path.normpath(folder))
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+                for name in sorted(os.listdir(folder)):
+                    p = os.path.join(folder, name)
+                    if os.path.isfile(p):
+                        z.write(p, arcname=os.path.join(root, name))
+
+        def _share_result_dialog(self, src, dst, work, zip_path, rep, kinds):
+            """What was scanned for, and what is still in there.
+
+            The old dialog said the bundle "carries no VIN or serial number",
+            which is precisely true and reads as an all-clear over a file that
+            still holds the owner's own note, their machine's clock and the
+            whole event log. It also said "have a look yourself" with no tool
+            behind it.
+            """
+            import shutil
+            win = tk.Toplevel(self)
+            win.title("%s — Share-safe copy" % APP_NAME)
+            win.transient(self)
+            surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
+            win.configure(bg=surface)
+            outer = ttk.Frame(win, padding=(18, 16))
+            outer.pack(fill="both", expand=True)
+            ttk.Label(outer, text="Share-safe copy written",
+                      style="Heading.TLabel").pack(anchor="w")
+            ttk.Label(outer, text=zip_path, style="Muted.TLabel",
+                      wraplength=560).pack(anchor="w", pady=(2, 10))
+            ttk.Label(
+                outer, wraplength=560,
+                text="Scanned for the VIN and the MBB, module and Sevcon serial "
+                     "numbers \u2014 %d replaced%s across %d files, and every file "
+                     "was re-scanned afterwards. It looks for those shapes and "
+                     "nothing else: not names, not places, not people."
+                     % (rep["identifiers_replaced"],
+                        " (" + kinds + ")" if kinds else "", rep["files"])
+            ).pack(anchor="w", pady=(0, 10))
+            ttk.Label(outer, text="What is still in there",
+                      style="Heading.TLabel").pack(anchor="w")
+            ttk.Label(
+                outer, wraplength=560,
+                text="Your own note, the settings dump, your machine's clock, and "
+                     "the full event log \u2014 when you rode, how far, when you "
+                     "charged, how long it sat plugged in. That is not leftovers; "
+                     "that is the data. Read it before you send it anywhere."
+            ).pack(anchor="w", pady=(2, 14))
+            row = ttk.Frame(outer)
+            row.pack(fill="x")
+
+            def done():
+                shutil.rmtree(work, ignore_errors=True)
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+
+            ttk.Button(row, text="Show me what changed",
+                       command=lambda: self._show_redaction_diff(
+                           src, dst, rep.get("pairs") or [])).pack(side="left")
+            ttk.Button(row, text="Open the folder",
+                       command=lambda: self._open_zip_folder(zip_path)
+                       ).pack(side="left", padx=(8, 0))
+            ttk.Button(row, text="Done", command=done).pack(side="right")
+            win.protocol("WM_DELETE_WINDOW", done)
+            self._share_win = win
+
+        def _open_zip_folder(self, zip_path):
+            try:
+                open_in_file_manager(os.path.dirname(zip_path))
             except Exception:
-                pass                      # the path is in the dialog either way
+                pass                      # the path is on screen either way
+
+        @staticmethod
+        def _diff_text(path):
+            """A file's text however it was encoded, or None if it is not text.
+
+            Uses the export's own decoder so the viewer reads exactly what the
+            redactor read - a file this cannot decode is one the export refused
+            to vouch for, and the two must not disagree about that.
+            """
+            try:
+                with open(path, "rb") as f:
+                    body, _enc = redact_mod._decode_text(f.read())
+                return body
+            except OSError:
+                return None
+
+        def _show_redaction_diff(self, src_dir, dst_dir, pairs):
+            """Every file in the bundle, with what the redactor changed marked.
+
+            The WHOLE bundle, file by file, and never only the files that
+            changed: a changed-only view implies everything it left out was
+            checked, and what actually happened is that those files were checked
+            for four identifier shapes and nothing else. `session_note.txt`
+            sorts first because it is the one file a person typed the contents
+            of, and the one the redactor cannot help with at all.
+
+            Nothing here is written to disk. The left-hand column is the
+            unredacted original, which is the point - and is why it stays on
+            this screen.
+            """
+            names = sorted(pairs or [],
+                           key=lambda pr: (pr[0] != "session_note.txt",
+                                           pr[0].lower()))
+            if not names:
+                messagebox.showinfo(APP_NAME, "There are no files to show.")
+                return
+            surface = ttk.Style().lookup("TFrame", "background") or P["bg"]
+            win = tk.Toplevel(self)
+            win.title("%s — What is being shared" % APP_NAME)
+            win.geometry("940x660")
+            win.configure(bg=surface)
+            win.transient(self)
+            outer = ttk.Frame(win, padding=(14, 12))
+            outer.pack(fill="both", expand=True)
+            ttk.Label(outer, text="Every file in the bundle, exactly as it will "
+                                  "be sent", style="Heading.TLabel").pack(anchor="w")
+            ttk.Label(
+                outer, style="Muted.TLabel", wraplength=880,
+                text="Struck-through lines are what the redactor took out; the "
+                     "line under each one is what replaces it. A file with "
+                     "nothing struck through was scanned and matched no "
+                     "identifier \u2014 which is not the same as having been "
+                     "checked for everything."
+            ).pack(anchor="w", pady=(2, 10))
+            body = ttk.Frame(outer)
+            body.pack(fill="both", expand=True)
+            left = ttk.Frame(body)
+            left.pack(side="left", fill="y")
+            lb = tk.Listbox(left, width=30, exportselection=False,
+                            bg=P["field"], fg=P["fg"],
+                            selectbackground=P["sel"], selectforeground=P["selfg"],
+                            highlightthickness=0, borderwidth=0, activestyle="none")
+            lb.pack(side="left", fill="y", expand=True)
+            right = ttk.Frame(body)
+            right.pack(side="left", fill="both", expand=True, padx=(12, 0))
+            head = ttk.Label(right, text="", style="Heading.TLabel", wraplength=600)
+            head.pack(anchor="w")
+            wrap = ttk.Frame(right)
+            wrap.pack(fill="both", expand=True, pady=(6, 0))
+            txt = tk.Text(wrap, wrap="none", bg=P["console"], fg=P["termfg"],
+                          insertbackground=P["termfg"], highlightthickness=0,
+                          borderwidth=0, font=("Consolas", 9))
+            ys = ttk.Scrollbar(wrap, orient="vertical", command=txt.yview)
+            xs = ttk.Scrollbar(right, orient="horizontal", command=txt.xview)
+            txt.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
+            ys.pack(side="right", fill="y")
+            txt.pack(side="left", fill="both", expand=True)
+            xs.pack(fill="x")
+            txt.tag_configure("was", foreground=P["danger"], overstrike=True)
+            txt.tag_configure("now", foreground=P["green"])
+            txt.tag_configure("warn", foreground=P["warn"])
+            txt.tag_configure("note", foreground=P["dim"])
+
+            for src_name, _out in names:
+                lb.insert("end", src_name)
+
+            def show(_evt=None):
+                sel = lb.curselection()
+                if not sel:
+                    return
+                src_name, out_name = names[sel[0]]
+                a = self._diff_text(os.path.join(src_dir, src_name))
+                b = self._diff_text(os.path.join(dst_dir, out_name))
+                txt.config(state="normal")
+                txt.delete("1.0", "end")
+                if src_name != out_name:
+                    txt.insert("end", "the file NAME carried an identifier too: "
+                                      "%s  \u2192  %s\n\n" % (src_name, out_name),
+                               "warn")
+                if src_name == "session_note.txt":
+                    txt.insert("end", "This is your own note, and it goes exactly "
+                                      "as you wrote it. The redactor does not look "
+                                      "for names, places or people \u2014 only for "
+                                      "the VIN and serial numbers.\n\n", "warn")
+                if a is None or b is None:
+                    txt.insert("end", "(not text this export can read \u2014 it was "
+                                      "left out of the bundle)\n", "warn")
+                    txt.config(state="disabled")
+                    return
+                al, bl = a.splitlines(), b.splitlines()
+                changed = 0
+                for i in range(max(len(al), len(bl))):
+                    x = al[i] if i < len(al) else None
+                    y = bl[i] if i < len(bl) else None
+                    if x == y:
+                        txt.insert("end", (y or "") + "\n")
+                    else:
+                        changed += 1
+                        if x is not None:
+                            txt.insert("end", x + "\n", "was")
+                        if y is not None:
+                            txt.insert("end", y + "\n", "now")
+                if not changed:
+                    txt.insert("1.0", "nothing in this file matched an identifier "
+                                      "\u2014 it is going exactly as it is\n\n",
+                               "note")
+                head.config(text="%s  \u2014  %d line(s) changed"
+                                 % (out_name, changed))
+                txt.config(state="disabled")
+                txt.yview_moveto(0)
+
+            lb.bind("<<ListboxSelect>>", show)
+            lb.selection_set(0)
+            show()
+            ttk.Button(outer, text="Close", command=win.destroy).pack(
+                anchor="e", pady=(10, 0))
+            self._diff_win = win
 
         def _open_session_folder(self):
             target = self.logger.dir if self.logger else self._session_root()

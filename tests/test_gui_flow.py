@@ -3223,6 +3223,174 @@ def test_the_share_safe_export_says_why_it_refused(app, monkeypatch, tmp_path):
     assert not (tmp_path / "not-a-capture-shared").exists()
 
 
+#: Built by concatenation so this TRACKED file never holds a contiguous
+#: identifier-shaped token - test_release_gate scans the repo for exactly that
+#: and cannot tell a fabricated one from a real one. Same trick as test_redact.
+_SHARE_VIN = "5TESTVNPRZ" + "4200002"
+_SHARE_MBB = "SJ4321" + "ZER8765"
+
+
+def _tiny_capture(tmp_path, folder_name):
+    """A folder load_session accepts, under a name of our choosing."""
+    d = tmp_path / folder_name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "001_bms.txt").write_text(
+        "# command: bms\n\nMBB Serial Number : %s\n"
+        "Bike VIN : %s\nPack Voltage : 113.2\n" % (_SHARE_MBB, _SHARE_VIN),
+        encoding="utf-8")
+    (d / "session_note.txt").write_text(
+        "picked up from Dave, cash, runs fine\n", encoding="utf-8")
+    return str(d)
+
+
+def test_the_export_writes_one_zip_and_nothing_beside_the_capture(
+        app, monkeypatch, tmp_path):
+    """`src + "-shared"` put two near-identical FOLDERS side by side and opened
+    a window showing both. Picking the wrong one publishes the VIN and every
+    byte that crossed the wire, irreversibly and undetectably - and the export
+    named the bundle after the source, so a folder called after a person
+    carried that name into the file being handed over. The export's own guard
+    catches identifier SHAPES, and a person's name is not one.
+    """
+    import tkinter.filedialog as fd
+
+    src = _tiny_capture(tmp_path / "captures", "Daves-FXS-preinspection-2026")
+    out = tmp_path / "elsewhere" / "bundle.zip"
+    out.parent.mkdir()
+    seen = {}
+
+    def _save(*a, **k):
+        seen.update(k)
+        return str(out)
+
+    monkeypatch.setattr(fd, "askdirectory", lambda *a, **k: src)
+    monkeypatch.setattr(fd, "asksaveasfilename", _save)
+    monkeypatch.setattr(type(app), "_share_result_dialog",
+                        lambda self, *a: seen.update(dialog=a))
+
+    app._export_share_safe()
+
+    assert out.exists(), "no zip was written"
+    # nothing new appeared next to the capture at all
+    assert os.listdir(os.path.dirname(src)) == [os.path.basename(src)]
+    # ...and the name it offers carries nothing from the source folder
+    assert "Daves" not in seen["initialfile"]
+    assert seen["initialfile"].startswith("openmbb-share-")
+    assert seen["initialfile"].endswith("_REDACTED.zip")
+
+
+def test_the_export_zip_actually_carries_the_redacted_files(
+        app, monkeypatch, tmp_path):
+    import zipfile
+    import tkinter.filedialog as fd
+
+    src = _tiny_capture(tmp_path / "captures", "2026-08-29_143022_1_COM3")
+    out = tmp_path / "bundle.zip"
+    monkeypatch.setattr(fd, "askdirectory", lambda *a, **k: src)
+    monkeypatch.setattr(fd, "asksaveasfilename", lambda *a, **k: str(out))
+    monkeypatch.setattr(type(app), "_share_result_dialog", lambda self, *a: None)
+
+    app._export_share_safe()
+
+    with zipfile.ZipFile(out) as z:
+        names = z.namelist()
+        blob = b"".join(z.read(n) for n in names)
+    assert any(n.endswith("001_bms.txt") for n in names)
+    assert _SHARE_MBB.encode() not in blob
+    assert _SHARE_VIN.encode() not in blob
+    assert b"Pack Voltage" in blob        # the data survived the redaction
+
+
+def test_a_refused_export_never_asks_where_to_save(app, monkeypatch, tmp_path):
+    """Asking somebody to name a file before knowing it can be produced is a
+    dialog for a file that will not exist."""
+    import tkinter.filedialog as fd
+
+    src = tmp_path / "not-a-capture"
+    src.mkdir()
+    (src / "holiday.txt").write_text("nothing to do with a bike\n",
+                                     encoding="utf-8")
+    asked = []
+    monkeypatch.setattr(fd, "askdirectory", lambda *a, **k: str(src))
+    monkeypatch.setattr(fd, "asksaveasfilename",
+                        lambda *a, **k: asked.append(k) or "")
+
+    app._errors.clear()
+    app._export_share_safe()
+
+    assert app._errors, "the export refused without saying anything"
+    assert not asked, "it asked where to save a bundle it was not going to make"
+
+
+def test_the_diff_viewer_shows_every_file_with_the_note_first(app, tmp_path):
+    """The WHOLE bundle, file by file. A changed-only view implies everything
+    it left out was checked - and what actually happened is that those files
+    were checked for four identifier shapes and nothing else. The note sorts
+    first because it is the one file a person typed the contents of.
+    """
+    src = tmp_path / "cap"
+    dst = tmp_path / "red"
+    src.mkdir()
+    dst.mkdir()
+    pairs = []
+    for name, body in [("001_bms.txt", "Bike VIN : %s\n" % _SHARE_VIN),
+                       ("session_note.txt", "picked up from Dave\n"),
+                       ("002_stats.txt", "nothing identifying here\n")]:
+        (src / name).write_text(body, encoding="utf-8")
+        (dst / name).write_text(
+            body.replace(_SHARE_VIN, "REDACTEDVIN000001"), encoding="utf-8")
+        pairs.append((name, name))
+
+    import tkinter as tk
+
+    app._show_redaction_diff(str(src), str(dst), pairs)
+    win = app._diff_win
+    app.update()
+    boxes = [w for w in _descendants(win) if isinstance(w, tk.Listbox)]
+    assert boxes, "no file list"
+    names = list(boxes[0].get(0, "end"))
+    assert names[0] == "session_note.txt"
+    assert set(names) == {"001_bms.txt", "session_note.txt", "002_stats.txt"}
+
+    # the note's own warning is on screen, because the redactor cannot help
+    # with what it does not look for
+    blob = " ".join(_all_label_text(win))
+    texts = [w.get("1.0", "end") for w in _descendants(win)
+             if isinstance(w, tk.Text)]
+    assert "names, places or people" in (blob + " ".join(texts))
+    win.destroy()
+
+
+def test_the_success_dialog_says_what_remains_not_just_what_was_removed(
+        app, monkeypatch, tmp_path):
+    """The old text - "every file was re-scanned and carries no VIN or serial
+    number" - is precisely true and reads as an all-clear over a bundle that
+    still holds the owner's note, their machine's clock and the whole event
+    log."""
+    import tkinter.filedialog as fd
+
+    src = _tiny_capture(tmp_path / "captures", "2026-08-29_143022_1_COM3")
+    out = tmp_path / "bundle.zip"
+    monkeypatch.setattr(fd, "askdirectory", lambda *a, **k: src)
+    monkeypatch.setattr(fd, "asksaveasfilename", lambda *a, **k: str(out))
+
+    import tkinter as tk
+    from tkinter import ttk
+
+    app._export_share_safe()
+    win = app._share_win
+    app.update()
+    blob = " ".join(_all_label_text(win)).lower()
+
+    assert "event log" in blob and "note" in blob      # what is still in there
+    assert "not names" in blob or "nothing else" in blob   # the scan's limits
+    labels = [str(w.cget("text")) for w in _descendants(win)
+              if isinstance(w, ttk.Button)]
+    assert any("what changed" in l.lower() for l in labels), \
+        "'have a look yourself' needs a tool behind it"
+    win.destroy()
+
+
 # --- the two condition surfaces ---------------------------------------------
 
 def _mirror_log():

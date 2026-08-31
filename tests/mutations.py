@@ -562,6 +562,60 @@ def not_from_a_bike(folder):''',
      '''            if port is not None:''',
      '''            if False:''',
      "tests/test_gui_flow.py::test_the_session_meta_records_what_it_was_captured_from"),
+
+    # item 23a - the export shows its work instead of asking to be trusted
+    ("export: name the bundle after the source folder again",
+     "src/openmbb/gui.py",
+     '''                initialfile="openmbb-share-%s_REDACTED.zip" % stamp,''',
+     '''                initialfile=os.path.basename(src) + "-shared.zip",''',
+     "tests/test_gui_flow.py::"
+     "test_the_export_writes_one_zip_and_nothing_beside_the_capture"),
+
+    ("export: build the bundle beside the capture again",
+     "src/openmbb/gui.py",
+     '''            work = tempfile.mkdtemp(prefix="openmbb-share-")
+            dst = os.path.join(work, "openmbb-share-%s_REDACTED" % stamp)''',
+     '''            work = tempfile.mkdtemp(prefix="openmbb-share-")
+            dst = src + "-shared"''',
+     "tests/test_gui_flow.py::"
+     "test_the_export_writes_one_zip_and_nothing_beside_the_capture"),
+
+    ("export: let a refusal fall through to the save dialog",
+     "src/openmbb/gui.py",
+     '''                messagebox.showerror(
+                    APP_NAME, "Nothing was written.\\n\\n%s" % e)
+                return
+            except OSError as e:''',
+     '''                messagebox.showerror(
+                    APP_NAME, "Nothing was written.\\n\\n%s" % e)
+            except OSError as e:''',
+     "tests/test_gui_flow.py::test_a_refused_export_never_asks_where_to_save"),
+
+    ("diff: show only the files that changed",
+     "src/openmbb/gui.py",
+     '''            names = sorted(pairs or [],
+                           key=lambda pr: (pr[0] != "session_note.txt",
+                                           pr[0].lower()))''',
+     '''            names = sorted(pairs or [],
+                           key=lambda pr: pr[0].lower())[1:]''',
+     "tests/test_gui_flow.py::"
+     "test_the_diff_viewer_shows_every_file_with_the_note_first"),
+
+    ("dialog: go back to naming only what was removed",
+     "src/openmbb/gui.py",
+     '''            ttk.Label(outer, text="What is still in there",
+                      style="Heading.TLabel").pack(anchor="w")''',
+     '''            ttk.Label(outer, text="",
+                      style="Heading.TLabel").pack(anchor="w")''',
+     "tests/test_gui_flow.py::"
+     "test_the_success_dialog_says_what_remains_not_just_what_was_removed"),
+
+    ("redact: stop reporting which source file became which",
+     "src/openmbb/redact.py",
+     '''        pairs.append((name, out_name))''',
+     '''        pass''',
+     "tests/test_gui_flow.py::"
+     "test_the_diff_viewer_shows_every_file_with_the_note_first"),
 ]
 
 
