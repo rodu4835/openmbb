@@ -603,10 +603,10 @@ def not_from_a_bike(folder):''',
 
     ("dialog: go back to naming only what was removed",
      "src/openmbb/gui.py",
-     '''            ttk.Label(outer, text="What is still in there",
-                      style="Heading.TLabel").pack(anchor="w")''',
-     '''            ttk.Label(outer, text="",
-                      style="Heading.TLabel").pack(anchor="w")''',
+     '''                text="Your own note, the settings dump, your machine's clock, and "
+                     "the full event log \u2014 when you rode, how far, when you "''',
+     '''                text="Every file was re-scanned and carries no VIN or "
+                     "serial number. "''',
      "tests/test_gui_flow.py::"
      "test_the_success_dialog_says_what_remains_not_just_what_was_removed"),
 
@@ -614,8 +614,8 @@ def not_from_a_bike(folder):''',
      "src/openmbb/redact.py",
      '''        pairs.append((name, out_name))''',
      '''        pass''',
-     "tests/test_gui_flow.py::"
-     "test_the_diff_viewer_shows_every_file_with_the_note_first"),
+     "tests/test_redact.py::"
+     "test_the_report_pairs_each_source_file_with_what_it_became"),
 ]
 
 

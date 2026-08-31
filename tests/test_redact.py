@@ -45,6 +45,28 @@ def _write_capture(folder, commands=None):
     return folder
 
 
+def test_the_report_pairs_each_source_file_with_what_it_became(tmp_path):
+    """A file whose NAME carries an identifier is written under a different
+    one, so anything showing the original and the redacted copy side by side
+    cannot pair them up by name. The report carries the mapping, and nothing
+    else did.
+    """
+    src = _write_capture(tmp_path / "cap")
+    (src / (_VIN + "_decoder.txt")).write_text(
+        "# command: bms\n\nnothing identifying inside\n", encoding="utf-8")
+
+    rep = redact.redact_session(str(src), str(tmp_path / "out"))
+
+    pairs = dict(rep["pairs"])
+    assert len(pairs) == rep["files"], "a written file with no pair"
+    # every source file that was written is pointed at its output name...
+    assert set(pairs) <= set(os.listdir(str(src)))
+    # ...including the one whose own NAME had to be redacted
+    became = pairs[_VIN + "_decoder.txt"]
+    assert _VIN not in became
+    assert became.endswith("_decoder.txt")
+
+
 def test_a_real_capture_shape_is_scanned_as_dirty():
     # the detectors must actually fire on the inputs, or the rest proves nothing
     kinds = {k for k, _v in redact.find_pii_shapes(
