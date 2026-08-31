@@ -755,6 +755,77 @@ def not_from_a_bike(folder):''',
      '''        pass''',
      "tests/test_capture_format.py::"
      "test_every_session_states_its_format_from_the_moment_it_exists"),
+
+    # item 9 - the record follows the enforcement down to the transport
+    ("transport: journal a write only from the GUI again",
+     "src/openmbb/transport.py",
+     '''        self.logger.journal_write(name, old, value, ok=None)      # PENDING''',
+     '''        pass''',
+     "tests/test_safety_transport.py::"
+     "test_a_headless_write_is_journalled_without_a_gui"),
+
+    ("transport: stop handing back the read-back it performed",
+     "src/openmbb/transport.py",
+     '''        self.last_write = {"name": name, "old": old, "new": value,''',
+     '''        self.last_write = None or {"name": name, "old": old, "new": None and value,''',
+     "tests/test_safety_transport.py::"
+     "test_the_transport_hands_back_the_read_back_it_already_did"),
+
+    ("transport: believe the console instead of the read-back",
+     "src/openmbb/transport.py",
+     '''        verified = first_number(got) == first_number(value)''',
+     '''        verified = said_kind != "failed"''',
+     "tests/test_safety_transport.py::"
+     "test_a_silent_clamp_is_caught_at_the_transport"),
+
+    # item 21 - one masking rule, one writer
+    ("journal: stop masking the record on its way to disk",
+     "src/openmbb/transport.py",
+     '''            f.write(self._mask(line))''',
+     '''            f.write(line)''',
+     "tests/test_safety_transport.py::"
+     "test_every_journal_record_type_masks_a_registered_secret"),
+
+    # item 18c - the tag asks what it is connected to
+    ("gui: let the simulator tag follow the checkbox again",
+     "src/openmbb/gui.py",
+     '''            port = getattr(getattr(self, "transport", None), "port", None)
+            if port is not None and self.connected:
+                return isinstance(port, SimPort)
+            return bool(self.sim_var.get())''',
+     '''            return bool(self.sim_var.get())''',
+     "tests/test_gui_flow.py::"
+     "test_the_simulator_tag_follows_the_connection_not_the_checkbox"),
+
+    # item 22 - a scorecard whose total does not move with the bike
+    ("verdict: count the conditional rows in the denominator again",
+     "src/openmbb/condition.py",
+     '''    scored = [c for c in checks if c["name"] in PACK_CHECKS]''',
+     '''    scored = list(checks)''',
+     "tests/test_condition.py::"
+     "test_the_unanswered_fraction_does_not_move_with_the_bike"),
+
+    ("verdict: drop a fired conditional row out of the verdict entirely",
+     "src/openmbb/condition.py",
+     '''    level = "unknown"
+    for c in checks:
+        if _RANK[c["level"]] > _RANK[level]:
+            level = c["level"]''',
+     '''    level = "unknown"
+    for c in scored:
+        if _RANK[c["level"]] > _RANK[level]:
+            level = c["level"]''',
+     "tests/test_condition.py::"
+     "test_a_fired_conditional_row_is_named_rather_than_counted"),
+
+    # item 7 - the clamping port, and the seam it needs
+    ("sim: store the asked-for value even when the console clamps",
+     "src/openmbb/sim.py",
+     '''                    self._respond(self._apply_write(name, val))''',
+     '''                    self._settings[name][1] = val
+                    self._respond("  %s set to %s" % (name, val))''',
+     "tests/test_safety_transport.py::"
+     "test_a_silent_clamp_is_caught_at_the_transport"),
 ]
 
 

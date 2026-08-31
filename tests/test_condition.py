@@ -1135,11 +1135,49 @@ def test_the_harsh_branches_carry_the_unanswered_count():
         {"name": "Lowest cell under load", "level": "unknown", "detail": ""},
         {"name": "Cell spread at rest", "level": "ok", "detail": ""},
     ]
-    assert "2 of 4 checks unanswered" in condition._headline("concern", 2, 4, checks)
-    assert "1 of 4 checks unanswered" in condition._headline("watch", 3, 4, [
+    # The denominator is the three fixed PACK checks (item 22): isolation is
+    # named in the headline rather than counted, so this capture is 1 of 3
+    # answered rather than 2 of 4.
+    assert "2 of 3 pack checks unanswered" in condition._headline(
+        "concern", 1, 3, checks)
+    assert "1 of 3 pack checks unanswered" in condition._headline("watch", 2, 3, [
         {"name": "Cell spread at rest", "level": "watch", "detail": ""}])
     # ...and stays quiet when everything WAS answered
-    assert "unanswered" not in condition._headline("concern", 4, 4, checks)
+    assert "unanswered" not in condition._headline("concern", 3, 3, checks)
+
+
+def test_the_unanswered_fraction_does_not_move_with_the_bike(tmp_path):
+    """Item 22. Isolation and warning rows exist only when they FIRE, so
+    counting them made the denominator depend on what was wrong: the same
+    evidence read "2 of 3" on a healthy pack and "2 of 4" on a faulted one, and
+    two reports were not comparable. A scorecard whose total moves is not one.
+    """
+    healthy = condition.verdict(condition.assess(""), [])
+    faulted = condition.verdict(condition.assess(""), [
+        {"label": "Isolation resistance", "value": 478, "status": "alert",
+         "display": "478 kOhm"}])
+
+    # the invariant: the denominator is the same on both bikes
+    assert healthy["total_checks"] == faulted["total_checks"] == 3
+    # the healthy one answers nothing at all here, so it takes the "cannot tell"
+    # branch, which correctly carries no fraction. The faulted one does carry it,
+    # and it is a three, not the four the fired row used to make it.
+    assert "of 3 pack checks" in faulted["headline"], faulted["headline"]
+    assert "of 4" not in faulted["headline"]
+
+
+def test_a_fired_conditional_row_is_named_rather_than_counted(tmp_path):
+    """It must still drive the level and still be named - only the counting
+    narrowed. Dropping it from the fraction may not drop it from the verdict."""
+    v = condition.verdict(condition.assess(""), [
+        {"label": "Isolation resistance", "value": 478, "status": "alert",
+         "display": "478 kOhm"}])
+
+    assert v["level"] == "concern", "a fired row stopped moving the level"
+    assert "isolation resistance" in v["headline"].lower()
+    assert v["total_checks"] == 3
+    # and the row is still IN the check list, just not in the denominator
+    assert any(c["name"] == "Isolation resistance" for c in v["checks"])
 
 
 def test_isolation_still_moves_the_verdict_level(tmp_path):

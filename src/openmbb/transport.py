@@ -11,6 +11,7 @@ import re
 import threading
 import time
 
+from .parsers import console_write_result
 from .safety import BlockedCommandError, command_blocked
 
 
@@ -215,6 +216,20 @@ class SessionLogger:
             f.write(self._mask(content))
         return path
 
+    def _journal(self, line):
+        """Append one record to the journal, masked. The only writer.
+
+        There were three, and they disagreed: `journal_consent` masked its two
+        fields by hand, `journal_observed` masked the whole line, and
+        `journal_write` masked nothing at all. A setting write is name/old/new
+        and low risk on its own, but this file is copied verbatim into
+        share-safe bundles - where a password is not a PII shape, so it is not
+        caught on the way out either - and one file should not hold three
+        answers to the same question.
+        """
+        with self._lock, open(self.journal_path, "a", encoding="utf-8") as f:
+            f.write(self._mask(line))
+
     def journal_consent(self, cmd, consent):
         """Record that a human authorized a heavy read, and how.
 
@@ -234,11 +249,9 @@ class SessionLogger:
         # bytes are already masked in session_raw.log. This file is copied
         # verbatim into share-safe bundles, where a password is not a PII shape
         # and so is not caught on the way out either.
-        line = "%s | %s | HEAVY READ CONSENTED | %s\n" % (
+        self._journal("%s | %s | HEAVY READ CONSENTED | %s\n" % (
             _dt.datetime.now().isoformat(timespec="seconds"),
-            self._mask(str(cmd).strip()), self._mask(str(consent).strip()))
-        with self._lock, open(self.journal_path, "a", encoding="utf-8") as f:
-            f.write(line)
+            str(cmd).strip(), str(consent).strip()))
 
     def journal_observed(self, name, old, new, because):
         """A setting that MOVED without being asked to.
@@ -253,11 +266,9 @@ class SessionLogger:
         `because` is OUR sentence and is written as ours. Nothing here is
         attributed to the console.
         """
-        line = "%s | %s | %s -> %s | OBSERVED (not requested) - %s\n" % (
+        self._journal("%s | %s | %s -> %s | OBSERVED (not requested) - %s\n" % (
             _dt.datetime.now().isoformat(timespec="seconds"),
-            name, old, new, str(because).strip())
-        with self._lock, open(self.journal_path, "a", encoding="utf-8") as f:
-            f.write(self._mask(line))
+            name, old, new, str(because).strip()))
 
     def journal_write(self, name, old, new, ok, got=None, said=None):
         """Record a write. `got` is what the bike actually read back.
@@ -288,11 +299,9 @@ class SessionLogger:
             # own goes through `note`, unattributed, because a permanent audit
             # file is the last place to paraphrase a machine.
             status += " [console said: %s]" % said
-        line = "%s | %s | %s -> %s | %s\n" % (
+        self._journal("%s | %s | %s -> %s | %s\n" % (
             _dt.datetime.now().isoformat(timespec="seconds"),
-            name, old, new, status)
-        with self._lock, open(self.journal_path, "a", encoding="utf-8") as f:
-            f.write(line)
+            name, old, new, status))
 
 
 class Transport:
@@ -312,6 +321,10 @@ class Transport:
         # scripted caller can't write a setting the bike never exposes. Invalidated
         # on login (the level change reveals a different set of settings).
         self.known_setting_names = None
+        self.known_settings = None
+        #: What the last write_setting did, for a caller that needs the
+        #: read-back it already performed rather than reading `set` twice.
+        self.last_write = None
         # D4: flips True once any command gets a non-empty reply — lets a later
         # empty read distinguish "console asleep" from "this command is silent".
         self.saw_any_response = False
@@ -557,8 +570,12 @@ class Transport:
             parsed, _ = parse_settings_dump(result)
             if parsed:
                 self.known_setting_names = set(parsed)
+                # the VALUES too, so write_setting can journal what a setting
+                # was before it changed it without a second read
+                self.known_settings = parsed
         elif head == "logout" or (head == "login" and len(stripped.split()) >= 2):
             self.known_setting_names = None
+            self.known_settings = None
 
         # spec: every command response gets its own file (transport-level, so
         # headless/scripted use is covered too, not just the GUI). The logger
@@ -598,9 +615,32 @@ class Transport:
             raise BlockedCommandError(
                 "'%s' is not in the current settings dump - refusing to write "
                 "(log in first, or your bike may not expose this setting)." % name)
-        return self.exec_command("set %s %s" % (name, value),
-                                 idle_timeout=idle_timeout, max_time=max_time,
-                                 _write_ok=True)
+        # The RECORD follows the enforcement down. Every other guard on this
+        # path already lives here - the whitelist, the blocklist, the
+        # name-must-exist check - while journalling was called only from the
+        # GUI, so a script or a REPL drove a write onto the wire with nothing
+        # written down at all. That is the shape the contactor gate had before
+        # 7479947 moved it down.
+        old = ((self.known_settings or {}).get(name) or {}).get("value", "")
+        self.logger.journal_write(name, old, value, ok=None)      # PENDING
+        reply = self.exec_command("set %s %s" % (name, value),
+                                  idle_timeout=idle_timeout, max_time=max_time,
+                                  _write_ok=True)
+        said_kind, said = console_write_result(reply)
+        # Read back HERE, and hand the result to the caller: the GUI used to
+        # re-read `set` itself, and doing it in both places would double the
+        # console traffic of every write on a real motorcycle.
+        verify = self.exec_command("set", idle_timeout=4.0, max_time=120.0)
+        live, _ = parse_settings_dump(verify)
+        got = (live.get(name) or {}).get("value", "")
+        verified = first_number(got) == first_number(value)
+        self.logger.journal_write(name, old, value, verified, got=got,
+                                  said=said if said_kind == "failed" else None)
+        self.last_write = {"name": name, "old": old, "new": value,
+                           "reply": reply, "verify": verify, "got": got,
+                           "verified": verified, "said_kind": said_kind,
+                           "said": said}
+        return reply
 
 
 _RULER_RE = re.compile(r"^\s*\+[-+]{3,}\s*$")

@@ -355,6 +355,18 @@ class SimPort:
         for i in range(0, len(data), 512):
             self._rx.put(data[i:i + 512])
 
+    def _apply_write(self, name, val):
+        """Store a written setting and answer for it.
+
+        A seam, so a fake can model a console that ACCEPTS a write and then does
+        something else - the silent clamp this project met on a real motorcycle,
+        where the console answered as though it had taken 102 and the bike went
+        on holding 89. See tests' ClampingPort. This one is the honest console:
+        it stores what it was given and says so.
+        """
+        self._settings[name][1] = val
+        return "  %s set to %s" % (name, val)
+
     def _respond(self, text):
         self._push(text.encode() + PROMPT)
 
@@ -504,8 +516,7 @@ class SimPort:
                     val = parts[2]
                     if unit and not re.search(r"[A-Za-z%]", val):
                         val = "%s %s" % (val, unit.group(0).strip())
-                    self._settings[name][1] = val
-                    self._respond("  %s set to %s" % (name, val))
+                    self._respond(self._apply_write(name, val))
                 else:
                     self._respond("  unknown setting: %s" % name)
             else:

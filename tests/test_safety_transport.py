@@ -5,6 +5,7 @@ Run with:  python -m pytest   (or)   openmbb --selftest
 
 import glob
 import os
+import re
 import tempfile
 import time
 
@@ -28,6 +29,38 @@ def make_transport_with_port():
     tmp = tempfile.mkdtemp(prefix="zctest_")
     port = SimPort()
     return Transport(port, SessionLogger(base_dir=tmp, tag="test")), port
+
+
+class ClampingPort(SimPort):
+    """A console that answers as though it took the write, and did not.
+
+    This is the motorcycle on 2026-08-29: `maxcustspmph` written 102, the
+    console answering for 102, the bike going on holding 89. Nothing at port
+    level could reproduce it - SimPort stores whatever it is given, so every
+    write in this suite succeeded and the read-back branch that matters was
+    reachable only by doctoring exec_command from the GUI tests.
+
+    `ceiling` is the cap the bike applies without saying so. `refuse` names
+    settings it answers FAILED for outright, the way rev 41 answers for the
+    derived `_allow` pair.
+    """
+
+    def __init__(self, ceiling=None, refuse=()):
+        SimPort.__init__(self)
+        self.ceiling = ceiling
+        self.refuse = set(refuse)
+
+    def _apply_write(self, name, val):
+        if name in self.refuse:
+            return "FAILED  %s could not be set to %s" % (name, val)
+        if self.ceiling is not None:
+            m = re.search(r"-?\d+(?:\.\d+)?", str(val))
+            if m and float(m.group(0)) > self.ceiling:
+                # stored capped, ANSWERED as though it took what was asked
+                kept = str(val).replace(m.group(0), str(self.ceiling), 1)
+                self._settings[name][1] = kept
+                return "  %s set to %s" % (name, val)
+        return SimPort._apply_write(self, name, val)
 
 
 class ScriptedPort:
@@ -657,6 +690,124 @@ def test_journal_pending_status():
     assert "PENDING" in text and "VERIFIED" in text
 
 
+def test_a_headless_write_is_journalled_without_a_gui(tmp_path):
+    """Item 9. journal_write was called only from gui.py, so a write driven
+    through transport.write_setting by a script or a REPL reached the wire with
+    NO record at all - the same shape the contactor gate had before 7479947
+    moved it down. Every other guard on this path already lived here.
+    """
+    tr = make_transport()
+    tr.exec_command("login tpsreport")
+    tr.exec_command("set")                       # populate the live dump
+
+    tr.write_setting("spfront", "22")
+
+    text = open(tr.logger.journal_path, encoding="utf-8").read()
+    assert "PENDING" in text, "the intent was not recorded before the wire"
+    assert "spfront" in text
+    # the outcome too, not just the request - and exactly once each
+    assert text.count("PENDING") == 1
+    assert sum(text.count(w) for w in ("VERIFIED", "UNVERIFIED")) == 1
+
+
+def test_the_transport_hands_back_the_read_back_it_already_did(tmp_path):
+    """A caller that needs the verify dump must not read `set` a second time -
+    on a real motorcycle that is double the console traffic of every write."""
+    tr = make_transport()
+    tr.exec_command("login tpsreport")
+    tr.exec_command("set")
+
+    tr.write_setting("spfront", "22")
+
+    w = tr.last_write
+    assert w["name"] == "spfront" and w["new"] == "22"
+    assert w["verify"], "the verify dump was not handed back"
+    assert "got" in w and "verified" in w and "said_kind" in w
+
+
+def test_every_journal_record_type_masks_a_registered_secret(tmp_path):
+    """Item 21. Three record types, three answers: journal_consent masked its
+    two fields by hand, journal_observed masked the whole line, and
+    journal_write masked nothing at all. This file is copied verbatim into
+    share-safe bundles, where a password is not a PII shape and so is not
+    caught on the way out either.
+    """
+    tr = make_transport()
+    secret = "hunter2tpsreport"
+    tr.logger.add_redaction(secret)
+
+    tr.logger.journal_write("spfront", secret, "22", ok=None)
+    tr.logger.journal_write("spfront", secret, "22", ok=True, got=secret,
+                            said="FAILED %s" % secret)
+    tr.logger.journal_observed("sprear", secret, "91", "moved by the x write")
+    tr.logger.journal_consent("eventlogdump %s" % secret, "yes, %s" % secret)
+
+    text = open(tr.logger.journal_path, encoding="utf-8").read()
+    assert secret not in text, "a registered secret reached the audit file"
+    assert "****" in text
+    # ...and the records are still there, not swallowed
+    for marker in ("PENDING", "OBSERVED (not requested)", "HEAVY READ CONSENTED"):
+        assert marker in text, marker
+
+
+def _clamping_transport(ceiling=None, refuse=()):
+    tmp = tempfile.mkdtemp(prefix="zcclamp_")
+    tr = Transport(ClampingPort(ceiling=ceiling, refuse=refuse),
+                   SessionLogger(base_dir=tmp, tag="test"))
+    tr.exec_command("login tpsreport")
+    tr.exec_command("set")
+    return tr
+
+
+def test_a_silent_clamp_is_caught_at_the_transport(tmp_path):
+    """Item 7. The console says it took 102; the bike holds 89. The transport
+    reads back and must not believe the console over the dump."""
+    tr = _clamping_transport(ceiling=89)
+
+    tr.write_setting("maxcustspmph", "102")
+
+    w = tr.last_write
+    assert w["verified"] is False, "a silent clamp read as a successful write"
+    assert "89" in w["got"], w["got"]
+    # the console said nothing that looks like a refusal, which is the trap
+    assert w["said_kind"] != "failed"
+
+
+def test_the_journal_records_the_clamp_rather_than_the_request(tmp_path):
+    """The audit file said `85 -> 102 | UNVERIFIED` while the motorcycle sat at
+    89, and nothing in it said so. It carries the read-back now."""
+    tr = _clamping_transport(ceiling=89)
+
+    tr.write_setting("maxcustspmph", "102")
+
+    text = open(tr.logger.journal_path, encoding="utf-8").read()
+    assert "PENDING" in text          # intent, before the wire
+    assert "UNVERIFIED" in text       # ...and the outcome
+    assert "bike reports" in text and "89" in text, text
+
+
+def test_a_console_refusal_reaches_the_journal_in_its_own_words(tmp_path):
+    """rev 41 answers FAILED for the derived `_allow` pair. The tool said "the
+    console reported SUCCESS" over exactly that wire."""
+    tr = _clamping_transport(refuse=("maxcustspmph",))
+
+    tr.write_setting("maxcustspmph", "102")
+
+    w = tr.last_write
+    assert w["said_kind"] == "failed"
+    text = open(tr.logger.journal_path, encoding="utf-8").read()
+    assert "console said" in text and "could not be set" in text
+
+
+def test_an_honest_console_still_verifies(tmp_path):
+    # the fake has to be able to say yes, or the tests above prove nothing
+    tr = _clamping_transport(ceiling=200)
+
+    tr.write_setting("maxcustspmph", "102")
+
+    assert tr.last_write["verified"] is True
+
+
 # --- D6: mid-session reboot + asleep detection ------------------------------
 
 def test_reboot_banner_raises():
@@ -793,6 +944,8 @@ def test_no_shipped_text_still_claims_the_coast_regen_fishtail_hazard():
     """
     import os
 
+    from openmbb import redact
+
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     assets = os.path.join(root, "src", "openmbb", "assets")
     # EVERY asset, not a hand-listed few. The first version of this test named
@@ -804,12 +957,21 @@ def test_no_shipped_text_still_claims_the_coast_regen_fishtail_hazard():
                if os.path.isfile(os.path.join(assets, n))]
     shipped += [os.path.join(root, "src", "openmbb", "gui.py"),
                 os.path.join(root, "README.md")]
+    #: Extensions whose contents no reader reads. Anything ELSE that will not
+    #: decode is a file this scan could not check, and skipping it silently is
+    #: the same false pass the scan exists to catch - a new asset saved as
+    #: UTF-16 would carry the claim straight through.
+    binary_ext = (".png", ".ico", ".icns", ".gif", ".jpg", ".jpeg", ".woff",
+                  ".woff2", ".ttf")
     for path in shipped:
-        try:
-            with open(path, encoding="utf-8") as f:
-                text = f.read().lower()
-        except (UnicodeDecodeError, OSError):
-            continue        # an icon or a binary: nothing a reader reads
+        raw = open(path, "rb").read()
+        text, _enc = redact.decode_text(raw)
+        if text is None:
+            assert path.lower().endswith(binary_ext), (
+                "%s could not be read as text and is not a known binary - the "
+                "scan skipped it rather than checking it" % path)
+            continue
+        text = text.lower()
         assert "fishtail" not in text, path
         assert "0 is refused" not in text, path
         assert "0% is refused" not in text, path

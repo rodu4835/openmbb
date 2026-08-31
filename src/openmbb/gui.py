@@ -3032,10 +3032,25 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     if on else "OFF — using the selected COM port"))
             self._refresh_dash_header()
 
+        def _connected_to_simulator(self):
+            """What we are ACTUALLY talking to, not what the checkbox says.
+
+            The checkbox is a setting for the NEXT connect. Unticking it while
+            connected to the simulator dropped the tag mid-session, over a
+            session whose data was still synthetic - and the tag exists because
+            a full rehearsal ran against the simulator at a real motorcycle
+            before anyone noticed. When there is a live port, it decides; the
+            checkbox only speaks for a session that has not started.
+            """
+            port = getattr(getattr(self, "transport", None), "port", None)
+            if port is not None and self.connected:
+                return isinstance(port, SimPort)
+            return bool(self.sim_var.get())
+
         def _refresh_sim_badge(self):
             """Reflect the simulator state in the single status-bar indicator
             (the redundant landing badge was removed — one place is enough)."""
-            on = bool(self.sim_var.get())
+            on = self._connected_to_simulator()
             lbl = getattr(self, "lbl_sim", None)
             if lbl is not None:
                 lbl.config(text="◆ SIMULATOR MODE" if on else "")
@@ -4916,18 +4931,18 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     # between send and verify still records that the bike may have
                     # changed — the on-disk journal is the audit trail the design leans
                     # on (the UI's revert is now the inline '↺ Reset' on the row).
-                    self.logger.journal_write(name, old_val, new_val, ok=None)  # PENDING
-                    # The reply is KEPT. It used to be discarded, and the dialog
-                    # then asserted "the console reported SUCCESS" over a wire
-                    # that had said FAILED.
-                    reply = self.transport.write_setting(name, new_val,
-                                                         idle_timeout=2.5)
-                    said_kind, said = parsers.console_write_result(reply)
-                    verify = self.transport.exec_command("set", idle_timeout=4.0,
-                                                         max_time=120.0)
+                    # The transport journals the intent before the wire and
+                    # the outcome after, and performs the read-back - so a
+                    # scripted write is recorded exactly as this one is, and one
+                    # write cannot produce two records. The reply is KEPT: it
+                    # used to be discarded, and the dialog then asserted "the
+                    # console reported SUCCESS" over a wire that had said FAILED.
+                    self.transport.write_setting(name, new_val, idle_timeout=2.5)
+                    w = self.transport.last_write or {}
+                    said_kind, said = w.get("said_kind"), w.get("said")
+                    verify = w.get("verify", "")
+                    got, verified = w.get("got", ""), w.get("verified", False)
                     live2, _ = parse_settings_dump(verify)
-                    got = live2.get(name, {}).get("value", "")
-                    verified = first_number(got) == first_number(new_val)
                     # Both dumps were already read, so the collateral diff is
                     # free: writing spfront moved four regen settings nobody
                     # touched, and the revert did not put them back.
@@ -4936,10 +4951,6 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     live_before, _ = parse_settings_dump(dump)
                     moved = parsers.settings_diff(live_before, live2,
                                                  ignore=(name,))
-                    self.logger.journal_write(name, old_val, new_val, verified,
-                                              got=got,
-                                              said=said if said_kind == "failed"
-                                              else None)
                     for mname, mold, mnew in moved:
                         # Not journal_write: this is not a write we performed,
                         # and calling it one forced a PENDING that reads as an

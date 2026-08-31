@@ -755,6 +755,19 @@ def _driver_clause(checks, level):
     return " %s %s" % (EM, ", ".join(named))
 
 
+#: The three checks EVERY capture is scored on, answered or not. They are added
+#: unconditionally (each with an `unknown` fallback), which is what makes a
+#: fraction over them mean the same thing on every bike.
+#:
+#: The isolation and warning rows are deliberately NOT here. They exist only
+#: when they fire, so counting them moved the denominator with the motorcycle -
+#: the same evidence read "2 of 3" on a healthy pack and "2 of 4" on a faulted
+#: one. They are NAMED instead, by _driver_clause, which is the surface that
+#: carries them.
+PACK_CHECKS = ("Weakest cell vs pack", "Lowest cell under load",
+               "Cell spread at rest")
+
+
 def _headline(level, answered, total, checks=None):
     """The one line a buyer reads.
 
@@ -777,7 +790,8 @@ def _headline(level, answered, total, checks=None):
     # driveway.
     missing = ""
     if answered < total:
-        missing = (" (%d of %d checks unanswered)" % (total - answered, total))
+        missing = (" (%d of %d pack checks unanswered)"
+                   % (total - answered, total))
     if level == "concern":
         return ("Walk away, or get it checked before you buy%s%s"
                 % (_driver_clause(checks, "concern"), missing))
@@ -900,12 +914,19 @@ def verdict(assessment, metrics=None):
     for u in assessment.get("undetermined") or []:
         caveats.append(u)
 
-    answered = [c for c in checks if c["level"] != "unknown"]
+    # Scored over the fixed pack checks only - see PACK_CHECKS. A conditional
+    # row that fired is reported by being NAMED in the headline, never by
+    # quietly enlarging the denominator underneath it.
+    scored = [c for c in checks if c["name"] in PACK_CHECKS]
+    answered = [c for c in scored if c["level"] != "unknown"]
+    # The LEVEL still comes from every check, scored or not: a fired isolation
+    # row must be able to drive the verdict even though it does not appear in
+    # the fraction. Only the counting narrowed.
     level = "unknown"
     for c in checks:
         if _RANK[c["level"]] > _RANK[level]:
             level = c["level"]
-    if not answered:
+    if not answered and not [c for c in checks if c["level"] != "unknown"]:
         level = "unknown"
     return {
         "level": level,
@@ -914,12 +935,12 @@ def verdict(assessment, metrics=None):
         # would be lying about the pack, which is the one thing this function
         # is for.
         "beyond_pack": beyond_pack_notes(metrics),
-        "headline": _headline(level, len(answered), len(checks), checks),
+        "headline": _headline(level, len(answered), len(scored), checks),
         "checks": checks,
         "answered": len(answered),
-        "total_checks": len(checks),
+        "total_checks": len(scored),
         "confidence": ("none" if not answered else
-                       "partial" if len(answered) < len(checks) else "full"),
+                       "partial" if len(answered) < len(scored) else "full"),
         "caveats": caveats,
     }
 

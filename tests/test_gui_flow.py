@@ -1999,6 +1999,28 @@ def test_rides_parses_session_eventlogdump(app):
     assert "event log" in app.lbl_ride_totals.cget("text").lower()  # sourced from it
 
 
+def _console_accepts_but_changes_nothing(app, monkeypatch, name, then=None,
+                                         reply="no-op"):
+    """Answer the write with `reply` and change nothing, at the WIRE.
+
+    Not by stubbing `write_setting`: the transport journals the intent and the
+    outcome, parses the console's answer and performs the read-back (item 9), so
+    replacing it would skip the very machinery these tests are about. The
+    default reply says neither SUCCESS nor FAILED. `then` doctors the answer to
+    any OTHER command, so a test can also bend the verify dump.
+    """
+    real = app.transport.exec_command
+    prefix = "set %s " % name
+
+    def doctored(cmd, *a, **k):
+        if str(cmd).startswith(prefix):
+            return reply
+        out = real(cmd, *a, **k)
+        return then(cmd, out) if then else out
+
+    monkeypatch.setattr(app.transport, "exec_command", doctored)
+
+
 def test_write_unchanged_readback_reports_clamp(app, monkeypatch):
     # B1: a write that reads back UNCHANGED from the pre-write value is a SILENT
     # CLAMP (the console can reply SUCCESS yet keep the old value — verified live
@@ -2015,7 +2037,7 @@ def test_write_unchanged_readback_reports_clamp(app, monkeypatch):
     assert _pump(app, lambda: app.logged_in)
     assert _pump(app, lambda: len(app.settings) >= 30)
     # make the write a no-op so the read-back stays at the OLD value -> clamp case
-    monkeypatch.setattr(app.transport, "write_setting", lambda *a, **k: "no-op")
+    _console_accepts_but_changes_nothing(app, monkeypatch, "spfront")
     app.unlock_var.set(True)
     app._write_value("spfront", "22")
     assert _pump(app, lambda: warned)                        # the clamp warning fired
@@ -2046,15 +2068,13 @@ def test_write_changed_but_wrong_readback_points_to_reset(app, monkeypatch):
     app._login()
     assert _pump(app, lambda: app.logged_in)
     assert _pump(app, lambda: len(app.settings) >= 30)
-    monkeypatch.setattr(app.transport, "write_setting", lambda *a, **k: "no-op")
     # The write flow reads `set` twice: (1) live old_val, then (2) the verify
-    # read. Doctor ONLY the 2nd so old_val stays 20 while the read-back is 99 —
-    # a genuine CHANGED-but-wrong result (99 != 22 asked, 99 != 20 old).
-    real = app.transport.exec_command
+    # read, which now happens inside write_setting. Doctor ONLY the 2nd so
+    # old_val stays 20 while the read-back is 99 — a genuine CHANGED-but-wrong
+    # result (99 != 22 asked, 99 != 20 old).
     calls = {"set": 0}
 
-    def doctored(cmd, *a, **k):
-        out = real(cmd, *a, **k)
+    def then(cmd, out):
         if cmd == "set":
             calls["set"] += 1
             if calls["set"] >= 2:
@@ -2063,7 +2083,7 @@ def test_write_changed_but_wrong_readback_points_to_reset(app, monkeypatch):
                     else ln for ln in out.splitlines())
         return out
 
-    monkeypatch.setattr(app.transport, "exec_command", doctored)
+    _console_accepts_but_changes_nothing(app, monkeypatch, "spfront", then)
     app.unlock_var.set(True)
     app._write_value("spfront", "22")
     assert _pump(app, lambda: warned)
@@ -3391,6 +3411,23 @@ def test_the_success_dialog_says_what_remains_not_just_what_was_removed(
     win.destroy()
 
 
+def test_the_simulator_tag_follows_the_connection_not_the_checkbox(app):
+    """Item 18c. The checkbox is a setting for the NEXT connect. Unticking it
+    mid-session dropped the tag over a session whose data was still synthetic -
+    and the tag exists because a full rehearsal ran against the simulator at a
+    real motorcycle before anyone noticed.
+    """
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    assert "SIMULATOR" in app.title()
+
+    app.sim_var.set(False)          # "next connect uses a real port"
+    app._refresh_sim_badge()
+
+    assert "SIMULATOR" in app.title(), (
+        "the tag dropped while still connected to the simulator")
+
+
 # ----------------------------------- item 11: a refused capture stays visible
 
 def _future_capture(root, name="2026-08-29_143022_1_COM3"):
@@ -3794,9 +3831,9 @@ def test_a_refused_write_quotes_the_console_instead_of_contradicting_it(
     assert _pump(app, lambda: app.logged_in)
     assert _pump(app, lambda: len(app.settings) >= 30)
 
-    monkeypatch.setattr(
-        app.transport, "write_setting",
-        lambda *a, **k: "FAILED  spfront could not be set to 22")
+    _console_accepts_but_changes_nothing(
+        app, monkeypatch, "spfront",
+        reply="FAILED  spfront could not be set to 22")
     app.unlock_var.set(True)
     app._write_value("spfront", "22")
     assert _pump(app, lambda: warned)
@@ -3916,12 +3953,9 @@ def test_an_empty_read_back_is_reported_as_unknown_not_as_a_bike_action(
     assert _pump(app, lambda: app.logged_in)
     assert _pump(app, lambda: len(app.settings) >= 30)
 
-    monkeypatch.setattr(app.transport, "write_setting", lambda *a, **k: "no-op")
-    real = app.transport.exec_command
     calls = {"set": 0}
 
-    def doctored(cmd, *a, **k):
-        out = real(cmd, *a, **k)
+    def then(cmd, out):
         if cmd == "set":
             calls["set"] += 1
             if calls["set"] >= 2:
@@ -3930,7 +3964,7 @@ def test_an_empty_read_back_is_reported_as_unknown_not_as_a_bike_action(
                                    if not ln.strip().startswith("spfront"))
         return out
 
-    monkeypatch.setattr(app.transport, "exec_command", doctored)
+    _console_accepts_but_changes_nothing(app, monkeypatch, "spfront", then)
     app.unlock_var.set(True)
     app._write_value("spfront", "22")
     assert _pump(app, lambda: warned)
@@ -3961,12 +3995,9 @@ def test_a_clamped_write_that_moved_other_settings_claims_no_harm_done(
     assert _pump(app, lambda: len(app.settings) >= 30)
 
     # the write is a no-op for spfront, but the verify dump shows sprear moved
-    monkeypatch.setattr(app.transport, "write_setting", lambda *a, **k: "no-op")
-    real = app.transport.exec_command
     calls = {"set": 0}
 
-    def doctored(cmd, *a, **k):
-        out = real(cmd, *a, **k)
+    def then(cmd, out):
         if cmd == "set":
             calls["set"] += 1
             if calls["set"] >= 2:
@@ -3978,7 +4009,7 @@ def test_a_clamped_write_that_moved_other_settings_claims_no_harm_done(
                 out = chr(10).join(lines)
         return out
 
-    monkeypatch.setattr(app.transport, "exec_command", doctored)
+    _console_accepts_but_changes_nothing(app, monkeypatch, "spfront", then)
     app.unlock_var.set(True)
     app._write_value("spfront", "22")
     assert _pump(app, lambda: len(warned) >= 2)
