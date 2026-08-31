@@ -11,10 +11,14 @@ current: what to do next, what needs a motorcycle, and what was deliberately not
 Opus sessions. Queue items below are scaffolded for direct pickup — files, the change,
 the tests, and the mutation each test must catch.
 
-**State:** v0.26.0 released 2026-08-30 (tagged, CI green both OSes, three
-binaries published), **plus the unpushed stack** clearing the whole engineering
-queue and the review's fix pass on top of it. Tree clean, **698 tests passing with 0 skipped**, **94/94 mutation
-entries catching**. Every bike-day
+**State:** **v0.27.0 released 2026-08-31** — tagged, CI green both OSes,
+three binaries and release notes published, nothing unpushed. Tree clean,
+**709 tests passing with 0 skipped**, **102/102 mutation entries catching**.
+
+v0.27.0 carries the whole engineering queue AND the adversarial review of it.
+The release argument was the critical: a real motorcycle could keep the
+`[SIMULATOR — NOT YOUR BIKE]` title after a rehearsal, so real writes read as
+rehearsal, and that shipped in the v0.26.0 binaries. Every bike-day
 finding is closed (items 15–20b) and each was reviewed adversarially before
 landing — three of those reviews found real defects, twice in a fix that had
 just been made for the same class of problem.
@@ -48,10 +52,17 @@ fail (item 6d's local hex guard, superseded by item 13 and coarser than what
 replaced it) and six anchors this stack had moved out from under. Neither was
 visible to the per-item runs.
 
-**Next:** the review ran (2026-08-30, Fable) and the pattern held a fourth
-time — 1 critical, 5 major, ~13 minor, four of the six heavyweight findings
-inside this stack's own fixes. **Item 25 is the scaffolded fix pass; nothing is
-pushed until it lands.** Then **At a bike**.
+**Next: At a bike is now the only thing left**, and it has been the binding
+constraint since v0.23. The code side is done — every queued item shipped,
+reviewed, fixed and released. What remains needs a second motorcycle: 6b rides
+along free with any pull, `derate_profile` and `cell_sag` need one to grade
+rather than describe, and the module-connect rename, the BattTemp dialect and
+displayed 0% all wait on the same thing.
+
+**23b** (opening intake for shared captures) is the one queued item that
+attacks that ceiling without a second bike in the garage, and it is held on a
+decision rather than on work — see item 23. The 2026-08-31 mail-in ask
+(section C) is the cheaper first try.
 
 **The organising constraint, sharpened:** only one motorcycle has ever been measured, and
 the code has now largely caught up with what one bike's data can teach. The next unit of
@@ -1371,11 +1382,26 @@ six steps. What the data buys:
   is a real measurement of the drive reduction.
 - Afterwards: **Export share-safe copy** before the capture leaves the machine.
 
-### C. The issue-#1 reporter — a mail-in, zero cost
+### C. The issue-#1 reporter — a mail-in, zero cost *(asked 2026-08-31)*
 
 A redacted capture from the Czech bike serves calibration, and after 1 Nov settles DST
-independently. Blocked on exactly one thing: **the reply draft exists and has never been
-posted.** Posting it is Ron's, not Claude's.
+independently.
+
+**The "reply draft exists and has never been posted" note was wrong, and stood for
+weeks.** No draft existed anywhere — not in the repo, HANDOFF.md or PROMPTS.md.
+What was actually true: the 2026-08-21 comment answered the reporter in full, they
+replied that they would send a reading after 1 November, and nothing was owed until
+then. The thing genuinely unasked was the CALIBRATION request, which is a different
+message and had never been drafted at all. A blocker recorded as "one small thing
+remains" that is really "this was never started" is the kind of note that survives a
+long time precisely because it sounds finished.
+
+**Asked 2026-08-31** ([comment](https://github.com/rodu4835/openmbb/issues/1#issuecomment-5480123720)):
+the one-bike calibration limit stated plainly, the share-safe export described with
+what it does NOT strip given equal billing, and an explicit note that attaching to a
+GitHub issue publishes permanently under their name. No is offered as a fine answer and
+decoupled from the clock question. **Now genuinely blocked on someone else** — the
+first time this item has been.
 
 ---
 
