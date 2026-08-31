@@ -1453,7 +1453,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Label(
                 outer, wraplength=560,
                 text="Scanned for the VIN and the MBB, module and Sevcon serial "
-                     "numbers \u2014 %d replaced%s across %d files, and every file "
+                     "numbers — %d replaced%s across %d files, and every file "
                      "was re-scanned afterwards. It looks for those shapes and "
                      "nothing else: not names, not places, not people."
                      % (rep["identifiers_replaced"],
@@ -1464,7 +1464,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             ttk.Label(
                 outer, wraplength=560,
                 text="Your own note, the settings dump, your machine's clock, and "
-                     "the full event log \u2014 when you rode, how far, when you "
+                     "the full event log — when you rode, how far, when you "
                      "charged, how long it sat plugged in. That is not leftovers; "
                      "that is the data. Read it before you send it anywhere."
             ).pack(anchor="w", pady=(2, 14))
@@ -1544,7 +1544,7 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 text="Struck-through lines are what the redactor took out; the "
                      "line under each one is what replaces it. A file with "
                      "nothing struck through was scanned and matched no "
-                     "identifier \u2014 which is not the same as having been "
+                     "identifier — which is not the same as having been "
                      "checked for everything."
             ).pack(anchor="w", pady=(2, 10))
             body = ttk.Frame(outer)
@@ -1595,10 +1595,10 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                 if src_name == "session_note.txt":
                     txt.insert("end", "This is your own note, and it goes exactly "
                                       "as you wrote it. The redactor does not look "
-                                      "for names, places or people \u2014 only for "
+                                      "for names, places or people — only for "
                                       "the VIN and serial numbers.\n\n", "warn")
                 if a is None or b is None:
-                    txt.insert("end", "(not text this export can read \u2014 it was "
+                    txt.insert("end", "(not text this export can read — it was "
                                       "left out of the bundle)\n", "warn")
                     txt.config(state="disabled")
                     return
@@ -1617,9 +1617,9 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                             txt.insert("end", y + "\n", "now")
                 if not changed:
                     txt.insert("1.0", "nothing in this file matched an identifier "
-                                      "\u2014 it is going exactly as it is\n\n",
+                                      "— it is going exactly as it is\n\n",
                                "note")
-                head.config(text="%s  \u2014  %d line(s) changed"
+                head.config(text="%s  —  %d line(s) changed"
                                  % (out_name, changed))
                 txt.config(state="disabled")
                 txt.yview_moveto(0)
