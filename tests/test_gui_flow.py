@@ -3537,21 +3537,26 @@ def test_the_tag_repaints_when_the_connection_changes(app, monkeypatch):
     """
     from openmbb.transport import Transport
 
-    # Stale the indicators first. __init__ already paints the tag, so asserting
-    # it is present after a connect proves nothing about the connect - which is
-    # exactly how the missing call survived review.
-    app.title("OpenMBB - stale from a previous session")
-    app.lbl_sim.config(text="")
+    # Connect to a SIMULATOR the checkbox says is not one. That is the only
+    # sequence where the connect repaint is the sole thing that can paint the
+    # tag: _connect calls _reset_session_state first, which also repaints, so
+    # with the box ON the tag comes back before done() is ever reached - and an
+    # assertion satisfied that way proves nothing about the connect, which is
+    # how the first version of this test stayed green under its own mutation.
+    from openmbb.sim import SimPort
+
+    app.sim_var.set(False)
+    app.port_var.set("COM_TEST")
+    monkeypatch.setattr(type(app), "_make_port",
+                        lambda self, name, is_sim: SimPort())
 
     app._connect()
     assert _pump(app, lambda: app.connected)
-    assert "SIMULATOR" in app.title(), "connect did not repaint the tag"
+    assert "SIMULATOR" in app.title(), (
+        "connected to the simulator and the title does not say so - the tag "
+        "followed the checkbox instead of the connection")
     assert "SIMULATOR" in str(app.lbl_sim.cget("text")), (
-        "connect did not repaint the status-bar indicator")
-
-    app.sim_var.set(False)          # "the NEXT connect uses a real port"
-    app._refresh_sim_badge()
-    assert "SIMULATOR" in app.title(), "the tag dropped while still on the sim"
+        "the status-bar indicator followed the checkbox too")
 
     # ...disconnect, then connect something that is NOT a SimPort
     app._reset_session_state()

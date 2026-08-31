@@ -736,7 +736,7 @@ def not_from_a_bike(folder):''',
 
     ("chart: stop naming the captures the trend left out",
      "src/openmbb/gui.py",
-     '''                note += " \u00b7 %d not shown (newer OpenMBB)" % len(refused)''',
+     '''                note += " · %d not shown (unreadable stamp)" % len(refused)''',
      '''                pass''',
      "tests/test_gui_flow.py::"
      "test_the_chart_caption_names_the_captures_it_left_out"),
