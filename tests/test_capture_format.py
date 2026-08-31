@@ -35,6 +35,80 @@ def _capture(tmp_path, name, meta=None):
     return str(d)
 
 
+# ------------------------------------------------------------- provenance
+#
+# `source:` is a new KEY, not a new format: an old reader ignores it and is not
+# made wrong by it, which is exactly the bar the bump comment sets. What these
+# pin is that adding it did not change what any existing folder means.
+
+def test_the_meta_file_outranks_the_folder_name(tmp_path):
+    # the name is the field a privacy fix has to normalise away, and the one a
+    # person can rename; the meta file is what OpenMBB itself wrote down
+    d = _capture(tmp_path, "2026-08-29_143022_1_sim",
+                 "capture_format: 1\nsource: COM7\n")
+    assert sessions.session_source(str(d)) == "COM7"
+
+
+def test_a_capture_written_before_source_existed_still_says_it_is_a_sim(tmp_path):
+    d = _capture(tmp_path, "2026-08-29_143022_1_sim", "capture_format: 1\n")
+    assert sessions.session_source(str(d)) == "simulator"
+    assert sessions.not_from_a_bike(str(d))
+
+
+def test_a_collision_suffix_does_not_un_mark_a_simulator(tmp_path):
+    # a build before the fix wrote `..._sim_1` on a same-microsecond collision,
+    # which endswith("_sim") answers False to - the folder silently rejoined
+    # the trend line as real history
+    d = _capture(tmp_path, "2026-08-29_143022_1_sim_1", "capture_format: 1\n")
+    assert sessions.not_from_a_bike(str(d))
+
+
+def test_silence_is_not_a_claim_about_where_it_came_from(tmp_path):
+    # ...but it is still real history, because that is what format 1 means and
+    # every capture ever taken is untagged
+    d = _capture(tmp_path, "2026-08-29_143022_1_COM3", "capture_format: 1\n")
+    assert sessions.session_source(str(d)) is None
+    assert not sessions.not_from_a_bike(str(d))
+
+
+def test_a_same_microsecond_collision_keeps_the_tag_at_the_end(tmp_path):
+    import datetime as _real
+    import types
+    from openmbb import transport as _tr
+
+    frozen = _real.datetime(2026, 8, 29, 14, 30, 22, 123456)
+
+    class _Fixed(_real.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen
+
+    saved = _tr._dt
+    _tr._dt = types.SimpleNamespace(datetime=_Fixed)
+    try:
+        a = _tr.SessionLogger(base_dir=str(tmp_path), tag="sim")
+        b = _tr.SessionLogger(base_dir=str(tmp_path), tag="sim")
+    finally:
+        _tr._dt = saved
+    assert a.dir != b.dir, "the collision path did not run"
+    for d in (a.dir, b.dir):
+        assert sessions.not_from_a_bike(d), d
+
+
+def test_the_identity_a_report_prints_is_built_from_what_openmbb_wrote(tmp_path):
+    d = _capture(tmp_path, "Daves-FXS-preinspection",
+                 "capture_format: 1\ntime: 2026-08-29T14:30:22\nsource: COM3\n")
+    label, banner = sessions.capture_identity(str(d))
+    assert label == "2026-08-29 14:30, from COM3"
+    assert banner is None
+    assert "Daves" not in label
+
+
+def test_a_folder_with_nothing_to_go_on_says_so_rather_than_guessing(tmp_path):
+    d = _capture(tmp_path, "my-bike-notes")
+    assert sessions.capture_identity(str(d)) == ("(not recorded)", None)
+
+
 def test_a_folder_that_makes_no_claim_is_format_one(tmp_path):
     """Silence has exactly one honest reading. Every capture written before the
     stamp existed is a format-1 capture, and refusing them would refuse every

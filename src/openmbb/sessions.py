@@ -31,6 +31,106 @@ import re
 CAPTURE_FORMAT = 1
 
 _CAPTURE_FORMAT_RE = re.compile(r"^[ \t]*capture_format:(.*)$", re.M)
+_SOURCE_RE = re.compile(r"^[ \t]*source:(.*)$", re.M)
+_META_TIME_RE = re.compile(r"^[ \t]*time:\s*(\S+)", re.M)
+
+#: `<YYYY-MM-DD>_<HHMMSS>_<micro>` - the machine-written prefix every session
+#: folder starts with. Everything after it is a tag, and the whole name is
+#: something a person can rename.
+_NAME_STAMP_RE = re.compile(r"^(\d{4}-\d\d-\d\d)_(\d\d)(\d\d)(\d\d)_\d+")
+
+#: The name tags that mark data that is NOT from a motorcycle. The optional
+#: trailing counter is tolerated because a build before the collision fix could
+#: write `..._sim_1` (see SessionLogger).
+_NOT_A_BIKE_RE = re.compile(r"_(sim|listen|selftest)(?:_\d+)?$")
+
+#: What each of those sources is, in words a reader can act on: the banner
+#: shouted at the top of a report, and the phrase that reads naturally mid-line.
+_SOURCE_WORDS = {
+    "simulator": ("SIMULATOR DATA", "the simulator"),
+    "sim": ("SIMULATOR DATA", "the simulator"),
+    "listen": ("A CABLE TEST", "a cable test"),
+    "selftest": ("A SELF-TEST", "a self-test"),
+}
+
+
+def _meta_text(folder):
+    try:
+        with open(os.path.join(folder, "session_meta.txt"),
+                  encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def session_source(folder):
+    """What this capture came off: "simulator", "listen", "selftest", a port
+    name, or None when nothing on disk says.
+
+    `source:` in session_meta.txt is authoritative. A capture written before
+    that field existed falls back to the `_sim` / `_listen` NAME tags, which is
+    the only evidence it carries.
+
+    None means "nothing recorded", not "a bike". Under format 1 an untagged
+    folder IS real history - that is what the trend line has always assumed -
+    so a caller deciding whether to TRUST data should keep reading silence as
+    real. A caller about to CLAIM something about the source must not.
+    """
+    m = _SOURCE_RE.search(_meta_text(folder))
+    if m and m.group(1).strip():
+        return m.group(1).strip()
+    m = _NOT_A_BIKE_RE.search(os.path.basename(os.path.normpath(folder)))
+    if m:
+        return "simulator" if m.group(1) == "sim" else m.group(1)
+    return None
+
+
+def not_from_a_bike(folder):
+    """True only when the capture SAYS it came off something other than a
+    motorcycle. Silence is False: under format 1 an untagged folder is real
+    history, and every capture taken before `source:` existed is untagged."""
+    return (session_source(folder) or "").lower() in _SOURCE_WORDS
+
+
+def capture_identity(folder):
+    """A capture label fit to print on a page handed to a stranger, plus the
+    words for a banner when the page is not describing a motorcycle at all.
+
+    Never the folder's own name. `condition_report` printed `session.name` -
+    whatever the folder happens to be called - into the one artifact this
+    project builds to be handed over, and the PII gate guarding that page scans
+    for four MOTORCYCLE identifier shapes, so `Daves-FXS-preinspection` went
+    through it clean. Filtering the name to a safe CHARSET does not fix it
+    either: a person's name is already in the safe charset.
+
+    So the label is rebuilt from what OpenMBB itself wrote down - when the
+    capture was taken and what it came off - and the folder name contributes
+    only its machine-written timestamp prefix, and only when the meta file is
+    missing.
+
+    Returns (label, banner_words_or_None).
+    """
+    src = session_source(folder)
+    words = _SOURCE_WORDS.get((src or "").lower())
+    banner = words[0] if words else None
+    when = None
+    m = _META_TIME_RE.search(_meta_text(folder))
+    if m:
+        when = m.group(1).strip().replace("T", " ")[:16]
+    if not when:
+        m = _NAME_STAMP_RE.match(os.path.basename(os.path.normpath(folder)))
+        if m:
+            when = "%s %s:%s" % (m.group(1), m.group(2), m.group(3))
+    where = words[1] if words else src
+    if when and where:
+        label = "%s, from %s" % (when, where)
+    elif when:
+        label = when
+    elif where:
+        label = "from %s" % where
+    else:
+        label = "(not recorded)"
+    return label, banner
 
 
 class CaptureFormatError(Exception):

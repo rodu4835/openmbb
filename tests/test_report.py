@@ -5,6 +5,7 @@ these tests build sessions on disk and never construct a Tk root.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -223,9 +224,42 @@ def test_the_condition_report_leads_with_the_headline_not_the_level(tmp_path):
     head = txt.splitlines()[:6]
     assert "OpenMBB condition report" in head[0]
     assert "2026-08-21 09:30" in txt and "v9.9.9" in txt
-    assert s.name in txt
+    # the capture is identified by WHEN it was taken, not by what its folder is
+    # called - see test_the_report_never_prints_the_folders_own_name
+    assert s.name not in txt
     v = report.analyze_session(s)["verdict"]
     assert v["headline"] in txt
+
+
+def test_the_report_never_prints_the_folders_own_name(tmp_path):
+    # report.py printed `session.name` into the one page this project builds to
+    # be handed to a stranger, and the PII gate guarding that page scans for
+    # four MOTORCYCLE identifier shapes - so a folder named after a person went
+    # through it clean and got vouched for. Filtering the name to a safe
+    # CHARSET does not fix it: a person's name is already in the safe charset.
+    src = _sim_session(tmp_path)
+    renamed = os.path.join(os.path.dirname(src), "Daves-FXS-preinspection-2026")
+    os.rename(src, renamed)
+    s = sessions.load_session(renamed)
+    txt = report.condition_report(s)
+    assert "Daves" not in txt
+    assert "preinspection" not in txt
+    assert s.name not in txt
+
+
+def test_a_simulator_capture_says_so_before_the_reader_reaches_a_number(tmp_path):
+    # a clean page off the shipped simulator was presentable as a bike's page,
+    # and nothing on it said otherwise
+    s = sessions.load_session(_sim_session(tmp_path, tag="sim"))
+    txt = report.condition_report(s)
+    assert "SIMULATOR DATA - NOT FROM A MOTORCYCLE" in txt
+    assert txt.index("NOT FROM A MOTORCYCLE") < txt.index("bike     :")
+
+
+def test_a_real_capture_carries_no_such_banner(tmp_path):
+    # the banner has to be absent when it should be, or it means nothing
+    s = sessions.load_session(_sim_session(tmp_path, tag="COM7"))
+    assert "NOT FROM A MOTORCYCLE" not in report.condition_report(s)
 
 
 def test_the_report_carries_the_whole_analysis_not_just_health(tmp_path):

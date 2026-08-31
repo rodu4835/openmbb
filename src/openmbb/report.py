@@ -144,10 +144,16 @@ def condition_report(session, version=None, generated=None, temp_units="C"):
     rep = analyze_session(session, temp_units)
     v = rep.get("verdict") or {}
     stamp = generated or datetime.datetime.now()
-    head = [
-        "OpenMBB condition report",
+    ident, banner = sessions.capture_identity(session.dir)
+    head = ["OpenMBB condition report"]
+    if banner:
+        # A clean page off the shipped simulator is presentable as this bike's
+        # page, and nothing on it said otherwise. It says so first, before the
+        # reader reaches a single number.
+        head += ["", "  *** %s - NOT FROM A MOTORCYCLE ***" % banner, ""]
+    head += [
         "  bike     : %s" % (_bike_line(session) or "(not identified)"),
-        "  capture  : %s" % session.name,
+        "  capture  : %s" % ident,
         "  generated: %s%s" % (stamp.strftime("%Y-%m-%d %H:%M"),
                                " by OpenMBB v%s" % version if version else ""),
         "",

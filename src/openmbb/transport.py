@@ -125,7 +125,15 @@ class SessionLogger:
                 os.makedirs(path, exist_ok=False)   # atomically claims a UNIQUE dir
                 break
             except FileExistsError:                  # same-microsecond collision
-                path, n = "%s_%d" % (base, n), n + 1
+                # The counter goes BEFORE the tag, never after it. `_sim` and
+                # `_listen` mark data that is not from a bike and are matched
+                # with endswith, so a collision folder named `..._sim_1`
+                # silently un-marked itself and rejoined the trend line as real
+                # history. The leading timestamp - which is what orders captures
+                # - is untouched, so the name shape's two load-bearing
+                # properties both still hold.
+                path, n = (os.path.join(root, "%s_%d_%s" % (stamp, n, tag)),
+                           n + 1)
         self.dir = path
         self.raw_path = os.path.join(self.dir, "session_raw.log")
         self.journal_path = os.path.join(self.dir, "writes_journal.txt")

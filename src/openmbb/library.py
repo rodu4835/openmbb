@@ -111,7 +111,9 @@ def summarize(folder):
         # a capture taken without '+event log' can never reach a verdict, and
         # saying so up front is kinder than a spinner that resolves to nothing
         "has_event_log": bool(log),
-        "is_sim": s.name.endswith(("_sim", "_listen")),
+        # the meta file first, the name tag only as the fallback for a
+        # capture written before `source:` existed - see sessions.session_source
+        "is_sim": sessions.not_from_a_bike(folder),
         "commands": len(s.commands),
         "verdict": None,
         "verdict_headline": None,

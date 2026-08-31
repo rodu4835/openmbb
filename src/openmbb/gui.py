@@ -3899,6 +3899,19 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
                     "app_version: %s" % __version__,
                     "firmware_rev: %s" % (rev if rev is not None else "?"),
                     "power_mode: %s" % (mode or "?")]
+            # Ask the transport what it is connected to rather than reading the
+            # folder name. The `_sim` tag lives in that name - the very field a
+            # privacy fix has to normalise away, and one a person can rename -
+            # so a rehearsal against the shipped simulator produced a clean
+            # report presentable as a bike's page. Omitted, never guessed, when
+            # there is no port to ask: silence reads as format-1 real history,
+            # and writing "serial" over a connection nobody checked is exactly
+            # the false claim this stamp exists to prevent.
+            port = getattr(getattr(self, "transport", None), "port", None)
+            if port is not None:
+                meta.append("source: %s" % (
+                    "simulator" if isinstance(port, SimPort)
+                    else (getattr(port, "port", None) or "serial")))
             if self.logger:
                 self.logger.save_named("session_meta.txt", "\n".join(meta) + "\n")
             if mode and "charg" in mode.lower():

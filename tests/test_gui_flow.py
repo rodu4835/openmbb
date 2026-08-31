@@ -1857,6 +1857,25 @@ def test_session_meta_flags_charging(app):
     assert "CHARGING" in app.txt_out.get("1.0", "end")
 
 
+def test_the_session_meta_records_what_it_was_captured_from(app):
+    """Item 24a. The `_sim` tag lives in the FOLDER NAME - which is the field a
+    privacy fix has to normalise away, and one a person can rename. So a
+    rehearsal against the shipped simulator produced a clean condition report
+    presentable as a bike's page, with nothing on it saying otherwise. The
+    transport knows what it is connected to; ask it instead.
+    """
+    from openmbb import sessions
+
+    app._connect()
+    assert _pump(app, lambda: app.connected)
+    app._write_session_meta("  - Mode                   : Stopped")
+    meta = os.path.join(app.logger.dir, "session_meta.txt")
+    assert "source: simulator" in open(meta, encoding="utf-8").read()
+    # and the answer no longer depends on what the folder is called
+    assert sessions.session_source(app.logger.dir) == "simulator"
+    assert sessions.not_from_a_bike(app.logger.dir)
+
+
 def test_a_new_capture_states_the_format_it_was_written_in(app):
     """The reader half is in tests/test_capture_format.py; this is the writer.
 

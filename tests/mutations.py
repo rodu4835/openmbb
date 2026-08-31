@@ -506,6 +506,62 @@ MUTATIONS = [
      '''            if len(ports) == 1 and not (self.port_var.get() or "").strip():''',
      '''            if len(ports) == 1:''',
      "tests/test_gui_flow.py::test_every_refresh_button_uses_the_same_lone_port_rule"),
+
+    # item 24 - provenance in the meta file, the folder name out of the report
+    ("report: print the folder's own name again",
+     "src/openmbb/report.py",
+     '''        "  capture  : %s" % ident,''',
+     '''        "  capture  : %s" % session.name,''',
+     "tests/test_report.py::test_the_report_never_prints_the_folders_own_name"),
+
+    ("report: drop the not-a-motorcycle banner",
+     "src/openmbb/report.py",
+     '''    if banner:''',
+     '''    if False:''',
+     "tests/test_report.py::"
+     "test_a_simulator_capture_says_so_before_the_reader_reaches_a_number"),
+
+    ("sessions: let the folder name outrank the meta file",
+     "src/openmbb/sessions.py",
+     '''    m = _SOURCE_RE.search(_meta_text(folder))
+    if m and m.group(1).strip():
+        return m.group(1).strip()''',
+     '''    m = None''',
+     "tests/test_capture_format.py::test_the_meta_file_outranks_the_folder_name"),
+
+    ("sessions: stop tolerating the collision suffix on a name tag",
+     "src/openmbb/sessions.py",
+     '''_NOT_A_BIKE_RE = re.compile(r"_(sim|listen|selftest)(?:_\\d+)?$")''',
+     '''_NOT_A_BIKE_RE = re.compile(r"_(sim|listen|selftest)$")''',
+     "tests/test_capture_format.py::"
+     "test_a_collision_suffix_does_not_un_mark_a_simulator"),
+
+    ("sessions: read silence as a bike rather than as nothing recorded",
+     "src/openmbb/sessions.py",
+     '''    return None
+
+
+def not_from_a_bike(folder):''',
+     '''    return "serial"
+
+
+def not_from_a_bike(folder):''',
+     "tests/test_capture_format.py::"
+     "test_silence_is_not_a_claim_about_where_it_came_from"),
+
+    ("transport: put the collision counter back after the tag",
+     "src/openmbb/transport.py",
+     '''                path, n = (os.path.join(root, "%s_%d_%s" % (stamp, n, tag)),
+                           n + 1)''',
+     '''                path, n = "%s_%d" % (base, n), n + 1''',
+     "tests/test_capture_format.py::"
+     "test_a_same_microsecond_collision_keeps_the_tag_at_the_end"),
+
+    ("gui: stop recording what the session was captured from",
+     "src/openmbb/gui.py",
+     '''            if port is not None:''',
+     '''            if False:''',
+     "tests/test_gui_flow.py::test_the_session_meta_records_what_it_was_captured_from"),
 ]
 
 
