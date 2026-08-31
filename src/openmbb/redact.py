@@ -130,14 +130,23 @@ class Redactor:
 _TEXT_ENCODINGS = ("utf-8-sig", "utf-16")
 
 
-def _decode_text(raw):
-    """Decode `raw` (BOM-aware, UTF-8 then UTF-16), or None if neither works."""
+def decode_text(raw):
+    """Decode `raw` (BOM-aware, UTF-8 then UTF-16), or None if neither works.
+
+    Public because `sessions` reads captures through it too. There was a
+    decoder here and a different one there, and the two halves of the tool
+    disagreed about what a capture is - see sessions.read_text.
+    """
     for enc in _TEXT_ENCODINGS:
         try:
             return raw.decode(enc), enc
         except (UnicodeDecodeError, ValueError):
             continue
     return None, None
+
+
+#: the name this had while it was private; kept so nothing has to change at once
+_decode_text = decode_text
 
 
 def _same_or_inside(a, b):

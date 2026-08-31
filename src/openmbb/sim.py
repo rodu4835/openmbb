@@ -198,17 +198,49 @@ SIM_BMS = """\
   Charge cycles       : 512
   Faults              : none"""
 
+#: 6155 km on the sim's own MBB odometer (SIM_STATS) x 2.3752, the ratio
+#: measured identically on all three real captures. The controller runs its own
+#: distance model with a wrong constant; a simulator that did not reproduce that
+#: would teach a reader the opposite of what the parser's own comment records.
+_SIM_SEVCON_ODO_KM = 14619.4
+
 SIM_SEVCON = """\
 == Motor Controller (synthetic) ==
-  Motor speed         : 0 rpm
-  Motor temp          : 24 C
-  Controller temp     : 22 C
-  Battery voltage     : 106.25 V
-  Max charge current  : -40 A
-  Max discharge cur.  : 520 A
-  Firmware            : 0712.0002
-  Operational         : Yes
-  Faults              : 0"""
+  - Motor speed               :     0 RPM
+  - Age of motor speed data   :    91 ms
+
+  - Motor Temp                :    24 C
+  - Max Motor Temp This Ride  :    31 C
+  - Age of motor temp data    :   140 ms
+
+  - Controller Temp           :    22 C
+  - Max Ctrl Temp This Ride   :    26 C
+  - Age of ctrl temp data     :   168 ms
+
+  - Battery Voltage           :   106.250 V
+  - Battery Current           :     0.000 A
+  - Digital Inputs 1-8        :  0x00
+
+  Transmitted PDOs
+  --Drive Control--
+  - Max Batt Chg Current      :   -40 A
+  - Max Batt Dishg Current    :   520 A
+
+  SDOs
+  - Access Level              :        4
+  - Motor Temp Control Mode   :     0x01
+  - Odometer Km               :  %.1f
+  - Odometer Miles            :   9080.4
+
+  - Sevcon DCF Rev            : 153
+  - Sevcon Firmware Rev       : SN0066.23
+  - Sevcon Hardware Rev       : 0x010d0005
+  - Sevcon Serial num         : SIMULATED
+
+  - In Operational Mode       : Yes
+
+  Active Sevcon Faults
+  - Number of Faults          :    0""" % _SIM_SEVCON_ODO_KM
 
 SIM_CHARGERS = """\
 == Chargers (synthetic) ==

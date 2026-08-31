@@ -616,6 +616,75 @@ def not_from_a_bike(folder):''',
      '''        pass''',
      "tests/test_redact.py::"
      "test_the_report_pairs_each_source_file_with_what_it_became"),
+
+    # item 10 - one decoder for everything that reads a capture
+    ("sessions: put the loaders back on a UTF-8-only read",
+     "src/openmbb/sessions.py",
+     '''    text, _enc = redact.decode_text(raw)
+    return text if text is not None else raw.decode("utf-8", errors="replace")''',
+     '''    return raw.decode("utf-8", errors="replace")''',
+     "tests/test_capture_format.py::"
+     "test_a_utf16_capture_still_has_its_commands"),
+
+    ("sessions: read the format stamp UTF-8-only again",
+     "src/openmbb/sessions.py",
+     '''    text = read_text(os.path.join(folder, "session_meta.txt"))''',
+     '''    try:
+        with open(os.path.join(folder, "session_meta.txt"), encoding="utf-8",
+                  errors="replace") as f:
+            text = f.read()
+    except OSError:
+        text = None''',
+     "tests/test_capture_format.py::"
+     "test_a_utf16_stamp_from_the_future_is_refused_not_read_as_absent"),
+
+    ("sessions: drop the lenient fallback a stray byte needs",
+     "src/openmbb/sessions.py",
+     '''    return text if text is not None else raw.decode("utf-8", errors="replace")''',
+     '''    return text''',
+     "tests/test_capture_format.py::"
+     "test_one_stray_byte_does_not_cost_the_whole_capture"),
+
+    # item 13 - num() and the hex prefix
+    ("num: accept a hex prefix again",
+     "src/openmbb/parsers.py",
+     '''    if end < len(s) and s[end] in "xX" and m.group(0).lstrip("-+") == "0":
+        return None''',
+     '''    if False:
+        return None''',
+     "tests/test_sevcon.py::"
+     "test_num_refuses_a_hex_token_everywhere_not_just_in_this_parser"),
+
+    ("num: take the head of a split digit run again",
+     "src/openmbb/parsers.py",
+     '''        if tail[:1].isspace() and tail.lstrip()[:1].isdigit():
+            return None''',
+     '''        if False:
+            return None''',
+     "tests/test_sevcon.py::"
+     "test_num_refuses_a_split_digit_run_the_way_a_unit_number_does"),
+
+    ("num: refuse the decimal that precedes a hex note too",
+     "src/openmbb/parsers.py",
+     '''    if end < len(s) and s[end] in "xX" and m.group(0).lstrip("-+") == "0":''',
+     '''    if "0x" in s.lower():''',
+     "tests/test_sevcon.py::"
+     "test_num_still_reads_the_decimal_that_comes_before_a_hex_note"),
+
+    # item 14 - the simulator's sevcon block
+    ("sim: go back to the sevcon block the parser cannot read",
+     "src/openmbb/sim.py",
+     '''  - Number of Faults          :    0""" % _SIM_SEVCON_ODO_KM''',
+     '''  Faults              : 0""" % _SIM_SEVCON_ODO_KM''',
+     "tests/test_sevcon.py::"
+     "test_the_simulator_shows_the_sevcon_feature_it_exists_to_demo"),
+
+    ("sim: let the simulated odometer contradict the measured ratio",
+     "src/openmbb/sim.py",
+     '''_SIM_SEVCON_ODO_KM = 14619.4''',
+     '''_SIM_SEVCON_ODO_KM = 6155.0''',
+     "tests/test_sevcon.py::"
+     "test_the_simulated_odometer_reproduces_the_measured_ratio"),
 ]
 
 

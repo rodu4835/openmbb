@@ -31,6 +31,24 @@ def num(s):
     end = m.end()
     if end + 1 < len(s) and s[end] == "." and s[end + 1] in "-+0123456789":
         return None
+    # A hex token is not a number this can read. `0x1C` matches just the leading
+    # `0`, so every caller got a confident 0.0 - the same silent-wrong-zero shape
+    # as the garbled decimal above. The firmware prints BARE hex in at least five
+    # fields (`region`, `Status Bits`, `Digital Inputs 1-8`, `Motor Temp Control
+    # Mode`, `Sevcon Hardware Rev`), so this is reachable rather than
+    # theoretical; the isolation and clock fields print a decimal first and were
+    # never at risk. Refused rather than decoded: nothing here wants the VALUE of
+    # a bitfield, and n/a is the honest answer where 0.0 was a wrong one.
+    if end < len(s) and s[end] in "xX" and m.group(0).lstrip("-+") == "0":
+        return None
+    # ...and the split digit run `_unit_number` already refuses: "62 49 km" is
+    # one number broken in two, and taking the head silently reports 62. Every
+    # `num` caller passes ONE label's value, so a second number after whitespace
+    # is a garble rather than a second field - verified against all 13 fixtures.
+    if end < len(s):
+        tail = s[end:]
+        if tail[:1].isspace() and tail.lstrip()[:1].isdigit():
+            return None
     return _finite(float(m.group(0)))
 
 

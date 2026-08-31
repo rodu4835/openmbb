@@ -9,6 +9,8 @@ import glob
 import os
 import re
 
+from . import redact
+
 
 #: The capture format this build writes, and the highest it can read.
 #:
@@ -54,13 +56,32 @@ _SOURCE_WORDS = {
 }
 
 
-def _meta_text(folder):
+def read_text(path):
+    """A capture file's text, however it was encoded, or None if there is no
+    file.
+
+    One decoder, shared with the export (`redact.decode_text`), because a
+    reader and a writer that disagree about what a capture IS produce a silent
+    wrong answer rather than an error: `errors="replace"` turned a UTF-16
+    session_meta.txt into replacement characters, every regex below missed, and
+    a `capture_format:` key that was PRESENT was reported absent.
+
+    The one deliberate difference: where `redact` refuses bytes it cannot
+    decode - it must not vouch for what it could not read - this falls back to
+    a lenient UTF-8 read, because a reader losing one character to a stray byte
+    is better than losing the capture.
+    """
     try:
-        with open(os.path.join(folder, "session_meta.txt"),
-                  encoding="utf-8", errors="replace") as f:
-            return f.read()
+        with open(path, "rb") as f:
+            raw = f.read()
     except OSError:
-        return ""
+        return None
+    text, _enc = redact.decode_text(raw)
+    return text if text is not None else raw.decode("utf-8", errors="replace")
+
+
+def _meta_text(folder):
+    return read_text(os.path.join(folder, "session_meta.txt")) or ""
 
 
 def session_source(folder):
@@ -150,11 +171,8 @@ def capture_format(folder):
     a version and failed - and quietly reading that as 1 would be exactly the
     false pass the stamp exists to prevent.
     """
-    try:
-        with open(os.path.join(folder, "session_meta.txt"),
-                  encoding="utf-8", errors="replace") as f:
-            text = f.read()
-    except OSError:
+    text = read_text(os.path.join(folder, "session_meta.txt"))
+    if text is None:
         return CAPTURE_FORMAT          # no meta file at all: a format-1 capture
     m = _CAPTURE_FORMAT_RE.search(text)
     if m is None:
@@ -200,41 +218,33 @@ class Session:
 
 
 def _header_command(path):
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            first = f.readline()
-    except OSError:
+    text = read_text(path)
+    if text is None:
         return None
-    m = re.match(r"#\s*command:\s*(.+)", first)
+    m = re.match(r"#\s*command:\s*(.+)", text.split("\n", 1)[0])
     return m.group(1).strip() if m else None
 
 
 def _header_time(path):
     """The '# time: HH:MM:SS.mmm' the logger stamps on every command file."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            f.readline()
-            m = re.match(r"#\s*time:\s*(\d\d:\d\d:\d\d)", f.readline())
-            return m.group(1) if m else None
-    except OSError:
+    text = read_text(path)
+    if text is None:
         return None
+    lines = text.split("\n")
+    m = re.match(r"#\s*time:\s*(\d\d:\d\d:\d\d)", lines[1] if len(lines) > 1
+                 else "")
+    return m.group(1) if m else None
 
 
 def _session_date(folder):
     """The capture date, from session_meta.txt — the per-command headers carry a
     time but no date."""
-    try:
-        with open(os.path.join(folder, "session_meta.txt"),
-                  encoding="utf-8", errors="replace") as f:
-            m = re.search(r"time:\s*(\d{4}-\d\d-\d\d)", f.read())
-            return m.group(1) if m else None
-    except OSError:
-        return None
+    m = re.search(r"time:\s*(\d{4}-\d\d-\d\d)", _meta_text(folder))
+    return m.group(1) if m else None
 
 
 def _read_response(path):
-    with open(path, encoding="utf-8", errors="replace") as f:
-        txt = f.read()
+    txt = read_text(path) or ""
     if not txt.startswith("# command:"):
         return txt
     # drop the leading '#' header line(s), then one optional blank separator —
@@ -313,8 +323,7 @@ def load_session(folder):
     settings_text = ""
     baselines = _newest_baseline(folder)
     if baselines:
-        with open(baselines, encoding="utf-8", errors="replace") as f:
-            settings_text = f.read()
+        settings_text = read_text(baselines) or ""
     elif "set" in commands:
         settings_text = commands["set"]
     return Session(folder, commands, settings_text, captured_at)

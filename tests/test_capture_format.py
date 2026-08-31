@@ -35,6 +35,69 @@ def _capture(tmp_path, name, meta=None):
     return str(d)
 
 
+# ----------------------------------------------------------- one decoder
+#
+# a646b7c gave `redact` a BOM-aware decoder and left the loaders on UTF-8 only,
+# so the two halves of the tool disagreed about what a capture IS. Both failures
+# below were reproduced before the fix.
+
+def _utf16_capture(tmp_path, name, meta):
+    d = tmp_path / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "001_bms.txt").write_bytes(
+        ("# command: bms\n# time: 12:00:00.000\n\nPack Voltage : 113.2\n")
+        .encode("utf-16"))
+    (d / "session_meta.txt").write_bytes(meta.encode("utf-16"))
+    return d
+
+
+def test_a_utf16_capture_still_has_its_commands(tmp_path):
+    # `redact` calls this capture first-class; `analyze` found zero commands in
+    # it, because _header_command decoded UTF-8 only
+    d = _utf16_capture(tmp_path, "cap", "capture_format: 1\n"
+                                        "time: 2026-08-29T14:30:22\n")
+    s = sessions.load_session(str(d))
+    assert sorted(s.commands) == ["bms"]
+    assert "Pack Voltage" in s.cmd("bms")
+    assert sessions._session_date(str(d)) == "2026-08-29"
+
+
+def test_a_utf16_stamp_from_the_future_is_refused_not_read_as_absent(tmp_path):
+    # the exact false pass the stamp exists to prevent: a key that is PRESENT,
+    # reported absent, so the capture reads as format 1 and gets believed
+    d = _utf16_capture(tmp_path, "cap", "capture_format: %d\n"
+                       % (CAPTURE_FORMAT + 1))
+    with pytest.raises(CaptureFormatError):
+        capture_format(str(d))
+
+
+def test_one_stray_byte_does_not_cost_the_whole_capture(tmp_path):
+    """The reader is deliberately more forgiving than the export.
+
+    `redact` refuses bytes it cannot decode - it must not vouch for what it
+    could not read. A reader has the opposite duty: losing one character to a
+    stray byte beats losing the capture.
+    """
+    d = tmp_path / "cap"
+    d.mkdir()
+    (d / "001_bms.txt").write_bytes(
+        b"# command: bms\n\nPack Voltage : 113.2 \xff\n")
+    s = sessions.load_session(str(d))
+    assert sorted(s.commands) == ["bms"]
+    assert "Pack Voltage" in s.cmd("bms")
+
+
+def test_the_loaders_and_the_export_use_the_same_decoder(tmp_path):
+    # one decoder, not two that agree today: the disagreement is the bug
+    from openmbb import redact as _redact
+
+    assert sessions.redact.decode_text is _redact.decode_text
+    p = tmp_path / "f.txt"
+    p.write_bytes("caf\u00e9 \u2014 113.2 V\n".encode("utf-16"))
+    assert sessions.read_text(str(p)) == _redact.decode_text(
+        p.read_bytes())[0]
+
+
 # ------------------------------------------------------------- provenance
 #
 # `source:` is a new KEY, not a new format: an old reader ignores it and is not

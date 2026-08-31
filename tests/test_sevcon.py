@@ -178,3 +178,72 @@ def test_a_hex_fault_count_is_unreadable_not_zero():
     assert not [m for m in health.health_snapshot(s)
                 if m["label"] == "Sevcon faults"], (
         "an unreadable fault count must leave the row out, never render ok")
+
+
+# ------------------------------------------------- item 14: the simulator
+
+def test_the_simulator_shows_the_sevcon_feature_it_exists_to_demo():
+    """SIM_SEVCON's labels predated parse_sevcon and missed every fault,
+    operational, firmware and odometer needle, so `openmbb --sim` rendered NO
+    Sevcon row at all - two of ten fields parsed. The demo mode is how somebody
+    decides whether this tool is worth plugging into their motorcycle.
+    """
+    from openmbb.sim import SIM_SEVCON
+
+    sim = parsers.parse_sevcon(SIM_SEVCON)
+    real = parsers.parse_sevcon(_fixture())
+    assert set(sim) == set(real), set(real) ^ set(sim)
+
+
+def test_the_simulated_odometer_reproduces_the_measured_ratio():
+    """The controller runs its own distance model with a wrong constant -
+    2.3752x the MBB odometer, identical to four decimals on all three real
+    captures. A simulator that contradicted that would teach the opposite of
+    what the parser's own comment records.
+    """
+    from openmbb.sim import SIM_SEVCON, SIM_STATS
+
+    sev = parsers.parse_sevcon(SIM_SEVCON)
+    mbb = parsers.parse_stats(SIM_STATS)
+    assert round(sev["odo_km"] / mbb["odo_km"], 4) == 2.3752
+
+
+def test_the_simulated_block_still_carries_a_hex_field_to_trip_over():
+    # the demo path should exercise the hex refusal and the `motor temp`
+    # exclude list, not only the fixtures
+    from openmbb.sim import SIM_SEVCON
+
+    assert "Motor Temp Control Mode" in SIM_SEVCON and "0x01" in SIM_SEVCON
+    sev = parsers.parse_sevcon(SIM_SEVCON)
+    assert sev["motor_temp_c"] == 24.0      # not 0x01, and not the max row
+
+
+# --------------------------------------------------------- item 13: num()
+
+def test_num_refuses_a_hex_token_everywhere_not_just_in_this_parser():
+    """Item 6d refused hex locally, in the one graded field. The survey found
+    five fields that print BARE hex on rev 41 - `region`, `Status Bits`,
+    `Digital Inputs 1-8`, `Motor Temp Control Mode`, `Sevcon Hardware Rev` - so
+    every parser sharing `num` was one label lookup away from the same wrong
+    zero.
+    """
+    for token in ("0x1C", "0x00", "0X0A", "-0x10"):
+        assert parsers.num(token) is None, token
+
+
+def test_num_still_reads_the_decimal_that_comes_before_a_hex_note():
+    # the isolation and clock fields print a real reading and THEN the raw hex;
+    # they were never at risk and must not become n/a
+    assert parsers.num("  32766 KOhms (0x7FFE) ") == 32766.0
+    assert parsers.num("  -25 KOhms (0xFFFFFFE7)") == -25.0
+    assert parsers.num(" 1787180283, 0x6A8634FB ") == 1787180283.0
+    # and a plain multiplication-looking token is not a hex prefix
+    assert parsers.num("10x20") == 10.0
+
+
+def test_num_refuses_a_split_digit_run_the_way_a_unit_number_does():
+    # "6249 km" arriving as "62 49 km" read 62 - a garble taken as a reading.
+    # Every num() caller passes ONE label's value, so a second number after
+    # whitespace is a break in one number, not a second field.
+    assert parsers.num("62 49 km") is None
+    assert parsers.num("6249 km") == 6249.0
