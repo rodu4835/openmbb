@@ -889,24 +889,16 @@ def parse_sevcon(text):
     def g(*needles, **kw):
         return find(kv, *needles, **kw)
 
-    def n(value):
-        """A number, unless it is written in hex - then it is unreadable.
-
-        `num("0x1C")` reads the leading zero and returns 0.0, which in the
-        graded field renders "none active" and an OK row: a fault count of 28
-        presented as a clean bike. Hex is not hypothetical here - this very
-        block prints 0x01, 0x00 and 0x010d0005 on neighbouring lines, so a
-        firmware writing the count the same way is an ordinary thing to meet.
-
-        Refused locally rather than in `num()`, which every parser shares; the
-        general survey is a separate question. A refused value means the key is
-        absent, which means no row at all - "could not read" said properly.
-        """
-        if value is None:
-            return None
-        if "0x" in str(value).lower():
-            return None
-        return num(value)
+    # `n` was a private hex-refusing wrapper here, because `num("0x1C")` read
+    # the leading zero and returned 0.0 - a fault count of 28 rendering as
+    # "none active" and an OK row. Item 13 surveyed every parser sharing `num`
+    # and moved the refusal there, which retires this copy and improves on it:
+    # the local rule refused any value CONTAINING "0x", so a firmware printing
+    # `28 (0x1C)` - a real count with its raw form beside it, the shape the
+    # isolation and clock fields already use - read as unreadable. `num`
+    # refuses the PREFIX and reads the 28. A refused value still means no key,
+    # which still means no row: "could not read" said properly.
+    n = num
 
     out = {}
     for key, needles, excl in (

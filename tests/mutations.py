@@ -103,10 +103,12 @@ MUTATIONS = [
                                            and heavy_consent.strip()):''',
      "tests/test_cli_selftest.py::test_a_refused_heavy_read_leaves_no_consent_record"),
 
-    ("consent: stop masking the consent sentence",
+    # Item 21 replaced journal_consent's hand-rolled per-field masking with one
+    # masked writer shared by all three record types, so this points at that.
+    ("consent: stop masking the consent record on its way to disk",
      "src/openmbb/transport.py",
-     "            self._mask(str(cmd).strip()), self._mask(str(consent).strip()))",
-     "            self._mask(str(cmd).strip()), str(consent).strip())",
+     '''            f.write(self._mask(line))''',
+     '''            f.write(line)''',
      "tests/test_cli_selftest.py::test_the_consent_record_is_masked_like_everything_else"),
 
     ("consent: journal every command, burying the two that matter",
@@ -223,16 +225,15 @@ MUTATIONS = [
     ("redact/gui: stop catching the refusal, so the export silently does nothing",
      "src/openmbb/gui.py",
      '''            except ValueError as e:
-                # A refusal about the REQUEST rather than the data: the chosen''',
+                shutil.rmtree(work, ignore_errors=True)''',
      '''            except ZeroDivisionError as e:
-                # A refusal about the REQUEST rather than the data: the chosen''',
+                shutil.rmtree(work, ignore_errors=True)''',
      "tests/test_gui_flow.py::test_the_share_safe_export_says_why_it_refused"),
 
-    ("consent: stop masking the command, only the consent sentence",
-     "src/openmbb/transport.py",
-     "            self._mask(str(cmd).strip()), self._mask(str(consent).strip()))",
-     "            str(cmd).strip(), self._mask(str(consent).strip()))",
-     "tests/test_cli_selftest.py::test_the_consent_record_masks_the_command_not_only_the_consent"),
+    # An entry for "masks the command but not the sentence" was here. Item 21
+    # made that unrepresentable: there is one mask over the whole line, so the
+    # two halves cannot come apart. The test that named it still runs and is
+    # still proven failable, by the entry above.
 
     # item 5 - the two condition surfaces are composed once
     ("mirror: the tab stops showing the coverage limit", "src/openmbb/gui.py",
@@ -354,20 +355,19 @@ MUTATIONS = [
      '''    for note in []:''',
      'tests/test_gui_flow.py::test_a_fault_the_pack_verdict_ignores_reaches_both_surfaces'),
 
-    # 6d - a hex fault count is unreadable, not zero
-    ("sevcon: read a hex fault count as its leading zero",
-     "src/openmbb/parsers.py",
-     '''        if "0x" in str(value).lower():
-            return None''',
-     '''        if False:
-            return None''',
-     "tests/test_sevcon.py::test_a_hex_fault_count_is_unreadable_not_zero"),
+    # 6d's local hex guard was retired by item 13, which moved the refusal into
+    # `num` for every parser. The runner reported this entry MISSED - removing
+    # the local copy changed nothing, because the shared guard already caught
+    # it. The protection it stood for is now entry "num: accept a hex prefix
+    # again", and test_a_hex_fault_count_is_unreadable_not_zero still guards
+    # the behaviour end to end.
 
     # item 15 - the write path says what happened, not what it asked for
+    # Item 9 moved the write path's reply parsing down to the transport.
     ("write: discard the console reply again, so a refusal cannot be quoted",
-     "src/openmbb/gui.py",
-     '''                    said_kind, said = parsers.console_write_result(reply)''',
-     '''                    said_kind, said = None, None''',
+     "src/openmbb/transport.py",
+     '''        said_kind, said = console_write_result(reply)''',
+     '''        said_kind, said = None, None''',
      'tests/test_gui_flow.py::test_a_refused_write_quotes_the_console_instead_of_contradicting_it'),
 
     ("write: stop parsing SUCCESS/FAILED out of the console's reply",
@@ -396,8 +396,8 @@ MUTATIONS = [
 
     ("journal: let an observed change wear the console-said label",
      "src/openmbb/transport.py",
-     '        line = "%s | %s | %s -> %s | OBSERVED (not requested) - %s\\n" % (',
-     '        line = "%s | %s | %s -> %s | PENDING [console said: %s]\\n" % (',
+     '        self._journal("%s | %s | %s -> %s | OBSERVED (not requested) - %s\\n" % (',
+     '        self._journal("%s | %s | %s -> %s | PENDING [console said: %s]\\n" % (',
      'tests/test_gui_flow.py::test_the_journal_never_puts_our_words_in_the_console_s_mouth'),
 
     ("journal: report an empty read-back as a value the bike reports",
@@ -443,7 +443,8 @@ MUTATIONS = [
 
     ("headline: drop the unanswered count from the harsh branches",
      "src/openmbb/condition.py",
-     '''        missing = (" (%d of %d checks unanswered)" % (total - answered, total))''',
+     '''        missing = (" (%d of %d pack checks unanswered)"
+                   % (total - answered, total))''',
      '''        missing = ""''',
      "tests/test_condition.py::test_the_harsh_branches_carry_the_unanswered_count"),
 
