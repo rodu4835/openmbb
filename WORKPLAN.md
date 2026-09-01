@@ -52,12 +52,13 @@ fail (item 6d's local hex guard, superseded by item 13 and coarser than what
 replaced it) and six anchors this stack had moved out from under. Neither was
 visible to the per-item runs.
 
-**Next: At a bike is now the only thing left**, and it has been the binding
-constraint since v0.23. The code side is done — every queued item shipped,
-reviewed, fixed and released. What remains needs a second motorcycle: 6b rides
-along free with any pull, `derate_profile` and `cell_sag` need one to grade
-rather than describe, and the module-connect rename, the BattTemp dialect and
-displayed 0% all wait on the same thing.
+**Next: 26 then 28, both unblocked.** The second motorcycle ARRIVED
+(2026-08-31, issue #1 — see C2): 6b is answered, and the grading question
+became concrete. Item 26 first (the garbage guard, so reference numbers come
+off a cleaned log), then item 28 (the two-bike comparison, design decided).
+Only the issue-#1 charge index waits on the reporter's re-pull — it is 2
+sessions against a 5-session floor. The module-connect rename, the BattTemp
+dialect and displayed 0% still want more bikes.
 
 **23b** (opening intake for shared captures) is the one queued item that
 attacks that ceiling without a second bike in the garage, and it is held on a
@@ -1447,6 +1448,64 @@ idle machine, re-pull soon (the buffer is only weeks deep and Aug 22/26 are
 already three weeks back), and the 358 C record is ours to guard against, not
 their bike misbehaving. Thank them — their one capture answered a question
 (6b) this project carried for weeks.
+
+### 28. The two-bike comparison — what grading honestly means at n=2
+
+`derate_profile`'s own docstring has been waiting for this by name: *"What a
+second bike is for is turning this from a description into a test."* The second
+bike exists. But n=2 never honestly yields thresholds — "normal is under X"
+needs a population — so what it yields is a **comparison**: your reading
+beside the one other measured Gen2, source named, n named, conditions shown.
+Design decided (Fable, 2026-09-01); implementation is Opus's, **after item 26**
+so the reference numbers are computed over a log the garbage guard has cleaned.
+
+**Decision 1 — a comparison, never a threshold.** Output names the other
+bike ("the one other measured Gen2, shared on issue #1") and its n. The words
+*normal*, *typical*, *healthy range* and *percentile* are banned from this
+surface; a wording test enforces the ban the way the "anonymous" ban works.
+`cell_sag`/`derate_profile` keep `"graded": False` — comparison is a new
+surface BESIDE the description, not a change to it, and it never moves `level`.
+
+**Decision 2 — reference readings become DATA with provenance, not numbers
+in comments.** New asset `reference_readings.json` (loaded like the other
+assets, `files("openmbb") / "assets"`): one entry per measured bike —
+`{bike_id, source (sentence + URL for the public one), captured, truncated,
+metrics: {cell_deviation, cell_sag, derate_profile, charge_index}, notes}` —
+derived NUMBERS only, never capture content (the never-commit-captures rule is
+untouched). The reference FXS's own figures move INTO this file from the
+docstrings and comments where they currently live, so the tool's calibration
+base finally has provenance a user can read. The issue-#1 bike's entry ships
+`truncated: true` until the re-pull, and every rendered line carries the
+smaller n.
+
+**Decision 3 — prefer the comparable metric, show conditions verbatim,
+refuse thin ones.** `cell_deviation` (median mV below the pack's own average
+under load) is the primary comparison — self-normalising, distributional.
+Absolute `cell_sag` renders with each side's conditions verbatim (mV at A /
+SOC / C), no normalising. `derate_profile` compares median/worst % directly
+(same definition both sides). The **charge index refuses below 5 sessions per
+side** — the same floor item 23's governance set for fleet figures — so
+the Czech bike's 2-session 15.25 Ah renders as "too few sessions to compare
+(2; needs 5)", which also tells the reader exactly what the re-pull buys.
+
+**Decision 4 — one composer, both surfaces.** `condition.comparison_lines()`
+returns the sentences; the Condition tab and the report both render it, the
+`coverage_note` pattern, so the two-surface mirror holds by construction.
+Mirror test mandatory (item 5's discipline).
+
+**Change:** condition.py (the composer + loading the asset), the new asset,
+report.py + gui.py render sites, README's Condition section gains a paragraph
+saying what the comparison is and is not.
+**Tests:** the banned-words test over the composer's output; the mirror test;
+the 5-session refusal (their real 2-session entry must refuse and say why);
+conditions-shown-verbatim; an entry with `truncated: true` says so on every
+line it feeds.
+**Mutations:** drop the banned-words guard — wording test fails; render the
+comparison on one surface only — mirror test fails; drop the session floor
+— refusal test fails.
+**Waits on the re-pull:** only the issue-#1 charge-index entry crossing its
+5-session floor, and refreshed sag numbers from the full log. The machinery,
+the reference file, the FXS entry and the sag comparison ship without it.
 
 ### C. The issue-#1 reporter — a mail-in, zero cost *(asked 2026-08-31)*
 
