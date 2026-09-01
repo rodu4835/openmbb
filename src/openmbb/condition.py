@@ -31,6 +31,7 @@ dicts out. No hardware, no serial port, no GUI.
 """
 
 import datetime as _dt
+import json
 import re
 
 EM = chr(0x2014)
@@ -728,6 +729,165 @@ CELL_FLOOR_WATCH_MV = 2800.0
 # 60-second samples inside one ride are highly correlated, so this is a floor on
 # having looked at all, not a statistical sample size.
 MIN_LOADED_SAMPLES = 30
+
+#: Sessions a charge index needs on EACH side before it will compare. The same
+#: floor item 23's governance set for any published fleet figure, for the same
+#: reason: below it the number is one bike's one afternoon.
+MIN_COMPARE_SESSIONS = 5
+
+#: Words this surface may never use. Two bikes cannot establish what is normal,
+#: and a comparison that borrows the vocabulary of a population study is a
+#: threshold wearing a comparison's clothes. Enforced by a test.
+BANNED_COMPARISON_WORDS = ("normal", "typical", "healthy range", "percentile",
+                           "average bike", "most bikes", "should be")
+
+
+def reference_readings():
+    """Every bike this project has measured, as derived readings.
+
+    Loaded from the shipped asset rather than held in code, so the tool's
+    calibration base has provenance a user can read - which is also what makes
+    it honest to cite. Returns {} if the asset cannot be read: a comparison
+    that cannot name its source does not get made.
+    """
+    try:
+        from importlib.resources import files
+        raw = (files("openmbb") / "assets" / "reference_readings.json").read_text(
+            encoding="utf-8")
+    except Exception:
+        return {}
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return {}
+
+
+def _other_bike(exclude_id="reference-2017-fxs"):
+    """The measured bike to compare against, or None.
+
+    Deliberately simple while n=2: the one that is not the reference. When a
+    third arrives this becomes a selection problem (nearest odometer? same
+    model year?) and the answer must be argued, not defaulted into.
+    """
+    bikes = (reference_readings() or {}).get("bikes") or []
+    for b in bikes:
+        if b.get("bike_id") != exclude_id:
+            return b
+    return None
+
+
+def _conditions(m, temp_units="C"):
+    """The conditions a reading was taken in, in the reader's own units.
+
+    Through health.fmt_temp like every other temperature this module prints:
+    a Celsius number in a Fahrenheit report is a defect this project has
+    already had once, in the page handed to a buyer.
+    """
+    bits = []
+    if m.get("at_amps") is not None:
+        bits.append("%g A" % m["at_amps"])
+    if m.get("at_soc_pct") is not None:
+        bits.append("%g%% SOC" % m["at_soc_pct"])
+    if m.get("at_pack_temp_c") is not None:
+        bits.append(health.fmt_temp(m["at_pack_temp_c"], temp_units))
+    return ", ".join(bits)
+
+
+def comparison_lines(assessment, other=None, temp_units="C"):
+    """This capture's readings beside the one other measured Gen2.
+
+    A COMPARISON, never a grade. It names the other bike, its sample count and
+    its conditions, and it never moves the verdict - `cell_sag` and
+    `derate_profile` keep `graded: False` because two bikes cannot grade
+    anything. What they can do is let a reader see two real packs side by side
+    and judge for themselves, which is the honest use of n=2.
+
+    Every metric refuses rather than compares when either side is below the
+    floor for it, and says what the shortfall is - so a thin capture tells its
+    owner what a better one would buy.
+
+    Returns a list of sentences (possibly empty). One composer, both surfaces.
+    """
+    other = other or _other_bike()
+    if not other:
+        return []
+    om = other.get("metrics") or {}
+    label = other.get("label") or "the other measured Gen2"
+    Label = label[:1].upper() + label[1:]      # when it opens a sentence
+    caveat = " (that capture is truncated and partly damaged, so its figures are provisional)" \
+        if other.get("truncated") else ""
+    out = []
+
+    mine_dev = assessment.get("cell_deviation") or {}
+    theirs_dev = om.get("cell_deviation") or {}
+    if mine_dev.get("median_mv") is not None and theirs_dev.get("median_mv") is not None:
+        n_mine = mine_dev.get("samples") or 0
+        n_theirs = theirs_dev.get("samples") or 0
+        if n_mine < MIN_LOADED_SAMPLES or n_theirs < MIN_LOADED_SAMPLES:
+            thin = "this capture" if n_mine < MIN_LOADED_SAMPLES else label
+            out.append(
+                "Weakest cell vs pack: not compared — %s has %d loaded samples "
+                "and %d are needed. %s"
+                % (thin, min(n_mine, n_theirs), MIN_LOADED_SAMPLES,
+                   "A longer ride log would answer it."))
+        else:
+            out.append(
+                "Weakest cell vs pack: %g mV below this pack's own average over "
+                "%d loaded samples. %s reads %g mV over %d.%s Two bikes is not a "
+                "range — it is one other reading."
+                % (mine_dev["median_mv"], n_mine, label,
+                   theirs_dev["median_mv"], n_theirs, caveat))
+
+    mine_sag = assessment.get("cell_sag") or {}
+    theirs_sag = om.get("cell_sag") or {}
+    if mine_sag.get("min_cell_mv") is not None and theirs_sag.get("min_cell_mv") is not None:
+        cond_mine = _conditions(mine_sag, temp_units)
+        cond_theirs = _conditions(theirs_sag, temp_units)
+        out.append(
+            "Weakest cell under load: %g mV here (%s). %s reached %g mV (%s).%s "
+            "The conditions are not the same, so this is two readings side by "
+            "side and not a better-or-worse."
+            % (mine_sag["min_cell_mv"], cond_mine, Label,
+               theirs_sag["min_cell_mv"], cond_theirs, caveat))
+
+    # assess() calls it "derate"; the asset spells it out. Accept both, so a
+    # rename on either side cannot silently delete this comparison - a check
+    # that cannot fire is indistinguishable from one that passed.
+    mine_der = (assessment.get("derate") or assessment.get("derate_profile")
+                or {})
+    theirs_der = om.get("derate_profile") or om.get("derate") or {}
+    if mine_der.get("median_pct") is not None and theirs_der.get("median_pct") is not None:
+        out.append(
+            "Discharge allowance: median %g%% here over %d samples; %s median "
+            "%g%% over %d.%s Both are descriptions, not scores — what a healthy "
+            "distribution looks like on this platform is still unestablished."
+            % (mine_der["median_pct"], mine_der.get("samples") or 0, label,
+               theirs_der["median_pct"], theirs_der.get("samples") or 0, caveat))
+
+    mine_cap = assessment.get("charge_capacity") or {}
+    theirs_cap = om.get("charge_index") or {}
+    if mine_cap.get("median_ah") is not None and theirs_cap.get("median_ah") is not None:
+        n_mine = mine_cap.get("sessions") or 0
+        n_theirs = theirs_cap.get("sessions") or 0
+        if n_mine < MIN_COMPARE_SESSIONS or n_theirs < MIN_COMPARE_SESSIONS:
+            thin = "this capture" if n_mine < MIN_COMPARE_SESSIONS else label
+            out.append(
+                "Charge index: not compared — %s has %d charge session%s and %d "
+                "are needed on each side."
+                % (thin, min(n_mine, n_theirs),
+                   "" if min(n_mine, n_theirs) == 1 else "s",
+                   MIN_COMPARE_SESSIONS))
+        else:
+            out.append(
+                "Charge index: %g Ah median over %d sessions here; %s reads %g Ah "
+                "over %d.%s An index for comparing captures, not the pack's "
+                "capacity."
+                % (mine_cap["median_ah"], n_mine, label,
+                   theirs_cap["median_ah"], n_theirs, caveat))
+    return out
+
+
+
 
 _RANK = {"concern": 3, "watch": 2, "ok": 1, "unknown": 0}
 

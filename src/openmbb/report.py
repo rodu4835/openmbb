@@ -458,6 +458,7 @@ def _condition_lines(c, units="C"):
                    % (cov["first"], cov["last"], cov["ride_samples"],
                       cov["charge_samples"]))
     out += _coverage_limit_lines(cov)
+    out += _comparison_lines(c, units)
     cap = c.get("charge_capacity")
     if cap:
         out.append("  charge accepted %g-%g V: median %g Ah over %d sessions"
@@ -513,6 +514,23 @@ def _wrap(sentence, indent="  ", hang="    "):
     return textwrap.wrap(sentence, width=78, initial_indent=indent,
                          subsequent_indent=hang,
                          break_on_hyphens=False) if sentence else []
+
+
+def _comparison_lines(assessment, temp_units="C"):
+    """This capture beside the one other measured Gen2.
+
+    Composed in condition.py because the Condition tab prints the same
+    sentences - the two-surface rule this project learned the hard way. A
+    comparison that drifts between the page a buyer reads and the screen the
+    owner reads is worse than no comparison.
+    """
+    lines = condition.comparison_lines(assessment, temp_units=temp_units)
+    if not lines:
+        return []
+    out = ["", "  -- beside the one other measured Gen2 (n=2, not a range) --"]
+    for sentence in lines:
+        out += _wrap(sentence)
+    return out
 
 
 def _coverage_limit_lines(cov):

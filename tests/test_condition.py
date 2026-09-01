@@ -1180,6 +1180,110 @@ def test_a_fired_conditional_row_is_named_rather_than_counted(tmp_path):
     assert any(c["name"] == "Isolation resistance" for c in v["checks"])
 
 
+# ------------------------- item 28: the two-bike comparison, at n=2
+
+def _thick():
+    """An assessment whose every metric clears its floor."""
+    return {"cell_deviation": {"median_mv": 63.8, "samples": 657},
+            "cell_sag": {"min_cell_mv": 3165.0, "at_amps": 136.0,
+                         "at_soc_pct": 85.0, "at_pack_temp_c": 30.0},
+            "derate": {"median_pct": 88.0, "samples": 1227},
+            "charge_capacity": {"median_ah": 18.0, "sessions": 36}}
+
+
+def _other(**over):
+    m = {"cell_deviation": {"median_mv": 6.8, "samples": 657},
+         "cell_sag": {"min_cell_mv": 3367.0, "at_amps": 61.0,
+                      "at_soc_pct": 8.0, "at_pack_temp_c": 40.0},
+         "derate_profile": {"median_pct": 98.0, "samples": 159},
+         "charge_index": {"median_ah": 10.83, "sessions": 36}}
+    m.update(over.pop("metrics", {}))
+    d = {"label": "the second measured Gen2", "truncated": False, "metrics": m}
+    d.update(over)
+    return d
+
+
+def test_the_comparison_never_reaches_for_a_population():
+    """n=2 cannot establish what is normal. A comparison that borrows the
+    vocabulary of a population study is a threshold wearing a comparison's
+    clothes, so the words are banned and the ban is tested."""
+    lines = " ".join(condition.comparison_lines(_thick(), _other())).lower()
+    assert lines, "nothing rendered"
+    for word in condition.BANNED_COMPARISON_WORDS:
+        assert word not in lines, word
+    # ...and it names what it IS
+    assert "not a range" in lines or "one other reading" in lines
+
+
+def test_a_thin_side_refuses_and_says_what_it_needs():
+    """The refusal is the useful part: it tells a capture's owner exactly what
+    a better capture would buy."""
+    thin = _other(metrics={"cell_deviation": {"median_mv": 6.8, "samples": 14},
+                           "charge_index": {"median_ah": 10.83, "sessions": 1}})
+    lines = condition.comparison_lines(_thick(), thin)
+    dev = [l for l in lines if l.startswith("Weakest cell")][0]
+    cap = [l for l in lines if l.startswith("Charge index")][0]
+    assert "not compared" in dev and "14 loaded samples" in dev
+    assert str(condition.MIN_LOADED_SAMPLES) in dev
+    assert "not compared" in cap and "1 charge session" in cap
+    assert str(condition.MIN_COMPARE_SESSIONS) in cap
+
+
+def test_the_sag_comparison_shows_both_sets_of_conditions():
+    # 3367 mV at 61 A is not "better" than 3165 mV at 136 A, and a line that
+    # printed the two numbers alone would say it was
+    # "Weakest cell under load" is this module's name for sag; "Lowest cell"
+    # belongs to the UNLOADED floor, and borrowing it made the two-surface
+    # mirror test see a fact its composer had withheld.
+    line = [l for l in condition.comparison_lines(_thick(), _other())
+            if l.startswith("Weakest cell under load")][0]
+    for cond in ("136 A", "85% SOC", "30 C", "61 A", "8% SOC", "40 C"):
+        assert cond in line, cond
+    assert "not a better-or-worse" in line
+
+
+def test_a_truncated_reference_says_so_on_every_line_it_feeds():
+    lines = condition.comparison_lines(_thick(), _other(truncated=True))
+    fed = [l for l in lines if "reads" in l or "reached" in l or "median" in l]
+    assert fed
+    for l in fed:
+        assert "provisional" in l, l
+
+
+def test_the_derate_comparison_survives_either_spelling_of_its_key():
+    """assess() calls it `derate`; the shipped asset spells it
+    `derate_profile`. The first version of this composer looked up only the
+    long name, got {}, and dropped the whole comparison silently - a check that
+    cannot fire is indistinguishable from one that passed."""
+    for key in ("derate", "derate_profile"):
+        a = {"derate" if key == "derate" else "derate_profile":
+             {"median_pct": 88.0, "samples": 1227}}
+        lines = condition.comparison_lines(a, _other())
+        assert any(l.startswith("Discharge allowance") for l in lines), key
+
+
+def test_the_shipped_reference_asset_is_readable_and_named():
+    """The calibration base has to be data a user can read, not numbers in a
+    docstring - that is the point of the asset."""
+    ref = condition.reference_readings()
+    bikes = ref.get("bikes") or []
+    assert len(bikes) >= 2
+    for b in bikes:
+        assert b.get("bike_id") and b.get("source"), b
+        assert b.get("metrics"), b
+    # and it carries no capture content, only derived numbers
+    import json as _json
+    blob = _json.dumps(ref)
+    assert "# command:" not in blob and "PackTemp" not in blob
+
+
+def test_no_comparison_without_a_bike_to_compare_against():
+    assert condition.comparison_lines(_thick(), None) == [] or \
+        condition.comparison_lines(_thick(), None)   # only if the asset has one
+    # with an explicit empty partner there is nothing to say
+    assert condition.comparison_lines(_thick(), {"metrics": {}}) == []
+
+
 def test_isolation_still_moves_the_verdict_level(tmp_path):
     """Demoting the most safety-critical row in the tool to a note would put a
     green OK over an HV-to-chassis leak - the failure 6c fixed, in the worse

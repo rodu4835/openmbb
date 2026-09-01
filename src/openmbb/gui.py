@@ -5457,6 +5457,11 @@ def build_gui(sim=False, preselect_port=None, log_dir=None):
             _cov_note = condition_mod.coverage_note(cov)
             if _cov_note:
                 _row("Cell readings available", _cov_note, "attention")
+            # Item 28: the same sentences the saved page prints, from the same
+            # composer - n=2 is one other reading, never a range.
+            for _cmp in condition_mod.comparison_lines(
+                    a, temp_units=config.get_temp_units()):
+                _row("Beside the other bike", _cmp, "measured")
             cap = a["charge_capacity"]
             if cap:
                 _row("Charge capacity",

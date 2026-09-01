@@ -913,6 +913,49 @@ def not_from_a_bike(folder):''',
      '''    if False:''',
      "tests/test_sevcon.py::"
      "test_the_coverage_note_names_the_damage_and_its_remedy"),
+
+    # item 28 - the two-bike comparison
+    ("28: compare a side that is below its floor",
+     "src/openmbb/condition.py",
+     '''        if n_mine < MIN_LOADED_SAMPLES or n_theirs < MIN_LOADED_SAMPLES:''',
+     '''        if False:''',
+     "tests/test_condition.py::"
+     "test_a_thin_side_refuses_and_says_what_it_needs"),
+
+    ("28: compare a charge index off one session",
+     "src/openmbb/condition.py",
+     '''MIN_COMPARE_SESSIONS = 5''',
+     '''MIN_COMPARE_SESSIONS = 1''',
+     "tests/test_condition.py::"
+     "test_a_thin_side_refuses_and_says_what_it_needs"),
+
+    ("28: drop the conditions from the sag comparison",
+     "src/openmbb/condition.py",
+     '''            % (mine_sag["min_cell_mv"], cond_mine, Label,''',
+     '''            % (mine_sag["min_cell_mv"], "", Label,''',
+     "tests/test_condition.py::"
+     "test_the_sag_comparison_shows_both_sets_of_conditions"),
+
+    ("28: stop admitting a reference capture is provisional",
+     "src/openmbb/condition.py",
+     '''        if other.get("truncated") else ""''',
+     '''        if False else ""''',
+     "tests/test_condition.py::"
+     "test_a_truncated_reference_says_so_on_every_line_it_feeds"),
+
+    ("28: look up only one spelling of the derate key",
+     "src/openmbb/condition.py",
+     '''    mine_der = (assessment.get("derate") or assessment.get("derate_profile")
+                or {})''',
+     '''    mine_der = assessment.get("derate_profile") or {}''',
+     "tests/test_condition.py::"
+     "test_the_derate_comparison_survives_either_spelling_of_its_key"),
+
+    ("28: render the comparison on one surface only",
+     "src/openmbb/report.py",
+     '''    out += _comparison_lines(c)''',
+     '''    pass''',
+     "tests/test_report.py::test_the_comparison_reaches_the_saved_page"),
 ]
 
 

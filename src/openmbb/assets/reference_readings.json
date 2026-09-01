@@ -1,0 +1,113 @@
+{
+  "_what_this_is": [
+    "Every Gen2 Zero this project has actually measured, as DERIVED READINGS.",
+    "No capture content lives here and none ever should - these are the numbers",
+    "the analysis produced, with enough provenance for a reader to weigh them.",
+    "",
+    "It exists because the tool's calibration base used to live in docstrings and",
+    "comments, where a user could not read it and a threshold could not cite it.",
+    "",
+    "n=2 is not a population. Nothing here supports the word 'normal': what two",
+    "bikes support is a COMPARISON - your reading beside a named bike's, with",
+    "both sets of conditions shown. See condition.comparison_lines, which",
+    "refuses any comparison whose either side is below the floor for it."
+  ],
+  "bikes": [
+    {
+      "bike_id": "reference-2017-fxs",
+      "label": "the 2017 FXS this tool was built on",
+      "source": "the maintainer's own motorcycle; every threshold in OpenMBB that has a number in it came from this bike",
+      "public": false,
+      "model_year": 2017,
+      "model": "FXS",
+      "firmware_rev": 41,
+      "odo_km": 7924,
+      "captured": "2026-08-29",
+      "truncated": false,
+      "notes": [
+        "Statistics were reset by the 2026-06-13 firmware update, so every",
+        "'lifetime' figure on this bike is younger than the bike.",
+        "Cells: 28. Ridden hard enough to produce loaded samples across a wide",
+        "current range, which is what makes its deviation figure meaningful."
+      ],
+      "metrics": {
+        "cell_deviation": {
+          "median_mv": 63.8,
+          "p90_mv": 98.7,
+          "worst_mv": 398.2,
+          "samples": 657
+        },
+        "cell_sag": {
+          "min_cell_mv": 3165.0,
+          "at_amps": 136.0,
+          "at_soc_pct": 85.0,
+          "at_pack_temp_c": 30.0,
+          "loaded_samples": 657
+        },
+        "derate_profile": {
+          "median_pct": 88.0,
+          "worst_pct": 22.0,
+          "worst_at_pack_temp_c": 59.0,
+          "worst_at_soc_pct": 27.0,
+          "samples": 1227
+        },
+        "charge_index": {
+          "median_ah": 18.0,
+          "min_ah": 15.92,
+          "max_ah": 20.32,
+          "sessions": 36,
+          "window_v": [103.0, 113.0]
+        }
+      }
+    },
+    {
+      "bike_id": "issue-1-2026-08-31",
+      "label": "the second measured Gen2",
+      "source": "shared by its owner on https://github.com/rodu4835/openmbb/issues/1 (2026-08-31), redacted with OpenMBB's own share-safe export",
+      "public": true,
+      "model_year": null,
+      "model": null,
+      "firmware_rev": 41,
+      "odo_km": 2388,
+      "captured": "2026-08-31",
+      "truncated": true,
+      "notes": [
+        "TRUNCATED and DAMAGED, and every figure below inherits both.",
+        "The event-log read ended before the console finished, so the log covers",
+        "part of the window it should. 104 of its 267 ride records also arrived",
+        "with fragments of themselves spliced in and were refused whole, which",
+        "is why the sample counts are small.",
+        "A re-pull on an idle machine is expected and will replace this entry."
+      ],
+      "metrics": {
+        "cell_deviation": {
+          "median_mv": 6.8,
+          "p90_mv": 21.9,
+          "worst_mv": 23.5,
+          "samples": 14
+        },
+        "cell_sag": {
+          "min_cell_mv": 3367.0,
+          "at_amps": 61.0,
+          "at_soc_pct": 8.0,
+          "at_pack_temp_c": 40.0,
+          "loaded_samples": 14
+        },
+        "derate_profile": {
+          "median_pct": 98.0,
+          "worst_pct": 22.0,
+          "worst_at_pack_temp_c": 39.0,
+          "worst_at_soc_pct": 0.0,
+          "samples": 159
+        },
+        "charge_index": {
+          "median_ah": 10.83,
+          "min_ah": 10.83,
+          "max_ah": 10.83,
+          "sessions": 1,
+          "window_v": [103.0, 113.0]
+        }
+      }
+    }
+  ]
+}

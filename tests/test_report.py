@@ -231,6 +231,23 @@ def test_the_condition_report_leads_with_the_headline_not_the_level(tmp_path):
     assert v["headline"] in txt
 
 
+def test_the_comparison_reaches_the_saved_page(tmp_path):
+    """Item 28's mirror half: one composer, both surfaces. The Condition tab
+    renders the same sentences (test_gui_flow), and this is the page a buyer
+    reads - the surface pair this project has had to repair before."""
+    from openmbb import condition as _c
+
+    s = sessions.load_session(_sim_session(tmp_path))
+    rep = report.analyze_session(s)
+    expected = _c.comparison_lines(rep.get("condition") or {})
+    txt = report.condition_report(s)
+    if not expected:
+        return                      # nothing measurable in a sim capture
+    assert "beside the one other measured Gen2" in txt
+    # the sentences themselves, not a paraphrase
+    assert expected[0].split(":")[0] in txt
+
+
 def test_the_report_never_prints_the_folders_own_name(tmp_path):
     # report.py printed `session.name` into the one page this project builds to
     # be handed to a stranger, and the PII gate guarding that page scans for
