@@ -1,7 +1,10 @@
 """Blocklist, write whitelist, and validators.
 
-The blocklist is enforced by the transport layer (see transport.Transport),
-so no UI path — including the raw-command box — can send a blocked command.
+The blocklist is enforced by the transport layer (see transport.Transport)
+as an informed-consent gate: no path sends a blocked command until the owner
+has read the consequences and typed 'confirm' — the raw box is where that
+override lives, and SECURITY.md documents it as intended. The refusals with no
+override at all are the control-character / non-ASCII / multi-line ones.
 """
 
 import re

@@ -122,7 +122,7 @@
     "category": "dangerous",
     "danger": "dangerous",
     "one_liner": "Clear stored diagnostic trouble codes.",
-    "what_it_does": "Clears stored DTCs (BLOCKED_COMMANDS comment: 'clears stored DTCs'). On the hard blocklist - the transport refuses to send it from any path, including the raw box.",
+    "what_it_does": "Clears stored DTCs (BLOCKED_COMMANDS comment: 'clears stored DTCs'). On the blocklist - refused from every app flow; the raw box sends it only after you read the consequences and type 'confirm'.",
     "what_could_happen": "Erases the stored fault history the bike (and a technician) would use to diagnose a problem. The clearing itself is a deliberate state change; a real underlying fault will simply re-log if still present, but past evidence is gone.",
     "reversible": "No - cleared DTCs cannot be un-cleared; the historical fault records are permanently gone.",
     "recovery": "Not recoverable without a prior log capture. Run errorlogdump/eventlogdump BEFORE any clear to preserve the record; there is no console way to restore cleared codes."
@@ -132,7 +132,7 @@
     "category": "dangerous",
     "danger": "dangerous",
     "one_liner": "Force all battery modules into storage mode.",
-    "what_it_does": "Forces the battery modules into storage mode (BLOCKED_COMMANDS comment: 'forces battery modules into storage mode'). On the hard blocklist - never sent.",
+    "what_it_does": "Forces the battery modules into storage mode (BLOCKED_COMMANDS comment: 'forces battery modules into storage mode'). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first.",
     "what_could_happen": "Commands the pack toward its storage state of charge / storage behavior, changing pack management state deliberately. Exact firmware-side effects and whether it self-discharges cells are not fully documented in the repo.",
     "reversible": "Unknown / treat as potentially irreversible - the repo does not document a clean inverse, and any self-discharge toward a storage SOC would not be undone by simply exiting the mode.",
     "recovery": "Not documented. Best effort would be a normal charge cycle to bring the pack back up, but any state change or discharge caused by storage mode may not be cleanly reversible; treat as unrecoverable without vendor tooling."
@@ -142,7 +142,7 @@
     "category": "dangerous",
     "danger": "catastrophic",
     "one_liner": "Bootloader command block.",
-    "what_it_does": "Bootloader command block (BLOCKED_COMMANDS comment: 'bootloader command block'). Exposes bootloader-level operations. On the hard blocklist - never sent.",
+    "what_it_does": "Bootloader command block (BLOCKED_COMMANDS comment: 'bootloader command block'). Exposes bootloader-level operations. On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first.",
     "what_could_happen": "Gives access to bootloader commands that can alter or erase firmware / low-level state. Effects are undocumented in the repo and potentially brick-class.",
     "reversible": "No / unknown - bootloader-level operations can leave firmware in an unbootable state with no console-level undo.",
     "recovery": "Not recoverable without a firmware reflash via vendor/dealer tooling; potentially requires MBB replacement if the bootloader path corrupts firmware."
@@ -152,7 +152,7 @@
     "category": "dangerous",
     "danger": "catastrophic",
     "one_liner": "Bluetooth BMS firmware updater (firmware flashing).",
-    "what_it_does": "Bluetooth BMS firmware updater = firmware flashing (BLOCKED_COMMANDS comment: 'bluetooth BMS firmware updater'). On the hard blocklist - never sent.",
+    "what_it_does": "Bluetooth BMS firmware updater = firmware flashing (BLOCKED_COMMANDS comment: 'bluetooth BMS firmware updater'). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first.",
     "what_could_happen": "Initiates a firmware flash of the Bluetooth BMS. An interrupted or wrong flash can brick the target module.",
     "reversible": "No - flashing overwrites firmware; a failed/partial flash is not undoable from the console.",
     "recovery": "Not recoverable without a successful re-flash via vendor tooling; a bricked module may need replacement."
@@ -192,7 +192,7 @@
     "category": "dangerous",
     "danger": "dangerous",
     "one_liner": "Reset settings to defaults.",
-    "what_it_does": "Resets settings (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_it_does": "Resets settings (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first.",
     "what_could_happen": "Reverts all configurable settings to firmware defaults, discarding any custom configuration (sprocket/speedo calibration, ride-mode customization, reserve, etc.).",
     "reversible": "Partially - you can re-enter each setting IF you recorded the prior values first; the reset itself provides no undo.",
     "recovery": "Re-apply each setting by hand from a prior full 'set' dump. Without a saved dump the old values are lost."
@@ -202,7 +202,7 @@
     "category": "dangerous",
     "danger": "dangerous",
     "one_liner": "Reset lifetime statistics.",
-    "what_it_does": "Resets stats (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_it_does": "Resets stats (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first.",
     "what_could_happen": "Zeroes lifetime statistics (odometer, top speed, all-time max temps).",
     "reversible": "No - reset lifetime stats cannot be restored; odometer/history is permanently zeroed.",
     "recovery": "Not recoverable without a prior 'stats' capture, and even then the values can only be noted, not restored to the bike."
@@ -212,7 +212,7 @@
     "category": "dangerous",
     "danger": "dangerous",
     "one_liner": "Clear the event log.",
-    "what_it_does": "Clears the event log (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_it_does": "Clears the event log (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first.",
     "what_could_happen": "Permanently erases the event-log history used for diagnosis.",
     "reversible": "No - cleared event log entries are gone.",
     "recovery": "Not recoverable without a prior eventlogdump capture; dump the log before clearing to preserve it."
@@ -222,7 +222,7 @@
     "category": "dangerous",
     "danger": "dangerous",
     "one_liner": "Clear the error log.",
-    "what_it_does": "Clears the error log (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_it_does": "Clears the error log (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first.",
     "what_could_happen": "Permanently erases the error-log history.",
     "reversible": "No - cleared error log entries are gone.",
     "recovery": "Not recoverable without a prior errorlogdump capture; dump the log before clearing to preserve it."
@@ -232,7 +232,7 @@
     "category": "dangerous",
     "danger": "caution",
     "one_liner": "Inject a synthetic event-log entry.",
-    "what_it_does": "Adds an entry to the event log (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_it_does": "Adds an entry to the event log (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first.",
     "what_could_happen": "Writes a fabricated/synthetic entry into the event log, polluting the diagnostic record. Not destructive to hardware, but corrupts log integrity.",
     "reversible": "No - an individual injected entry cannot be selectively removed (only a full log clear would remove it, itself destructive).",
     "recovery": "Not cleanly recoverable; the only removal is a full eventlogclear, which destroys all other entries too."
@@ -242,7 +242,7 @@
     "category": "dangerous",
     "danger": "caution",
     "one_liner": "Inject a synthetic error-log entry.",
-    "what_it_does": "Adds an entry to the error log (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_it_does": "Adds an entry to the error log (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first.",
     "what_could_happen": "Writes a fabricated entry into the error log, polluting the diagnostic record.",
     "reversible": "No - an injected entry cannot be selectively removed without a full errorlogclear (itself destructive).",
     "recovery": "Not cleanly recoverable; removal requires a full errorlogclear that destroys all other entries too."
@@ -252,7 +252,7 @@
     "category": "dangerous",
     "danger": "caution",
     "one_liner": "Reboot / reset the MBB.",
-    "what_it_does": "Resets the MBB (BLOCKED_COMMANDS). On the hard blocklist - never sent. Would reboot the controller and lose the logged-in console session/state.",
+    "what_it_does": "Resets the MBB (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first. Would reboot the controller and lose the logged-in console session/state.",
     "what_could_happen": "The MBB reboots mid-session: login level and console state are lost (transport treats a boot banner as a ConsoleRebootError). If sent while riding, a controller reset drops normal operation.",
     "reversible": "Partially - a reset is a reboot, not a data change, so the bike comes back up; but the current session and any in-progress operation are lost.",
     "recovery": "Reconnect on the Connect tab and log in again. Never send while the bike is in motion."
@@ -262,7 +262,7 @@
     "category": "dangerous",
     "danger": "catastrophic",
     "one_liner": "Exit to bootloader.",
-    "what_it_does": "Exits to the bootloader (BLOCKED_COMMANDS). On the hard blocklist - never sent.",
+    "what_it_does": "Exits to the bootloader (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first.",
     "what_could_happen": "Drops the MBB out of the application firmware into the bootloader, halting normal operation and exposing firmware-flash operations. If firmware is not cleanly re-entered/flashed the unit can be left non-functional.",
     "reversible": "No / unknown - leaving the application for the bootloader is not a simple reversible toggle from the console; recovery depends on the bootloader path.",
     "recovery": "Not recoverable without vendor/dealer tooling to return to or reflash the application firmware; potential brick if the bootloader session is mishandled."
@@ -272,7 +272,7 @@
     "category": "dangerous",
     "danger": "dangerous",
     "one_liner": "Console test command (state-changing).",
-    "what_it_does": "Blocked test command (BLOCKED_COMMANDS). On the hard blocklist - never sent. The repo treats it as unsafe/state-changing and does not document its exact behavior.",
+    "what_it_does": "Blocked test command (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first. The repo treats it as unsafe/state-changing and does not document its exact behavior.",
     "what_could_happen": "Undocumented test/diagnostic action that may actuate outputs or change state. Because its behavior is not characterized in the repo it must be treated as potentially harmful.",
     "reversible": "Unknown - undocumented; treat as potentially irreversible.",
     "recovery": "Not documented; treat as unrecoverable without knowing exactly what the specific test routine did."
@@ -282,7 +282,7 @@
     "category": "dangerous",
     "danger": "dangerous",
     "one_liner": "Watchdog-timer command (state-changing).",
-    "what_it_does": "Blocked watchdog command (BLOCKED_COMMANDS). On the hard blocklist - never sent. Repo does not document its exact effect; treated as unsafe.",
+    "what_it_does": "Blocked watchdog command (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first. Repo does not document its exact effect; treated as unsafe.",
     "what_could_happen": "Manipulating the watchdog timer can cause a reset or leave the safety watchdog in an unexpected state.",
     "reversible": "Unknown - undocumented; treat as potentially irreversible / could force a reset.",
     "recovery": "Not documented; a resulting reset would require reconnect/login. Treat effect as unrecoverable without knowing the exact action."
@@ -292,7 +292,7 @@
     "category": "dangerous",
     "danger": "dangerous",
     "one_liner": "Timing command (state-changing).",
-    "what_it_does": "Blocked timing command (BLOCKED_COMMANDS). On the hard blocklist - never sent. Exact effect not documented in the repo; treated as unsafe.",
+    "what_it_does": "Blocked timing command (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first. Exact effect not documented in the repo; treated as unsafe.",
     "what_could_happen": "May alter timing-related parameters; undocumented and potentially affects drivetrain/controller behavior.",
     "reversible": "Unknown - undocumented; treat as potentially irreversible.",
     "recovery": "Not documented; treat as unrecoverable without a prior record of any changed values."
@@ -302,7 +302,7 @@
     "category": "dangerous",
     "danger": "dangerous",
     "one_liner": "CAN-bus command (state-changing).",
-    "what_it_does": "Blocked CAN command (BLOCKED_COMMANDS). On the hard blocklist - never sent. Exact effect not documented; treated as a write to the CAN subsystem.",
+    "what_it_does": "Blocked CAN command (BLOCKED_COMMANDS). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first. Exact effect not documented; treated as a write to the CAN subsystem.",
     "what_could_happen": "Could inject/alter CAN traffic or bus configuration, disturbing communication with the BMS/Sevcon and normal operation.",
     "reversible": "Unknown - undocumented; treat as potentially irreversible for any configuration it changes.",
     "recovery": "Not documented; a bus disturbance may clear on reset, but any changed configuration may not. Treat as unrecoverable without knowing the exact action."
@@ -312,7 +312,7 @@
     "category": "dangerous",
     "danger": "dangerous",
     "one_liner": "Charger control command (state-changing).",
-    "what_it_does": "Blocked charger command (BLOCKED_COMMANDS - note this is singular 'charger', distinct from the read 'chargers'). On the hard blocklist - never sent. Exact effect not documented; treated as a write to charging.",
+    "what_it_does": "Blocked charger command (BLOCKED_COMMANDS - note this is singular 'charger', distinct from the read 'chargers'). On the blocklist - no app flow sends it, and the raw box requires a typed 'confirm' first. Exact effect not documented; treated as a write to charging.",
     "what_could_happen": "May command or alter charger behavior. Mismanaging charging is a battery-safety concern; undocumented in the repo.",
     "reversible": "Unknown - undocumented; treat as potentially irreversible for anything it changes and potentially hazardous.",
     "recovery": "Not documented; treat as unrecoverable without vendor guidance. Use the read-only 'chargers' command for status instead."
@@ -693,7 +693,7 @@
     "category": "write",
     "danger": "caution",
     "one_liner": "Set Custom-mode max speed in mph.",
-    "what_it_does": "WRITE_WHITELIST 'maxcustspmph' - 'Custom mode: max speed (mph)'. Top speed in Custom ride mode (real rev-41 name maxcustspmph). Physical ceiling ~85 mph; console accepts up to 102. Validator: whole number 20-102. Risk text labels it SAFE (factory-supported parameter space). Gated Writes-tab path only.",
+    "what_it_does": "WRITE_WHITELIST 'maxcustspmph' - 'Custom mode: max speed (mph)'. Top speed in Custom ride mode (real rev-41 name maxcustspmph). The console accepts up to 102, but the bike clamps the stored value to the factory 89 mph while answering SUCCESS (verified live 2026-07-12) - the read-back is how OpenMBB catches it. Validator: whole number 20-102. Gated Writes-tab path only.",
     "what_could_happen": "Sets the Custom ride-mode speed cap. Values above the bike's ~85 mph physical ceiling are accepted by the console but not physically achievable; it stays within the factory-supported parameter space.",
     "reversible": "Yes - it is a whitelisted, journaled setting; re-run the write with the prior value (captured in the writes journal / 'set' dump) to restore it.",
     "recovery": "Re-write the previous value via the Writes tab; the write flow journals old->new so the prior value is recorded."
@@ -713,9 +713,9 @@
     "category": "write",
     "danger": "caution",
     "one_liner": "Set Custom-mode coast (off-throttle) regen (% of allowed).",
-    "what_it_does": "WRITE_WHITELIST 'maxcustregcotq_allow' - 'Custom mode: coast regen (% of allowed)'. Off-throttle coast regen in Custom mode, % of allowed (real name maxcustregcotq_allow). Validator _v_coast_regen: whole number 0-100. Exactly 0 is ALLOWED and warned - it disables off-throttle regen entirely. Risk text: 'SAFE - factory-supported range; 0 disables coast regen entirely.' Gated Writes-tab path only.",
+    "what_it_does": "WRITE_WHITELIST 'maxcustregcotq_allow' - 'Custom mode: coast regen (% of allowed)'. Off-throttle coast regen in Custom mode, % of allowed (real name maxcustregcotq_allow). Validator _v_coast_regen: whole number 0-100. Exactly 0 is ALLOWED and warned - it disables off-throttle regen entirely. Risk text: 'SAFE - factory-supported range; 0 disables coast regen entirely.' On the verified rev-41 FXS the console answers FAILED to every write of this setting - the firmware derives it from its x10 sibling, so it cannot be set directly; the app says so up front instead of letting you fail three times. Gated Writes-tab path only.",
     "what_could_happen": "Changes off-throttle regen braking feel. Very low values give free coasting; exactly 0 disables off-throttle regen entirely, so the write flow warns before you confirm.",
-    "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value.",
+    "reversible": "In principle - whitelisted and journaled - but on the verified rev-41 FXS every write of it is REFUSED, so there is never anything to undo.",
     "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
   },
   {
@@ -723,9 +723,9 @@
     "category": "write",
     "danger": "caution",
     "one_liner": "Set Custom-mode brake regen (% of allowed).",
-    "what_it_does": "WRITE_WHITELIST 'maxcustregbrtq_allow' - 'Custom mode: brake regen (% of allowed)'. Regen applied when the brake switch triggers, in Custom mode (real name maxcustregbrtq_allow). Validator: whole number 0-100. Risk text labels it SAFE (factory-supported parameter space). Gated Writes-tab path only.",
+    "what_it_does": "WRITE_WHITELIST 'maxcustregbrtq_allow' - 'Custom mode: brake regen (% of allowed)'. Regen applied when the brake switch triggers, in Custom mode (real name maxcustregbrtq_allow). Validator: whole number 0-100. On the verified rev-41 FXS the console answers FAILED to every write of this setting - the firmware derives it from its x10 sibling, so it cannot be set directly; the app says so up front instead of letting you fail three times. Gated Writes-tab path only.",
     "what_could_happen": "Changes how much regen is applied when the brake switch triggers in Custom mode; affects brake feel. Stays within factory-supported bounds.",
-    "reversible": "Yes - whitelisted and journaled; restore by re-writing the prior value.",
+    "reversible": "In principle - whitelisted and journaled - but on the verified rev-41 FXS every write of it is REFUSED, so there is never anything to undo.",
     "recovery": "Re-write the previous value via the Writes tab (old value is journaled)."
   },
   {

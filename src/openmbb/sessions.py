@@ -2,7 +2,11 @@
 
 A session folder (written by transport.SessionLogger) holds one file per
 command — `NNN_<cmd>.txt` with a `# command: <cmd>` header — plus
-`settings_baseline_*.txt` / `settings_backup_*.txt` raw settings dumps.
+`settings_baseline_*.txt` / `settings_backup_*.txt` raw settings dumps, and
+`session_meta.txt` from the moment the folder exists (capture format, time,
+app version; a full pull adds firmware rev, power mode and `source:`). This
+module is what reads that stamp back — capture_format(), session_source(),
+capture_identity().
 """
 
 import glob

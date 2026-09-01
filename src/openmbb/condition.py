@@ -842,8 +842,11 @@ def beyond_pack_notes(metrics):
 def verdict(assessment, metrics=None):
     """A plain-language read on the pack, from one capture.
 
-    Returns {level, headline, checks, confidence, caveats}. `level` is one of
-    concern / watch / ok / unknown, worst-wins across the checks.
+    Returns {level, beyond_pack, headline, checks, answered, total_checks,
+    confidence, caveats}. `level` is one of concern / watch / ok / unknown,
+    worst-wins across the checks. `beyond_pack` carries the findings a green
+    pack verdict must not walk a reader past; `answered`/`total_checks` are the
+    fixed pack-check fraction the headline prints.
 
     Only checks that need NO reference bike are used: self-referencing ones
     where the pack is its own control, absolute ones fixed by chemistry, and

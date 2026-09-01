@@ -3,12 +3,17 @@
 Phases:  0 Connect -> 1 Read (baseline) -> 2 Login -> 3 Writes (whitelist-only)
 
 Safety model (enforced in the TRANSPORT layer, not just the UI):
-  * HARD BLOCKLIST: destructive/dangerous commands can never be sent, from any
-    UI path including the raw-command box.
-  * Writes are WHITELIST-only, and only for settings actually present in the
-    live `set` dump.
+  * BLOCKLIST as an informed-consent gate: destructive/dangerous commands are
+    refused from every flow, and the raw box sends one ONLY after the owner has
+    read the consequences and typed 'confirm' (SECURITY.md calls that intended
+    behaviour, and it is). The refusals with NO override are the control
+    character / non-ASCII / multi-line ones.
+  * Writes through the write flow are WHITELIST-only, and only for settings
+    actually present in the live `set` dump; a raw-box `set` faces the same
+    typed-'confirm' gate rather than the whitelist.
   * Every write: re-read current -> confirm old->new -> auto-backup full
-    settings dump -> send -> read-back verify -> journal (per-entry revert).
+    settings dump -> journal intent -> send -> read-back verify -> journal
+    what the bike actually reported (a refusal is recorded in its own words).
 
 Console work is done PARKED, key on, kill switch off. Never while riding.
 """

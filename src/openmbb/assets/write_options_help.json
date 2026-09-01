@@ -38,14 +38,14 @@
     "name": "maxcustregcotq_allow",
     "plain_name": "Custom mode: coast regen (% of allowed)",
     "what_it_does": "Sets the regenerative braking strength when you roll off the throttle (coast) in Custom mode, as a percentage of what the Sevcon allows. Lower values give a more free-coasting feel and improve efficiency. Higher values give stronger engine-braking.",
-    "caution": "0% disables off-throttle regen completely: the bike freewheels when you roll off instead of slowing, which changes the deceleration you are used to. Zero's own app writes 0 in some flows. Values around 5% give a near-freewheel feel with regen still present.",
+    "caution": "0% disables off-throttle regen completely: the bike freewheels when you roll off instead of slowing, which changes the deceleration you are used to. Zero's own app writes 0 in some flows. Values around 5% give a near-freewheel feel with regen still present. On the verified rev-41 FXS the console answers FAILED to every write of this setting - the firmware derives it from its x10 sibling, so it cannot be set directly; the app says so up front instead of letting you fail three times.",
     "seen_on_rev41": true
   },
   {
     "name": "maxcustregbrtq_allow",
     "plain_name": "Custom mode: brake regen (% of allowed)",
     "what_it_does": "Sets the regen braking force applied when the brake switch closes (i.e. when you pull the brake lever) in Custom mode, as a percentage of what the Sevcon allows. 0% disables brake-lever-triggered regen in Custom mode; 100% applies maximum allowed brake regen.",
-    "caution": "Factory-supported. At 0% the brake lever triggers no regen in Custom mode. High values add significant electrical braking on top of hydraulic brakes — test in a safe area before riding normally.",
+    "caution": "Factory-supported. At 0% the brake lever triggers no regen in Custom mode. High values add significant electrical braking on top of hydraulic brakes — test in a safe area before riding normally. On the verified rev-41 FXS the console answers FAILED to every write of this setting - the firmware derives it from its x10 sibling, so it cannot be set directly; the app says so up front instead of letting you fail three times.",
     "seen_on_rev41": true
   },
   {

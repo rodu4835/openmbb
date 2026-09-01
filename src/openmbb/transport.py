@@ -1,7 +1,9 @@
 """Serial transport, session logging, and settings-dump parsing.
 
 Works over real pyserial or the simulator (sim.SimPort) — anything with
-read/write/close/in_waiting. Enforces the safety blocklist on every send and
+read/write/close/in_waiting. Screens every send — control characters and
+non-ASCII are refused unconditionally, and the safety blocklist is enforced
+unless the owner has typed 'confirm' (the informed-consent backstop) — and
 saves every command response to its own session file.
 """
 

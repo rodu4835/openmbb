@@ -5,6 +5,10 @@
   openmbb --port COM4     # preselect a port
   openmbb --selftest      # headless transport/safety tests
   openmbb --smoketest     # build the GUI once and exit
+
+  openmbb sessions        # list saved captures, no bike needed
+  openmbb analyze <dir>   # the full report from a saved capture
+  openmbb redact <dir>    # share-safe copy, verified before it is handed over
 """
 
 import argparse
@@ -331,8 +335,10 @@ def cmd_redact(args):
              if rep["by_kind"] else ""))
     if rep["skipped"]:
         print("  skipped (unreadable): %s" % ", ".join(rep["skipped"]))
-    print("  every output file was re-scanned and carries no VIN or serial.")
-    print("  Check it yourself before sending it anywhere.")
+    print("  every output file was re-scanned: no VIN, no serial numbers. It")
+    print("  looks for those identifier shapes and NOTHING else - your own")
+    print("  notes, your machine's clock and the whole event log go exactly")
+    print("  as written. Read it yourself before sending it anywhere.")
     return 0
 
 

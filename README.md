@@ -44,8 +44,9 @@ unless you send it yourself. That is what **File → Export share-safe copy…**
 for, and it re-scans every file it writes before handing it to you.
 
 The only outbound thing OpenMBB can do is **hand a URL to your web browser**,
-and only when you click a Help-menu item that says so (*Releases & changelog…*,
-*View project on GitHub*, *Report an issue…*). Your browser then makes that
+and only when you click something that says so: the three Help-menu items
+(*Releases & changelog…*, *View project on GitHub*, *Report an issue…*) and the
+home screen's *Open the releases page* link once a copy has gone stale. Your browser then makes that
 request the way it makes any other — OpenMBB is not involved and never learns
 the result.
 
@@ -245,8 +246,8 @@ holds the account name, which is not a VIN and would otherwise survive every
 check here. If anything shaped like an identifier does survive into the finished
 page, the report is **withheld entirely** rather than saved with a warning.
 
-**File → Session library…** lists every capture in your save folder as a row you
-can actually read: when it was taken, the odometer, the SOC, and the pack
+**File → Session library…** lists your captures (the sixty most recent) as
+rows you can actually read: when it was taken, the odometer, the SOC, and the pack
 verdict. Verdicts are read in the background after the list is on screen (each
 one re-reads about a megabyte of event log) and cached beside the capture, so a
 folder you have opened before comes back instantly. A capture pulled without
@@ -425,6 +426,8 @@ src/openmbb/
   charts.py      series extraction for the dependency-free plots
   config.py      saved preferences (units, theme, save location, logins)
   dialogs.py     themed message boxes, centred on the parent window
+  assets/        in-app help: info.html (Instructions / Wiring / Safety / the
+                 command reference), wiring.svg, the three help JSONs, icons
 tests/           pytest suite (safety/transport/config/analysis + GUI flow)
 ```
 
@@ -436,7 +439,9 @@ Everything lands in `<save-base>/openmbb-sessions/<timestamp>_<port>/`:
 full pull has run — firmware rev, power mode and what it was captured
 from), `settings_baseline_*.txt` — including the `_postlogin_` one, which is the
 authoritative pre-change backup — `settings_backup_*.txt` (auto, pre-write), and
-`writes_journal.txt` (every setting write, and every consented heavy read). Add a
+`writes_journal.txt` (every setting write, every consented heavy read, every
+write refused before it reached the wire, and every setting the bike moved
+without being asked). Add a
 note or open a session in the **Library** and two more appear:
 `session_note.txt`, which is your own free text, and `session_summary.json`, the
 cached verdict.
@@ -461,8 +466,9 @@ buried inside the install folder when you start from the desktop shortcut).
 Change it via **Tools → Settings → Session** (remembered across runs in
 `~/.openmbb/config.json`) or per-launch with `--logdir <path>`; if the configured
 folder ever goes missing (deleted, unplugged drive) the app falls back to the
-default instead of failing to connect. The current save target is shown in the
-top status strip and is clickable.
+default instead of failing to connect. The current save target is shown in
+**Tools → Settings → Session** (with Open folder and Copy path beside it), and
+**File → Open session folder** jumps straight to it.
 
 ## Analyzing a session without the bike
 
@@ -478,11 +484,14 @@ openmbb analyze <session-folder>       # the full report as text
 openmbb analyze <folder> --json        # the same report, structured
 openmbb analyze <folder> --units F     # temperatures in Fahrenheit
 openmbb analyze <folder> --fail-on-alert   # exit 1 if any HEALTH metric is at alert
+openmbb redact <session-folder>        # share-safe copy (same checks as the GUI export)
+openmbb redact <folder> --out <dst>    # ...to a chosen destination
 ```
 
-The text report is five blocks — **Health, Rides, Clocks, Condition, Verdict**,
-in that order. Rides needs an event log in the capture and Clocks needs a `stats`
-read; the other three always print, and say what they could not determine.
+The text report is six blocks — **Health, Rides, Bike state, Clocks,
+Condition, Verdict**, in that order. Rides needs an event log in the capture,
+Bike state needs the `inputs`/`runtime` reads, and Clocks needs a `stats` read;
+the other three always print, and say what they could not determine.
 Abbreviated from a real rev-41 capture:
 
 ```
@@ -497,7 +506,7 @@ Abbreviated from a real rev-41 capture:
   log covers 06/24/2026 21:59:31 -> 08/13/2026 18:03:28  (1231 ride, 1476 charge samples)
   charge accepted 103-113 V: median 17.83 Ah over 43 sessions
   weakest cell under load: 3165 mV at 136 A, 85% SOC, 30 C
-  discharge allowance: median 85% · worst 22% at 59 C / 27% SOC
+  discharge allowance: median 85%, worst 22% at 59 C / 27% SOC
   could not determine: whether the statistics were ever reset: none found, but
     this log only reaches back to 06/24/2026, so a reset before that would not appear
 
@@ -513,8 +522,9 @@ Abbreviated from a real rev-41 capture:
 `1` only with `--fail-on-alert`, and only when a **health** metric is at alert —
 narrower than it sounds, because that count comes off the health rows alone, so a
 `concern` verdict raised by a Condition check still exits `0`. `2` for a path
-that isn't a directory, or a directory holding neither an `NNN_<cmd>.txt` capture
-nor a settings dump. `--fail-on-alert` is there so this can drive a script or a
+that isn't a directory, a directory holding neither an `NNN_<cmd>.txt` capture
+nor a settings dump, or a capture whose format stamp this build refuses to read
+(written by a newer OpenMBB, or damaged). `--fail-on-alert` is there so this can drive a script or a
 scheduled check rather than only a pair of eyes.
 
 **On the JSON.** Each health metric is
@@ -538,7 +548,8 @@ rendered in. Every other temperature in the JSON is Celsius and its key says so
 read the temperature setting saved by the GUI.
 
 The top level carries `session`, `units`, `counts`, `health`, `rides`,
-`ride_source`, `ride_log_truncated`, `clocks`, `condition` and `verdict`.
+`consumption`, `range`, `ride_source`, `ride_log_truncated`, `clocks`,
+`bike_state`, `condition` and `verdict`.
 `condition` and `verdict` are always present — when a capture holds no event log
 their `undetermined` list and an `unknown` level are the answer, rather than the
 keys being absent.

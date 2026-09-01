@@ -31,7 +31,10 @@ In scope — examples of what's worth reporting:
 - A write that **skips the whitelist re-validation** in `Transport.write_setting`.
 - A path that could **brick a component or leave the bike in an unsafe state**
   more easily than the documented, confirmed flow.
-- A **PII leak** (VIN, serials, passwords) into logs, saved reports, or the repo.
+- A **PII leak** (VIN, serials, passwords) into logs, saved reports, or the
+  repo — or through the **share-safe export** while it reports verified clean:
+  that export exists to be trusted with exactly this, so an identifier surviving
+  it is very much a finding.
 - **Any outbound network request.** OpenMBB is built to make none — no update
   check, no telemetry, no crash reporting. A build that contacts a host on its
   own, for any reason however benign, is a finding, and so is any change that
