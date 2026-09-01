@@ -462,6 +462,34 @@ def _batt_temp(line):
     return float(m.group(1)) if m else None
 
 
+#: Labels that appear exactly ONCE on a well-formed sample line. A line
+#: carrying one of them twice has fragments of itself spliced into it - seen on
+#: a capture pulled over a loaded machine, where 28% of riding lines were
+#: mangled this way and 14% carried two different values for one field.
+#:
+#: The damage is not confined to the repeated field. `_ride_field` takes the
+#: FIRST match, so on a spliced line every value is whichever copy happened to
+#: land first, and a match can run across the seam between two fragments: a
+#: pack at 35 C read as 358 C because "35" was followed by the "8" of a date
+#: from the duplicated copy. That reading is in no plausible range and no range
+#: check can catch the others, which all are.
+_SPLICE_LABELS = (r"pack\s*temp", r"packsoc", r"motrpm", r"vpack", r"mincell")
+
+
+def _line_is_spliced(line):
+    """True if `line` repeats a label that occurs once on a whole record.
+
+    Refusing the whole record rather than the repeated field: the splice moves
+    every other value on the line too, and a value that is merely wrong is
+    worse than one that is missing, because this tool grades on it.
+    """
+    low = (line or "").lower()
+    for pat in _SPLICE_LABELS:
+        if len(re.findall(pat, low)) > 1:
+            return True
+    return False
+
+
 # A cell in a pack that is on its feet at all sits between these. A reading
 # outside them is a decode artifact, not a cell. Two-sided on purpose: the
 # fabrications seen on this platform run HIGH (8241 mV), but a rev-12 decode of
@@ -515,6 +543,15 @@ def _mode_samples(text, mode_word, required):
         if mv is not None and not (CELL_MV_MIN <= mv <= CELL_MV_MAX):
             rec["mincell_mv"] = None
             rec["curr_limit_pct"] = None
+        # ...and a spliced line is unreadable in EVERY field, not just the
+        # repeated one. Kept as a record so the sample count still reflects
+        # what the bike logged, with its values dropped and the reason named -
+        # a stretch we could not read is not a clean one (see coverage_note).
+        if _line_is_spliced(line):
+            for k in list(rec):
+                if k != "ts":
+                    rec[k] = None
+            rec["spliced"] = True
         records.append(rec)
     return records
 

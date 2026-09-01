@@ -605,6 +605,7 @@ def assess(event_log, max_batt_temp_c=None, temp_units="C"):
     cap = charge_capacity(charges)
 
     with_cell = sum(1 for r in rides if r.get("mincell_mv") is not None)
+    spliced = sum(1 for r in rides if r.get("spliced"))
 
     undetermined = []
     if not rides:
@@ -643,7 +644,11 @@ def assess(event_log, max_batt_temp_c=None, temp_units="C"):
                      # how much of the ride log can answer the cell question at
                      # all — the rest was written by an older firmware and is
                      # not decodable, which is a coverage limit, not a pass
-                     "ride_samples_with_cell": with_cell},
+                     "ride_samples_with_cell": with_cell,
+                     # arrived with fragments of themselves spliced in - every
+                     # field on them was refused, so they are a coverage limit
+                     # of their own with a different cause and a different fix
+                     "ride_samples_spliced": spliced},
         "stats_resets": resets,
         "faults": faults,
         "cell_sag": sag,
@@ -1276,6 +1281,27 @@ def coverage_note(cov):
     """
     total = (cov or {}).get("ride_samples") or 0
     with_cell = (cov or {}).get("ride_samples_with_cell")
+    spliced = (cov or {}).get("ride_samples_spliced") or 0
+    if spliced and total:
+        # A different cause with a different remedy: this one is fixable by
+        # re-pulling, and saying "written before a firmware change" over it
+        # would send the reader after the wrong thing.
+        note = ("%d of %d ride records arrived damaged — fragments of the same "
+                "line repeated, which happens when the console is read on a "
+                "busy machine. Every value on those records was refused rather "
+                "than read, because a splice moves the other fields too. "
+                "Re-pull with the machine idle to recover them."
+                % (spliced, total))
+        if with_cell is not None and with_cell < total - spliced:
+            note += (" Of the rest, cell voltage is readable on %d — the others "
+                     "carry a value no cell can hold (records written before a "
+                     "firmware change, re-read by a newer one). What the pack "
+                     "did across all of these is UNMEASURED here, not clean."
+                     % with_cell)
+        else:
+            note += (" What the pack did across them is UNMEASURED here, not "
+                     "clean.")
+        return note
     if not total or with_cell is None or with_cell >= total:
         return None
     return (

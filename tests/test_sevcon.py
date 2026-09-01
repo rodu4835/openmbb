@@ -15,7 +15,7 @@ import os
 
 import pytest
 
-from openmbb import health, parsers, sessions
+from openmbb import condition, health, parsers, sessions
 
 FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "fixtures", "rev41_sevcon.txt")
@@ -178,6 +178,79 @@ def test_a_hex_fault_count_is_unreadable_not_zero():
     assert not [m for m in health.health_snapshot(s)
                 if m["label"] == "Sevcon faults"], (
         "an unreadable fault count must leave the row out, never render ok")
+
+
+# ------------------------------- item 26: a spliced line is not a reading
+
+#: Verbatim from the second bike's capture (issue #1, 2026-08-31). The pack was
+#: at 35 C; the line arrived with fragments of itself spliced in, so the pack
+#: temperature regex matched "35" and ran on into the "8" of a duplicated date.
+_SPLICED_LINE = (
+    " 04453     08/16/2026 01:59:34   Riding                     PackTemp: h "
+    "358/16/2026 01:59:34   Riding                     PackTemp: h 35C, l 34C, "
+    "PackSOC: C, l 33C, PackSOC: 67%, Vpack:105.277V, MotAmps:   0, BattAmps:"
+    "   1, Mods: 10, MotTemp:  58C, CtrlTemp:  32C, AmbTemp:  23C, MotRPM:1240"
+    ":  23C, MotRPM:1307, Odo: 2021km, Curr limit: 570 A (100%), "
+    "MinCell: 3711mV")
+
+#: The same shape, undamaged.
+_CLEAN_LINE = (
+    " 00003     08/05/2026 06:27:38   Riding                     PackTemp: h "
+    "40C, l 38C, PackSOC: 88%, Vpack:111.483V, MotAmps: -33, BattAmps: -18, "
+    "Mods: 10, MotTemp:  83C, CtrlTemp:  42C, AmbTemp:  32C, MotRPM:1716, "
+    "Odo: 1615km, Curr limit: 570 A (100%), MinCell: 3928mV")
+
+
+def test_a_spliced_ride_record_is_refused_in_every_field():
+    """Item 26. 358 C is not a sensor reading - it is "35" followed by a digit
+    from a duplicated copy of the date. A range guard would have caught that
+    one number and left the 57 records in the same capture that carry two
+    DIFFERENT in-range values for one field, where the parser silently takes
+    whichever landed first.
+    """
+    recs = parsers.parse_ride_log(_SPLICED_LINE)
+    assert len(recs) == 1, "the record should survive as a counted sample"
+    rec = recs[0]
+    assert rec.get("spliced") is True
+    # every value refused, not just the temperature that looked wrong
+    for field in ("pack_temp_c", "soc", "vpack", "motrpm", "mincell_mv"):
+        assert rec.get(field) is None, "%s survived a spliced line" % field
+    # and 358 reaches nothing downstream
+    assert 358 not in [rec.get("pack_temp_c")]
+
+
+def test_an_undamaged_record_is_untouched():
+    # the guard has to be precise, or it eats real data: measured 0 false
+    # positives across 4,732 reference-bike records
+    recs = parsers.parse_ride_log(_CLEAN_LINE)
+    assert len(recs) == 1
+    rec = recs[0]
+    assert not rec.get("spliced")
+    assert rec["pack_temp_c"] == 40.0
+    assert rec["soc"] == 88.0
+    assert rec["motrpm"] == 1716.0
+    assert rec["mincell_mv"] == 3928.0
+
+
+def test_the_coverage_note_names_the_damage_and_its_remedy():
+    """Two causes now, and they have different fixes: a pre-firmware-change
+    record cannot be recovered, a spliced one can be re-pulled. Saying the
+    wrong one sends the reader after the wrong thing."""
+    note = condition.coverage_note({"ride_samples": 267,
+                                    "ride_samples_with_cell": 14,
+                                    "ride_samples_spliced": 104})
+    assert "104 of 267" in note
+    assert "busy machine" in note
+    assert "Re-pull" in note
+    assert "UNMEASURED" in note
+
+
+def test_the_note_keeps_the_firmware_wording_when_nothing_was_spliced():
+    note = condition.coverage_note({"ride_samples": 1137,
+                                    "ride_samples_with_cell": 635,
+                                    "ride_samples_spliced": 0})
+    assert "before a firmware change" in note
+    assert "busy machine" not in note
 
 
 # ------------------------------------------------- item 14: the simulator

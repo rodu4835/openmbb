@@ -892,6 +892,27 @@ def not_from_a_bike(folder):''',
      '''            leaks = []''',
      "tests/test_gui_flow.py::"
      "test_the_export_refuses_a_file_name_carrying_an_identifier"),
+
+    # item 26 - a spliced line is not a reading
+    ("26: read a spliced record as though it were data",
+     "src/openmbb/parsers.py",
+     '''        if _line_is_spliced(line):''',
+     '''        if False:''',
+     "tests/test_sevcon.py::"
+     "test_a_spliced_ride_record_is_refused_in_every_field"),
+
+    ("26: refuse every record, damaged or not",
+     "src/openmbb/parsers.py",
+     '''        if len(re.findall(pat, low)) > 1:''',
+     '''        if len(re.findall(pat, low)) > 0:''',
+     "tests/test_sevcon.py::test_an_undamaged_record_is_untouched"),
+
+    ("26: blame the firmware for a damaged capture",
+     "src/openmbb/condition.py",
+     '''    if spliced and total:''',
+     '''    if False:''',
+     "tests/test_sevcon.py::"
+     "test_the_coverage_note_names_the_damage_and_its_remedy"),
 ]
 
 
