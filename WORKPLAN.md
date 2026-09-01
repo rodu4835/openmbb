@@ -795,7 +795,18 @@ the original, and a **success dialog that stops reading as an all-clear** —
 naming what was scanned for and what remains, with the diff viewer behind a
 button. None of these commits anyone to anything.
 
-**23b — held, fully scoped.** `SHARING.md`, the issue template and
+**23b — HELD, and re-affirmed 2026-09-01 after the first invitation
+worked.** Ron: keep it at an invitation for now. The evidence supports it. One
+asked-for capture (issue #1) answered 6b, produced the first cross-bike
+comparison, and exposed a real parsing defect — at the cost of one comment
+and no standing promises. A permanent intake would have required the retention
+policy, the deletion channel and the pre-committed refusals to exist BEFORE
+anyone had sent anything. 23a already shipped, so any owner who wants to send a
+capture can; 23b only decides whether the app asks everyone, always. Revisit if
+invitations stop scaling — more than a handful outstanding at once, or a
+second person offering unprompted.
+
+**Scope, unchanged and still accurate:** `SHARING.md`, the issue template and
 `openmbb check-shared` open intake, and intake is a personal commitment —
 retention, deletion requests, the pre-committed refusals — not an engineering
 task. Everything needed to build it is recorded below; the decision to open it
