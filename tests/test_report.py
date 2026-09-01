@@ -231,21 +231,37 @@ def test_the_condition_report_leads_with_the_headline_not_the_level(tmp_path):
     assert v["headline"] in txt
 
 
-def test_the_comparison_reaches_the_saved_page(tmp_path):
+def test_the_comparison_reaches_the_saved_page():
     """Item 28's mirror half: one composer, both surfaces. The Condition tab
     renders the same sentences (test_gui_flow), and this is the page a buyer
-    reads - the surface pair this project has had to repair before."""
+    reads - the surface pair this project has had to repair before.
+
+    Driven with an assessment that HAS the metrics rather than a simulator
+    capture, which carries no loaded cell reading, no current limit and no
+    charge session - the first version of this test took a sim session, found
+    nothing to compare, and returned before asserting anything. It passed with
+    the render site deleted.
+    """
     from openmbb import condition as _c
 
-    s = sessions.load_session(_sim_session(tmp_path))
-    rep = report.analyze_session(s)
-    expected = _c.comparison_lines(rep.get("condition") or {})
-    txt = report.condition_report(s)
-    if not expected:
-        return                      # nothing measurable in a sim capture
-    assert "beside the one other measured Gen2" in txt
-    # the sentences themselves, not a paraphrase
-    assert expected[0].split(":")[0] in txt
+    c = {"cell_deviation": {"median_mv": 63.8, "samples": 657},
+         "cell_sag": {"min_cell_mv": 3165.0, "at_amps": 136.0,
+                      "at_soc_pct": 85.0, "at_pack_temp_c": 30.0},
+         "derate": {"median_pct": 88.0, "worst_pct": 22.0, "samples": 1227,
+                    "worst_at_pack_temp_c": 59.0, "worst_at_soc_pct": 27.0,
+                    "worst_when": "07/31/2026 16:44:04", "buckets": {}},
+         "charge_capacity": {"median_ah": 18.0, "sessions": 36,
+                             "window_v": [103.0, 113.0]}}
+    expected = _c.comparison_lines(c)
+    assert expected, "the composer yielded nothing, so this proves nothing"
+
+    body = "\n".join(report._condition_lines(c))
+
+    assert "beside the one other measured Gen2" in body
+    # the composer's own sentences, not a paraphrase of them
+    for sentence in expected:
+        head = sentence.split(":")[0]
+        assert head in body, head
 
 
 def test_the_report_never_prints_the_folders_own_name(tmp_path):
