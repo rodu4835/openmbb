@@ -1437,7 +1437,7 @@ documented 50–60 C stop band are anchors). **Test:** a log with one 358 C
 record grades from the sane records and names the refused one. **Mutation:**
 drop the bound — the test fails.
 
-### 27. Answer the reporter — the truncation, in plain words *(Ron posts)*
+### 27. ~~Answer the reporter~~ — **posted 2026-09-01** ([comment](https://github.com/rodu4835/openmbb/issues/1#issuecomment-5487848892), authorized)
 
 Their question ("is it possible some packets were dropped?") has a verified
 answer sitting in their own file: the capture ended early and SAYS so in its
