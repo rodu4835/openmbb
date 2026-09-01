@@ -52,13 +52,21 @@ fail (item 6d's local hex guard, superseded by item 13 and coarser than what
 replaced it) and six anchors this stack had moved out from under. Neither was
 visible to the per-item runs.
 
-**Next: 26 then 28, both unblocked.** The second motorcycle ARRIVED
-(2026-08-31, issue #1 — see C2): 6b is answered, and the grading question
-became concrete. Item 26 first (the garbage guard, so reference numbers come
-off a cleaned log), then item 28 (the two-bike comparison, design decided).
-Only the issue-#1 charge index waits on the reporter's re-pull — it is 2
-sessions against a 5-session floor. The module-connect rename, the BattTemp
-dialect and displayed 0% still want more bikes.
+**Next: nothing is blocked on code.** 26 and 28 shipped (2026-09-01);
+721 tests, 0 skipped; 111/111 mutation entries catching. The second bike is
+measured, 6b is answered, and the comparison surface exists and honestly
+refuses what it cannot yet compare.
+
+What is left needs someone else: **the reporter's re-pull** (their charge index
+is 1 session against a 5-session floor, and their sag rests on 14 loaded
+samples — both cross their floors with a clean capture), the **post-Nov-1
+DST reading**, and **23b**, which is held on a decision rather than on work.
+The module-connect rename, the BattTemp dialect and displayed 0% still want
+more bikes than two.
+
+**Worth releasing:** item 26 fixes a false ALERT that any damaged capture can
+produce, and it is the kind of thing the next person to share a capture will
+hit.
 
 **23b** (opening intake for shared captures) is the one queued item that
 attacks that ceiling without a second bike in the garage, and it is held on a
@@ -960,7 +968,7 @@ docstring — *"a dated page fit to hand a buyer"* — true for the first time.
 
 ---
 
-### 25. The stack review's fix pass *(review 2026-08-30, Fable; 30-agent adversarial pass + independent trace)*
+### 25. ~~The stack review's fix pass~~ — **shipped** (`1a81184`, in v0.27.0) *(review 2026-08-30, Fable; 30-agent adversarial pass + independent trace)*
 
 **Verdict on `8f39a67..HEAD`: NOT ready to push.** One critical, five major,
 ~13 minor, 8 notes. The pattern held a **fourth** time — and sharpened: four of
@@ -1426,7 +1434,31 @@ Working copy of the capture is OUTSIDE `openmbb-sessions\` deliberately — the
 trend charts exclude simulators, not other bikes, and this must never plot into
 the reference bike's history.
 
-### 26. A logged pack temperature needs the same plausibility guard cells got
+### 26. ~~A logged pack temperature needs a plausibility guard~~ — **shipped, premise corrected**
+
+**The filed premise was wrong and the truth was worse.** 358 C was not a bad
+sensor record: the line arrived with fragments of ITSELF spliced into it, so
+the pack-temperature regex matched "35" and ran on into the "8" of a duplicated
+date. The pack was at 35 C.
+
+A range guard would have fixed that one number and missed what was under it.
+Over the same capture: 415 riding lines, 118 with a repeated field label, **57
+carrying two DIFFERENT values for one field** — MotRPM 1963 and 2935 on the
+same line. `_ride_field` takes the FIRST match, so those were parsed into
+confident numbers that are wrong, and every one is in range where no range
+check can see it.
+
+Our read loop is clean (`buf += chunk`, appended once) and the corruption is in
+`session_raw.log` as received, so it arrived over the wire — the reporter
+pulled on a machine they called "very busy", and their instinct was right. Not
+our bug; still our problem, because we turned it into numbers.
+
+So the guard is not a range: a line repeating a label that occurs once is a
+line with a seam in it, and the seam moves every other field too. The record is
+kept as a counted sample, every value refused, the reason named — and the
+coverage note distinguishes this cause from the pre-firmware-change one,
+because only this one is fixed by re-pulling. Measured: 104 of 267 refused on
+the second bike, **0 of 4,732 on the reference captures**.
 
 358 C is not a temperature a pack survives, but nothing range-guards the event
 log's temperature fields, so a garbage record (the re-read-by-newer-firmware
@@ -1449,7 +1481,24 @@ already three weeks back), and the 358 C record is ours to guard against, not
 their bike misbehaving. Thank them — their one capture answered a question
 (6b) this project carried for weeks.
 
-### 28. The two-bike comparison — what grading honestly means at n=2
+### 28. ~~The two-bike comparison~~ — **shipped**
+
+Built as designed. Against the real pair, **two of four comparisons decline**
+and name their shortfall — which is the feature: a capture too thin to
+compare tells its owner what a better one buys. `assets/reference_readings.json`
+carries both bikes as derived readings with source, sample counts and a
+`truncated` flag, so the calibration base is finally something a user can read.
+
+**Four of my own defects, every one caught by machinery already here:** the
+derate key looked up under a name `assess()` does not use (silent empty
+comparison); Celsius printed into a Fahrenheit report (caught by the test
+written when that last happened, which insists on a real capture for exactly
+this reason); an invented synonym colliding with the unloaded-cell-floor needle
+(caught by the two-surface mirror); and a mirror test that early-returned on a
+simulator capture and asserted nothing (caught by the mutation runner). The
+guards did the work; the discipline is what made them exist.
+
+#### The design as scaffolded, kept as the record
 
 `derate_profile`'s own docstring has been waiting for this by name: *"What a
 second bike is for is turning this from a description into a test."* The second
