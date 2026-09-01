@@ -953,7 +953,7 @@ def not_from_a_bike(folder):''',
 
     ("28: render the comparison on one surface only",
      "src/openmbb/report.py",
-     '''    out += _comparison_lines(c)''',
+     '''    out += _comparison_lines(c, units)''',
      '''    pass''',
      "tests/test_report.py::test_the_comparison_reaches_the_saved_page"),
 ]
