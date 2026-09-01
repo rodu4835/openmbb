@@ -306,7 +306,7 @@ Then push; CI (which has seen none of this) judges the stack whole.
   CI a reintroduced lie still exits 0. Both are guards-of-guards; note them on
   item 8's ledger rather than build a third layer now.
 
-### 6. ~~Parse `sevcon`~~ — **shipped** (`da3d511`, `2d51a0f`)
+### 6. ~~Parse `sevcon`~~ — **shipped** (`da3d511`, `5c4ab4c`)
 
 `parse_sevcon` plus a Health row graded exactly like `obd`: the stored fault
 COUNT is presence-or-absence and needs no reference bike, so three faults is an
@@ -347,10 +347,18 @@ motor and the wheel, not 2.37; the Sevcon's figure is its own distance model
 run with a wrong constant (an assumed reduction near 1.89, or equivalently a
 wrong wheel circumference).
 
-**Open, for any second Gen2:** is the Sevcon's assumed constant the same on
-every bike (a DCF default nobody sets per-model) or does it vary? Same free
-measurement as before — one contactor-free pull carries both odometers and the
-stats to compute true revs/km. The refusal-to-print stands either way.
+**ANSWERED 2026-08-31, by the second bike** (the issue-#1 mail-in): the
+constant is SHARED. Divide each bike's motor revs by its own sevcon km:
+
+    Ron's FXS   18,082,161 rev / 18,821.3 sevcon-km = 960.9 rev/km
+    the Czech   5,857,470 rev /  6,092.6 sevcon-km = 961.4 rev/km
+
+0.06% apart — a DCF default nobody sets per bike, assuming ~961 motor revs
+per km (a ~1.04 m/rev wheel model). The km-to-km RATIO varies because real
+gearing does: 2.3752 on the FXS (2,282 rev/km) vs 2.5513 on the Czech bike
+(2,453 rev/km); ratio = real rev/km ÷ 961. First arithmetic pass paired one
+capture's revs with another's sevcon km and briefly "refuted" this — pair
+within a capture. The refusal-to-print stands, now with its mechanism.
 
 ### 6c. ~~The verdict must not let a green OK hide a red fault row~~ — **shipped** (`9e53397`)
 
@@ -1381,6 +1389,64 @@ six steps. What the data buys:
   the number is a Sevcon constant; anything else means it tracks the gearing and
   is a real measurement of the drive reduction.
 - Afterwards: **Export share-safe copy** before the capture leaves the machine.
+
+### C2. The second bike ARRIVED (2026-08-31) — first findings
+
+The reporter answered the calibration ask same-day with
+`openmbb-share-2026-09-01_004218_REDACTED.zip` on issue #1 — a full v0.27
+share-safe pull, event log included, exported hours after v0.27.0 shipped.
+`openmbb analyze` ran clean on it. Verified facts from the first pass:
+
+- **rev 41 firmware**, 2,388 km, 22 BMS cycles, cell spread 3 mV, isolation
+  8,203 kΩ (live sample 23 kΩ, no BMS fault flag — the same live-sample
+  shape as the reference bike). One active Sevcon fault.
+- **The truncation honesty earned its keep on a stranger's machine.** Their
+  eventlogdump ends with the transport's own marker (`### TRUNCATED: no console
+  prompt seen before the read ended`), the Rides block says "totals are a
+  floor... re-pull", and that is very likely their own question answered: two
+  100+ km rides (Aug 22/26) missing from logs pulled "with an old computer...
+  very busy". Reply is Ron's to post — item 27.
+- **A physically impossible 358 C pack temp is IN their log** (08/16 01:59:34,
+  23 C ambient) and the health grade follows the log, so their report carries
+  an ALERT driven by what is almost certainly a garbage record — the same
+  re-read-by-newer-firmware class the cell-voltage guard already refuses (10 of
+  their 267 ride records carry impossible cell values). Item 26.
+- **Charge index: 15.25 Ah median (103–113 V) over 2 sessions** vs the
+  reference bike's 18.00 — the first cross-bike capacity comparison, tiny n.
+- **Their clock is 9 h 3 m behind** — consistent with the thread's two-clock
+  model (UTC counter, −7 rendering, CEST local). DST question still waits for
+  the post-Nov-1 reading.
+- Note: the effective-gearing line prints "FX/FXS factory (20T front / 90T
+  rear...)" beside a 5.00:1 / 2,453 rev/km measurement that is NOT the FX/FXS
+  4.50 — check whether that parenthetical prints regardless of the measured
+  ratio (filed under item 26's survey, low stakes).
+
+Working copy of the capture is OUTSIDE `openmbb-sessions\` deliberately — the
+trend charts exclude simulators, not other bikes, and this must never plot into
+the reference bike's history.
+
+### 26. A logged pack temperature needs the same plausibility guard cells got
+
+358 C is not a temperature a pack survives, but nothing range-guards the event
+log's temperature fields, so a garbage record (the re-read-by-newer-firmware
+class) drives a real ALERT on the second bike's report. The cell-voltage guard
+("a value no cell can hold") is the model: refuse the reading, count it as
+unmeasured, say so. Survey which log temperature fields need bounds and what
+the honest bounds are (the bike's own stated charge range 0–50 C and the
+documented 50–60 C stop band are anchors). **Test:** a log with one 358 C
+record grades from the sane records and names the refused one. **Mutation:**
+drop the bound — the test fails.
+
+### 27. Answer the reporter — the truncation, in plain words *(Ron posts)*
+
+Their question ("is it possible some packets were dropped?") has a verified
+answer sitting in their own file: the capture ended early and SAYS so in its
+last line; the missing rides are very likely past the cut. Draft the reply
+around: what the marker means, that v0.27 waits up to 15 minutes per read on an
+idle machine, re-pull soon (the buffer is only weeks deep and Aug 22/26 are
+already three weeks back), and the 358 C record is ours to guard against, not
+their bike misbehaving. Thank them — their one capture answered a question
+(6b) this project carried for weeks.
 
 ### C. The issue-#1 reporter — a mail-in, zero cost *(asked 2026-08-31)*
 
