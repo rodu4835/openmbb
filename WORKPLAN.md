@@ -11,17 +11,26 @@ current: what to do next, what needs a motorcycle, and what was deliberately not
 Opus sessions. Queue items below are scaffolded for direct pickup — files, the change,
 the tests, and the mutation each test must catch.
 
-**State:** **v0.27.0 released 2026-08-31** — tagged, CI green both OSes,
-three binaries and release notes published, nothing unpushed. Tree clean,
-**709 tests passing with 0 skipped**, **102/102 mutation entries catching**.
+**State:** **v0.28.0 released 2026-09-01** — tagged, CI green both OSes,
+three binaries and release notes published. **721 tests passing with 0
+skipped**, **111/111 mutation entries catching**. One commit unpushed
+(`4ebb7b9`, the 23b decision).
 
-v0.27.0 carries the whole engineering queue AND the adversarial review of it.
-The release argument was the critical: a real motorcycle could keep the
-`[SIMULATOR — NOT YOUR BIKE]` title after a rehearsal, so real writes read as
-rehearsal, and that shipped in the v0.26.0 binaries. Every bike-day
-finding is closed (items 15–20b) and each was reviewed adversarially before
-landing — three of those reviews found real defects, twice in a fix that had
-just been made for the same class of problem.
+**Next: three small items from the data-driven-design audit (2026-09-05) —
+items 29–31.** About 250 lines between them, all tests and named constants,
+none touching `safety.py` or `transport.py`. Item 30 goes red on purpose until
+one decision is made — see *Open decisions*: are the four Custom-mode settings
+SAFE or caution? The reasoning, and what was deliberately NOT built, is in
+*From the data-driven-design audit* below.
+
+What is left after that needs someone else: **the reporter's re-pull** (their
+charge index is 1 session against a 5-session floor, and their weakest-cell-
+vs-pack figure rests on 14 loaded samples against a 30-sample floor — both cross
+their floors with a clean capture), the
+**post-Nov-1 DST reading**, and **23b**, which is held on a decision rather
+than on work — see item 23; the 2026-08-31 mail-in ask (section C) is the
+cheaper first try. The module-connect rename, the BattTemp dialect and
+displayed 0% still want more bikes than two.
 
 **The bike day (2026-08-29)** was the first real hardware since v0.22.x, and
 everything built across v0.23–v0.25 met a motorcycle at once and held: the 45 s
@@ -29,7 +38,7 @@ idle window returned `8301 of 8301` entries with zero `TRUNCATED`,
 `HEAVY READ CONSENTED` reached a real journal, `capture_format: 1` stamped, and
 the four-link write chain passed a real write in both directions. **Five real
 captures now**, and a 4th capacity point: 17.92 → 17.92 → 17.83 → **18.00 Ah**,
-spread 0.9%, no measurable degradation.
+spread under 1%, no measurable degradation.
 
 It also produced **eleven findings**, and the theme held all the way through:
 **the tool modelled intent well and outcome poorly** — it recorded what it
@@ -40,43 +49,26 @@ four settings nobody touched and said nothing; the audit file recorded requests
 and not results; a safety refusal that had shipped for 22 versions turned out
 to be unsourced folklore contradicted by the manufacturer's own app; and the
 write confirm dialog told a rider a value was refused while the app sent it.
+v0.27.0 carried the whole engineering queue and its adversarial review; the
+review's critical was that a real motorcycle could keep the
+`[SIMULATOR — NOT YOUR BIKE]` title after a rehearsal — introduced by 18c in
+`6edec18`, after the v0.26.0 tag, so it was caught before any binary carried it.
+(The v0.27.0 release notes say it shipped in v0.26.0; they are wrong, and so was
+the previous version of this paragraph.)
 
-**The engineering queue is empty** as of 2026-08-30. Items 7, 9–14, 18c,
-21–22, 23a and 24 all shipped in one stack: **698 tests passing with 0
-skipped** (was 648), **94/94 mutation entries catching**. What remains is
-**23b** — opening intake for shared captures, which is a personal
-commitment rather than an engineering task and is held deliberately — and **At a bike**, which needs a motorcycle.
+**The second bike (2026-08-31, issue #1)** arrived as a redacted share and did
+three things at once: answered 6b (the Sevcon odometer constant is a shared
+factory default, ~961 motor-rev/km on both bikes), exposed a defect in how the
+tool read EVERY capture (a line with fragments of itself spliced in was parsed
+into confident wrong numbers — item 26), and made comparison possible (item
+28, which honestly declines two of four against the real pair). v0.28.0
+carried both.
 
-**The full manifest run earned its keep twice.** It found a test that could not
-fail (item 6d's local hex guard, superseded by item 13 and coarser than what
-replaced it) and six anchors this stack had moved out from under. Neither was
-visible to the per-item runs.
-
-**Next: nothing is blocked on code.** 26 and 28 shipped (2026-09-01);
-721 tests, 0 skipped; 111/111 mutation entries catching. The second bike is
-measured, 6b is answered, and the comparison surface exists and honestly
-refuses what it cannot yet compare.
-
-What is left needs someone else: **the reporter's re-pull** (their charge index
-is 1 session against a 5-session floor, and their sag rests on 14 loaded
-samples — both cross their floors with a clean capture), the **post-Nov-1
-DST reading**, and **23b**, which is held on a decision rather than on work.
-The module-connect rename, the BattTemp dialect and displayed 0% still want
-more bikes than two.
-
-**Worth releasing:** item 26 fixes a false ALERT that any damaged capture can
-produce, and it is the kind of thing the next person to share a capture will
-hit.
-
-**23b** (opening intake for shared captures) is the one queued item that
-attacks that ceiling without a second bike in the garage, and it is held on a
-decision rather than on work — see item 23. The 2026-08-31 mail-in ask
-(section C) is the cheaper first try.
-
-**The organising constraint, sharpened:** only one motorcycle has ever been measured, and
-the code has now largely caught up with what one bike's data can teach. The next unit of
-progress is **data, not code** — see *At a bike*. Code items below either prepare for
-that data or protect what exists.
+**The organising constraint, restated:** two motorcycles have now been
+measured, and the code has caught up with what two can teach. Two bikes yield
+a comparison, never a threshold. The next unit of progress is still **data,
+not code** — see *At a bike* and section C. Code items below either prepare
+for that data or protect what exists.
 
 ---
 
@@ -1590,23 +1582,305 @@ first time this item has been.
 
 ---
 
+## From the data-driven-design audit (2026-09-05)
+
+Ron's design directive — a fixed **engine** driven by external **policy
+files**, with a ladder of expressiveness, a trust boundary, loud validation, a
+`schema_version` on every file and hostile-fixture tests of the interpreter —
+was applied to this codebase as an audit (Fable, 2026-09-05). The first-pass
+proposal was four steps and roughly 1,200 lines: a shared validating loader for
+the four JSON assets, a full schema for `reference_readings.json`, moving the
+write whitelist's text into the help asset, and lifting `health.py`'s
+thresholds into a shipped thresholds file. A 14-agent adversarial pass (one
+grounding agent per step, two skeptics per step, two judges with opposed
+stances) refuted every step as written, with high confidence, and both judges
+— including the one told to favour building — converged on the same smaller
+versions. Those are items 29–31, about 250 lines between them.
+
+**Why the architecture was not adopted.** The directive's premise — policy
+files as untrusted input on their own release cadence — is false for this
+program, verifiably: all four assets compile into the same PyInstaller binary
+as the code that reads them (`pyproject.toml` package-data,
+`packaging/openmbb.spec`), and nine of the ten commits that ever touched one
+of the four JSON assets also changed `.py` in the same commit (the tenth,
+`bcd6cd3`, created the first two help files and no code). A `schema_version` gate between a file and a reader built from the same
+commit can never fire in production. The trust boundary is the repo, and CI
+already sits on it. The tables that LOOK most like policy — `BLOCKED_COMMANDS`,
+`BLOCKED_SETTINGS`, the write gate — are placed in the engine by the
+directive's own trust-boundary rule: the deciding question is not "is this a
+table" but "what happens if a file changes this", and the answer there is "a
+user unblocks `settingsrst`" or "a verdict means different things on different
+installs". So: no `policy.py`, no external override channel, no user-editable
+thresholds, nothing that moves safety wording out of Python. Recorded under
+*Deferred* with the conditions that would reopen it.
+
+**What the directive earned anyway.** Its rule that one fact in two places is
+a bug, used as a hunting instruction, found four defects shipping today, and
+its "validate loudly" rule names a real hole in the one policy file the tool
+does have. All five verified 2026-09-05:
+
+- `command_reference.json:697` and `info.html:113` still say *"~85 mph
+  physical ceiling"* for `maxcustspmph`. The v0.27.0 docs audit (`5df86f2`)
+  corrected the entry's `what_it_does` and left `what_could_happen` beside it.
+  `test_maxcustspmph_help_states_the_89_clamp`
+  (`tests/test_safety_transport.py:266`) names `safety.py` and
+  `write_options_help.json` by hand and cannot see either copy — the blind spot
+  `58bf24f` closed for the fishtail claim seven hundred lines further down the
+  same file (`tests/test_safety_transport.py:976`).
+- Four settings wear two colours: `maxcustspmph`, `maxcusttq_allowed`,
+  `maxcustregcotq_allow` and `maxcustregbrtq_allow` are `SAFE` in
+  `WRITE_WHITELIST` (green row via `gui.py:4647`) and `"caution"` in
+  `command_reference.json` and the `info.html` badge. No test compares them.
+- `reference_readings.json:19` says *"every threshold in OpenMBB that has a
+  number in it came from this bike"*; `health.py:277` says the 50/60 °C battery
+  bands are *"documented defaults, not read from this bike"*. Both ship.
+- Cell spread (`health.py:175`) and controller temperature (`health.py:282`)
+  have no grading test at all. A wrong literal there flips a buyer's Health
+  status with CI green — the only place in the whole four-step proposal where a
+  wrong number could reach a buyer with nothing going red.
+- `condition.reference_readings()` returns `{}` on any failure
+  (`condition.py:757–762`); `json.loads` accepts the literals `NaN` and
+  `Infinity`, and nothing guards this ingress the way `parsers._finite`
+  (`parsers.py:55`) guards the console's. Mis-case one metric key in the
+  shipped asset and one of four comparison sentences vanishes from both
+  surfaces with the suite green, because `tests/test_report.py:256` asserts
+  only that `expected` is non-empty, and `expected` is derived from the
+  composer. Reproduced during the audit (`test_report.py` + `test_condition.py`,
+  127 tests, green with `median_mV`; re-checked against the full suite, also
+  green); the tree was restored.
+
+### 29. The reference asset must fail loudly — the one policy file this tool has
+
+**What is wrong.** `reference_readings.json` is hand-typed with no producer
+script, its own notes announce the next hand edit (*"A re-pull on an idle
+machine is expected and will replace this entry"*), and a third bike is the
+same edit again. Today that edit can: drop a comparison silently (typo in a
+metric key); print `nan mV` into a buyer's page (a `NaN` literal, accepted by
+`json.loads`); or raise `TypeError` inside `comparison_lines` (a string where a
+number belongs), which is a raw traceback in `openmbb analyze` (`cli.py:397`)
+and at the Condition tab either aborts the render unwrapped (units toggles, Use
+current) or is folded into the generic "Couldn't load session" box
+(`gui.py:5381–5384`). The only guards are `bike_id`/`source`/`metrics` being
+truthy (`tests/test_condition.py:1265–1266`) and `assert expected`
+(`tests/test_report.py:256`).
+
+**The change — a validator inside `condition.reference_readings()`, nothing
+generic.** Files: `src/openmbb/condition.py` (the one production file),
+`src/openmbb/assets/reference_readings.json` (gains `schema_version: 1`),
+`tests/test_condition.py`, `tests/test_report.py`, `tests/fixtures/`,
+`tests/mutations.py`.
+
+1. `json.loads(raw, parse_constant=...)` so `NaN`/`Infinity` raise at this
+   ingress the way `parsers._finite` refuses them at the console's.
+2. A walk that requires `schema_version == 1` — refuse unknown, and refuse
+   ABSENCE too: unlike `capture_format`, where absence means "before the
+   stamp", every shipped copy of this file carries the key, so a missing one is
+   a broken file. Then: a non-empty `bikes` list with unique `bike_id`; the
+   required per-bike keys; for each metric an **exact, frozen key set** —
+   unknown metric name or unknown key inside a metric is the error, because
+   that is what turns the `median_mV` typo into a red CI; every numeric leaf
+   finite; every `samples`/`loaded_samples`/`sessions` an `int >= 0`.
+3. One `ReferenceAssetError` naming file, path and reason
+   (`reference_readings.json: bikes[1].metrics.cell_deviation has unknown key
+   median_mV`). Wording template: `sessions.capture_format`,
+   `sessions.py:195–203`.
+4. `comparison_lines` catches ONLY that error and renders one visible line on
+   both surfaces — *"Beside the other bike: not compared — reference_readings.json
+   failed its check: <reason>"* — in the surface's existing "not compared"
+   vocabulary, instead of the silent `return {}`. It must pass the
+   `BANNED_COMPARISON_WORDS` test and the two-surface mirror. Honest note: with
+   the asset inside the binary, this line will only ever be seen by a test. It
+   exists so the failure mode is DECIDED rather than defaulted, which is the
+   directive's point.
+5. **Keep the dual `derate`/`derate_profile` lookup** (`condition.py:853–858`)
+   and its mutation anchor (`mutations.py:946–952`). The defect it
+   commemorates (`bbc1db8`) was on the `assess()` side, which no file schema
+   governs; dropping it would make an `assess()`-side rename silent again.
+
+**Tests.** The shipped asset passes the validator (replaces the truthiness
+check). Hostile fixtures under `tests/fixtures/`: `NaN`, unknown key, string
+count, negative count, unknown `schema_version`, missing `schema_version`,
+duplicate `bike_id` — each asserting the precise error text. Tighten
+`tests/test_report.py:256` from `assert expected` to "all four heads fire
+against the shipped asset" (`Weakest cell vs pack`, `Weakest cell under load`,
+`Discharge allowance`, `Charge index` — the thin second bike renders two as
+"not compared", which still carries the head). And the end-to-end shape of the
+actual `bbc1db8` defect: `assess()` over the rev-41 fixture, then
+`comparison_lines` against the shipped asset, asserting the Discharge-allowance
+line fires.
+
+**Mutations, each of which must turn its test red:** drop `parse_constant`;
+drop the unknown-key check; drop the finite/int walk; re-anchor the
+`median_mv` → `median_mV` edit that was reproduced during the audit.
+
+**Not doing, and why.** No `policy.py` and no `schema_version` on the three
+help assets: they are strings and booleans only. An unparseable
+`analyze_help.json` or `write_options_help.json` is already red in CI
+(`tests/test_gui_flow.py:671–694` assert those two maps load non-empty with
+named entries). An unparseable `command_reference.json` is NOT: `_load_cmd_ref`
+swallows it to `{}` (`gui.py:3855–3882`) and no test loads that map, so the one
+dialog it feeds falls back to the milder "Dangerous command" heading
+(`gui.py:3943`) — it under-labels a catastrophic command rather than blocks
+one, since refusal itself lives in `safety.command_blocked`. **Do instead:** one
+test that loads `command_reference.json` through `_load_cmd_ref` and asserts
+every `BLOCKED_COMMANDS` and `HEAVY_COMMANDS` name has an entry (all do
+today; nothing pins it). No header citation of a
+data version: the saved page already stamps `by OpenMBB v%s`, the asset ships
+inside that version, and there has only ever been one reference set. No
+`window_v` ordering rule: no consumer reads the other bike's window. Roughly
+100–120 lines. The generic seam gets built the day a second NUMERIC asset
+arrives, not before.
+
+### 30. Five copies describe each writable setting and nothing checks they agree
+
+**What is wrong.** The whitelist's text lives in `safety.WRITE_WHITELIST`,
+`write_options_help.json`, the `set <name>` entries of
+`command_reference.json`, and `info.html` twice per entry — and `info.html` is
+hand-maintained (no generator anywhere in the repo). Every drift incident on
+record is asset-to-asset or in `info.html`: the fishtail claim (`58bf24f`,
+`a05f16c`), the live *~85 mph* copies above, the four risk colours above. The
+pair that has never hurt anyone — `safety.py` beside
+`write_options_help.json` — has drifted only in `plain_name`, which no `.py` in
+`src/` reads: dead data. Fifteen `what_it_does` entries in
+`command_reference.json` cite `READ_TIPS` by name — five quote a tip as
+`(READ_TIPS: '...')` (the `obd` quote no longer matches what `READ_TIPS`
+says), the rest carry a bare `(READ_TIPS)` marker.
+`seen_on_rev41` is read at `gui.py:4684` and `:4699` and is the derived copy of
+`REV41_FXS_SETTINGS`, which `tests/test_rev41_fixture.py:229` pins to the real
+rev-41 dump; the two agree today and nothing enforces it.
+
+**The change — guard first, move nothing.** The order items 5 and 28 followed.
+
+1. One mirror test in `tests/test_safety_transport.py` asserting:
+   `write_options_help.json` names == `WRITE_WHITELIST` keys;
+   `seen_on_rev41 == (name in REV41_FXS_SETTINGS)` for every entry; each
+   `command_reference.json` `set <name>` entry's `danger` agrees with the
+   `WRITE_WHITELIST` risk prefix (`SAFE` ↔ `safe`, `CAUTION` ↔ `caution`).
+2. Widen `test_maxcustspmph_help_states_the_89_clamp` to scan every file in
+   `assets/` (which includes `info.html`) plus `gui.py` and `README.md`, exactly
+   the way
+   `test_no_shipped_text_still_claims_the_coast_regen_fishtail_hazard`
+   (`tests/test_safety_transport.py:976`) already does for its claim.
+3. **It fails today**, on the *~85 mph* copies and the four colours. That is
+   the feature: the colour decision (see *Open decisions*) gets made on
+   purpose, by Ron, rather than as a side effect of a refactor — and if wording
+   moves, it moves in the emphatic direction, never softer.
+4. Alongside: fix the *~85 mph* text in both copies; delete the unread
+   `plain_name` field; strip the fifteen `READ_TIPS` citations; derive the
+   rev-41 note at `gui.py:4684`/`:4699` from `REV41_FXS_SETTINGS` and drop
+   `seen_on_rev41`.
+
+**Mutation:** flip one `danger` class in `command_reference.json` — the mirror
+test must go red.
+
+**Not doing, and why.** Not moving label/effect/risk text out of `safety.py`.
+Those strings are Python constants and cannot be absent; `write_options_help.json`
+is loaded by a function that turns every exception into `{}` (`gui.py:4668`),
+so the move would put the confirm dialog's `EFFECT:`/`RISK:` lines
+(`gui.py:4967`) and the row colour (`gui.py:4647`) behind that loader, on the
+surface that gates writes to a motorcycle, and would relocate the emphatic
+`CAUTION` strings. It would also de-duplicate the one pair that never drifted
+and leave the three copies that did. `READ_TIPS` versus `one_liner` is not a
+pick-one either: 17 entries against 85, and the reference has no entry for
+bare `bluetooth` (only the `bluetooth <args>` write) or bare `set`. Roughly 50
+lines, no production text moved.
+
+### 31. Five health bands grade against bare literals, two of them untested
+
+**What is wrong.** `health.py` grades cell balance (`:164`, 30/60 mV), cell
+spread (`:175`, 40/80 mV), battery temperature (`:247`, 50/60 °C), controller
+temperature (`:282`, 70/90 °C) and isolation (`:301`/`:306`, 1000/500 kΩ)
+against numbers on the line, and three notes repeat them as prose (`:166`
+*"<30 mV is healthy"*, `:307` *"500-999 kOhm"*, `:315` *">1000 kOhm"*) while
+`:279` already formats its pair through `_t()`/`_rng()`. No band number has
+changed since the commit that introduced it (`980951b`, `212abf6`,
+`91aaeee`; the battery band's variable was renamed in `1028fc3` with the
+number unchanged). Spread and controller have **no grading test**; the exact
+1000/999/500 isolation edges are untested. `analyze_help.json` restates the
+balance, battery and isolation bands in full and the healthy edge of spread
+(40 mV) and controller (70 °C) in prose, and agrees today; nothing pins it.
+And the provenance claim at
+`reference_readings.json:19` is contradicted by `health.py:277`.
+
+**The change — named constants and the missing tests, no asset.** Files:
+`src/openmbb/health.py`, `src/openmbb/assets/reference_readings.json` (one
+sentence), a new test file or `tests/test_analysis.py`, `tests/mutations.py`.
+
+1. Name the ten literals as module constants in `condition.py`'s
+   one-provenance-comment-per-band style (`CELL_DEV_OK_MV` et al.,
+   `condition.py:712–731`), recording honestly that balance, spread, battery
+   and isolation bands are **unsourced author judgement** and only controller
+   temperature has a measured anchor (the reference bike peaked at 44 °C,
+   `analyze_help.json:126`). Do not invent sources to fill the pattern.
+2. Format the three prose notes from the constants so output is
+   byte-identical.
+3. Boundary tests: spread at 39/40/79/80 mV; controller at 69/70/89/90 °C;
+   isolation at exactly 1000/999/500 kΩ off-charger.
+4. One test reading `analyze_help.json` and asserting each `healthy_note`
+   quotes the constant's rendered number — generalising the guard `49720a3`
+   added by hand for the SOC note (`tests/test_analysis.py:382–403`).
+5. Correct `reference_readings.json:19` so it stops claiming every numbered
+   threshold was measured on the reference bike. And retire the phrase
+   *"documented defaults"* at `health.py:277` and `analyze_help.json:70` unless
+   the document can be named — no document is cited anywhere in the repo, so
+   "unsourced" is the honest word there too.
+
+**Mutations:** one per new boundary guard (`health.py` has a single manifest
+entry today, `mutations.py:323`), plus one that changes a band number in
+`analyze_help.json` so the cross-check is proven to fail.
+
+**Not doing, and why.** No shipped thresholds asset. The numbers have a
+measured rate of change of zero; a loud loader on a module imported at import
+time by `condition.py`, `gui.py`, `library.py` and `report.py` turns a JSON
+typo into an app that will not start at the bike, and a swallowing loader is
+the `condition.py:745–762` pattern item 29 exists to retire; "a third-bike
+contributor proposes a band change as a data diff" contradicts item 28's
+Decision 1 (a comparison, never a threshold), and with no external override
+channel (above) a data diff is a PR either way, so a one-line edit to a named
+constant is an equally
+reviewable diff. Roughly 80–100 lines, zero behaviour change. Revisit only if
+a per-model band table is ever needed at runtime (one binary carrying several
+pack sizes), a documented Zero or Farasis source for the bands surfaces, or
+Decision 1 is reversed.
+
+---
+
 ## Open decisions, not tasks
 
-- **What displayed 0% means** — A.6.
+- **What displayed 0% means** — A.9.
 - **DST** — A.5 or C, calendar-gated past 1 Nov 2026.
 - **`session_meta.txt` on a second pull** — see queue item 2's limitation note.
+- **Are the four Custom-mode settings SAFE or caution?** `maxcustspmph`,
+  `maxcusttq_allowed`, `maxcustregcotq_allow`, `maxcustregbrtq_allow` are
+  `SAFE` (green) in the Writes tab and `caution` in the command reference and
+  `info.html`. Item 30's mirror test stays red until one answer is chosen. If
+  wording moves, it moves in the emphatic direction, never softer.
 
 ## Deferred
 
 - **Split `gui.py`** — planned in full, deliberately not started; reasoning in commit
   `5258b3e` (headline: the urgent parts were plain bugs, since fixed; the unlock is
   speculative here; the file barely shrinks). Counts refreshed 2026-08-23: 5,896 lines
-  (was 5,817 at deferral) and the three most-entangled methods each grew — the file is
-  still accreting. One **new** post-deferral fact: `_render_condition` is now ~180
+  (5,885 at the deferral commit, 5,817 when the analysis was done) and `_baseline`, the
+  most-entangled method, grew again — the file is still accreting. One **new**
+  post-deferral fact: `_render_condition` is now ~190
   lines of pure Tk-thin rendering, which is *mirror* pressure, not serial entanglement —
   queue item 5 is the response, not reopening the split. The extraction plan's on-bike
   validation steps are preserved above in *At a bike*. Reopen when headless capture is
   actually wanted or a second person works in the file.
+- **The engine/policy split (Ron's data-driven-design directive)** — assessed
+  2026-09-05 and deliberately not done; reasoning in *From the data-driven-design
+  audit*. Headline: every data file compiles into the binary that reads it, so
+  there is no second release cadence and no boundary for a version gate to
+  guard; the safety tables belong in the engine by the directive's own
+  trust-boundary rule; and the two riskiest moves (safety wording behind a
+  swallowing loader, health bands behind an import-time loader) would add
+  failure modes that Python constants cannot have. What survived is the
+  discipline applied to the one policy file the tool has (item 29) and the
+  duplicate hunt (items 30–31). **Reopen when** a second NUMERIC asset arrives
+  (a thresholds file, a user-supplied reference set under 23b), a second person
+  edits the assets, or any data file leaves the binary. Until then the seam is
+  `condition.reference_readings()` and nothing else.
 
 ---
 
@@ -1616,6 +1890,11 @@ One line per ship, newest first; the full reasoning is the commit message.
 
 | what | commit / tag |
 |---|---|
+| **v0.28.0** — a line carrying fragments of itself is refused whole and counted; your pack beside the one other measured Gen2 (a comparison, never a range); reference readings as data with provenance | tag `v0.28.0` |
+| Your pack beside the one other measured Gen2: `reference_readings.json`, `comparison_lines`, two of four decline against the real pair and say why | `bbc1db8` |
+| A line with fragments of itself spliced in is not a reading: whole record refused, counted, cause named — 104 of 267 on the second bike, 0 of 4,732 on the reference captures | `991794c` |
+| Docs audit against v0.27.0: the blocklist has not been a wall since v0.13, and the docs said otherwise | `5df86f2` |
+| **v0.27.0** — the stack review's fix pass: a real motorcycle could keep the `[SIMULATOR — NOT YOUR BIKE]` title after a rehearsal (the critical; introduced by 18c after the v0.26.0 tag, fixed before any binary carried it), five majors, thirteen minors | `1a81184`, tag `v0.27.0` |
 | The record follows the enforcement down: a scripted write is journalled, one masked writer, the scorecard stops moving with the bike, the clamping port | `6edec18` |
 | A refused capture is named wherever it is absent; every session stamps its format from the moment its folder exists | `eeccf8b` |
 | One decoder for everything that reads a capture; `num()` refuses hex and split digit runs; the simulator shows the Sevcon feature it exists to demo | `4e4e6e9` |
