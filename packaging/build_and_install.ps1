@@ -3,7 +3,8 @@
     build_and_install.ps1 - one-click "build the current source and install it" for OpenMBB.
 
     Does exactly what the release chore does by hand, in order:
-      1. Build the single-file exe   (PyInstaller via packaging/build.py)  -> dist/openmbb.exe
+      1. Build the program tree      (PyInstaller --onedir via packaging/build.py --mode onedir)
+                                     -> dist\onedir\openmbb\  (openmbb.exe + _internal\)
       2. Build the Windows installer (Inno Setup / ISCC; version read from __version__)
       3. Install it silently         (/VERYSILENT, per-user, no admin)
       4. Verify the installed build  (frozen --selftest [+ --smoketest] must exit 0)
@@ -66,7 +67,8 @@ $Packaging = $PSScriptRoot
 $RepoRoot  = Split-Path -Parent $Packaging          # packaging/ -> repo root
 $Iss       = Join-Path $Packaging 'openmbb.iss'
 $Builder   = Join-Path $Packaging 'build.py'
-$DistExe   = Join-Path $RepoRoot  'dist\openmbb.exe'
+$DistDir   = Join-Path $RepoRoot  'dist\onedir\openmbb'    # the --onedir tree the installer ships
+$DistExe   = Join-Path $DistDir   'openmbb.exe'
 $SetupOut  = Join-Path $Packaging 'Output\openmbb-setup-windows-x64.exe'
 $InitPy    = Join-Path $RepoRoot  'src\openmbb\__init__.py'
 
@@ -109,18 +111,20 @@ Ensure-NotRunning 'before building'
 # CWD must be the repo root: build.py / PyInstaller emit dist/ and build/ relative to it.
 Push-Location $RepoRoot
 
-# --- 1/4  build the exe ------------------------------------------------------
+# --- 1/4  build the program tree ---------------------------------------------
 Info ""
-Info "[1/4] Building the exe (PyInstaller) - this takes a couple of minutes..."
-& $Py $Builder
+Info "[1/4] Building the program tree (PyInstaller --onedir) - this takes a couple of minutes..."
+& $Py $Builder --mode onedir
 if ($LASTEXITCODE -ne 0) { Die "PyInstaller build failed (exit $LASTEXITCODE)." }
 if (-not (Test-Path $DistExe)) { Die "Build reported success but $DistExe is missing." }
-Ok  ("      built dist\openmbb.exe ({0} MB)" -f [math]::Round((Get-Item $DistExe).Length / 1MB, 1))
+if (-not (Test-Path (Join-Path $DistDir '_internal'))) { Die "$DistDir has no _internal\ - that is not a --onedir tree." }
+$treeMB = [math]::Round(((Get-ChildItem $DistDir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
+Ok  "      built dist\onedir\openmbb\ ($treeMB MB: openmbb.exe + _internal\)"
 
 # --- 2/4  build the installer ------------------------------------------------
 Info ""
 Info "[2/4] Building the installer (Inno Setup, v$Version)..."
-$isccOut = & $Iscc "/DAppVersion=$Version" "/DExeSrc=$DistExe" $Iss
+$isccOut = & $Iscc "/DAppVersion=$Version" "/DDistDir=$DistDir" $Iss
 if ($LASTEXITCODE -ne 0) { $isccOut | ForEach-Object { Fail "      $_" }; Die "ISCC failed (exit $LASTEXITCODE)." }
 if (-not (Test-Path $SetupOut)) { Die "ISCC reported success but $SetupOut is missing." }
 Ok  ("      built {0} ({1} MB)" -f [System.IO.Path]::GetFileName($SetupOut), [math]::Round((Get-Item $SetupOut).Length / 1MB, 1))
@@ -142,16 +146,24 @@ if (Test-Path $UninstKey) {
     if ($disp -eq $Version) { Ok "      registry: v$disp" } else { Warn "      registry shows v$disp (expected v$Version)" }
 }
 if (-not (Test-Path $InstallExe)) { Die "Installed exe not found at $InstallExe" }
+$InstallInternal = Join-Path (Split-Path $InstallExe) '_internal'
+if (-not (Test-Path $InstallInternal)) { Die "Installed tree has no _internal\ ($InstallInternal) - the installer did not ship the --onedir layout." }
 
 # --- 4/4  verify the installed build ----------------------------------------
 Info ""
 Info "[4/4] Verifying the installed build..."
-$out = & $InstallExe --selftest
-if ($LASTEXITCODE -ne 0) { $out | ForEach-Object { Fail "      $_" }; Die "Installed --selftest FAILED (exit $LASTEXITCODE)." }
+# openmbb.exe is a GUI-subsystem exe (console=False in the spec). The call
+# operator (& $InstallExe) neither waits for such a process nor sets
+# $LASTEXITCODE, so the previous form of this step tested the exit code ISCC had
+# left behind and printed PASSED whatever the installed exe did. Start-Process
+# -Wait -PassThru blocks and returns the exe's real exit code; it is the same
+# idiom .github/workflows/build.yml uses for these exes.
+$p = Start-Process -FilePath $InstallExe -ArgumentList '--selftest' -Wait -PassThru
+if ($p.ExitCode -ne 0) { Die "Installed --selftest FAILED (exit $($p.ExitCode))." }
 Ok  "      --selftest PASSED"
 if (-not $SkipSmoketest) {
-    $out = & $InstallExe --smoketest
-    if ($LASTEXITCODE -ne 0) { $out | ForEach-Object { Fail "      $_" }; Die "Installed --smoketest FAILED (exit $LASTEXITCODE)." }
+    $p = Start-Process -FilePath $InstallExe -ArgumentList '--smoketest' -Wait -PassThru
+    if ($p.ExitCode -ne 0) { Die "Installed --smoketest FAILED (exit $($p.ExitCode))." }
     Ok  "      --smoketest PASSED"
 }
 

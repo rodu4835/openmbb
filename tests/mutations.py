@@ -956,6 +956,32 @@ def not_from_a_bike(folder):''',
      '''    out += _comparison_lines(c, units)''',
      '''    pass''',
      "tests/test_report.py::test_the_comparison_reaches_the_saved_page"),
+
+    # the Wacatac!ml false positive - the build's antivirus-facing promises
+    ("packaging: let UPX back in on the onedir tree",
+     "packaging/openmbb.spec",
+     '''        upx=False,          # the other half of the pin''',
+     '''        upx=True,           # the other half of the pin''',
+     "tests/test_packaging.py::test_spec_pins_upx_off_on_both_shapes"),
+
+    ("packaging: point the installer back at a single exe",
+     "packaging/openmbb.iss",
+     '''Flags: ignoreversion recursesubdirs createallsubdirs''',
+     '''Flags: ignoreversion''',
+     "tests/test_packaging.py::test_the_installer_ships_the_onedir_tree_end_to_end"),
+
+    ("packaging: stop padding the version tuple to four words",
+     "packaging/build.py",
+     '''    return tuple(nums + [0] * (4 - len(nums)))''',
+     '''    return tuple(nums)''',
+     "tests/test_packaging.py::"
+     "test_version_tuple_pads_to_four_and_refuses_what_filevers_cannot_hold"),
+
+    ("packaging: build both shapes into the same dist",
+     "packaging/build.py",
+     '''    return {"distpath": os.path.join("dist", "onedir"),''',
+     '''    return {"distpath": "dist",''',
+     "tests/test_packaging.py::test_the_two_shapes_cannot_overwrite_each_other"),
 ]
 
 

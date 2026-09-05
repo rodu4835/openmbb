@@ -94,6 +94,34 @@ One self-contained file that bundles Python, Tk, and every dependency:
 Release binaries are built and verified by CI (`.github/workflows/build.yml`) on
 each tagged release.
 
+### Windows SmartScreen and antivirus
+
+The Windows binaries are not code-signed, and two warnings follow from that.
+
+**SmartScreen** ("Windows protected your PC") appears for any unsigned download
+without an established reputation. *More info → Run anyway* runs it.
+
+**Defender** sometimes flags unsigned PyInstaller builds with a machine-learning
+detection such as `Trojan:Win32/Wacatac.C!ml`. The `!ml` suffix means a heuristic
+classifier, not a signature match. A one-file PyInstaller executable unpacks
+itself into `%TEMP%` at every launch, which is a pattern those classifiers score
+against. So the installer ships a directory tree that runs in place, both
+executables carry a Windows version resource, and UPX is never applied. The
+portable exe stays one file by design, which makes it the likelier of the two to
+be flagged.
+
+What you can check: every release binary is built by GitHub Actions from the
+public source at the tagged commit (`.github/workflows/build.yml`), and each
+release attaches `SHA256SUMS.txt`. Compare before running:
+
+```
+certutil -hashfile openmbb-windows-x64.exe SHA256     # Windows
+sha256sum --ignore-missing -c SHA256SUMS.txt          # Linux, in the download folder
+```
+
+If you would rather not run an unsigned executable at all, run from source (next
+section). It is the same code; that section lists what it needs.
+
 ### Run from source (any OS)
 
 ```
@@ -114,8 +142,10 @@ openmbb --selftest  # headless transport/safety tests
 openmbb --smoketest # build the GUI once, sim-connect, and exit
 ```
 
-Requires **Python 3.9+** (that is what the package metadata enforces; CI runs
-3.12, so 3.9–3.11 are supported but untested); `pyserial` and `sv-ttk` install
+Requires **Python 3.9+** with Tk (python.org and Microsoft Store builds include
+it; on Debian/Ubuntu: `sudo apt install python3-tk`). That is what the package
+metadata enforces; CI runs 3.12, so 3.9–3.11 are supported but untested.
+`pyserial` and `sv-ttk` install
 automatically (if `sv-ttk` is ever unavailable the app falls back to a built-in
 theme in whichever mode you have selected, light or dark). Fonts
 and the file-manager "open folder" action work cross-platform. To **update**:
@@ -129,7 +159,8 @@ and the file-manager "open folder" action work cross-platform. To **update**:
 ```
 pip install ".[dev]"                  # adds PyInstaller + Pillow (quote it — zsh
                                       # expands the brackets otherwise)
-python packaging/build.py             # -> dist/openmbb(.exe)  — portable, any OS
+python packaging/build.py             # -> dist/openmbb(.exe)  — the portable one-file build, any OS
+python packaging/build.py --mode onedir   # -> dist/onedir/openmbb/  — the tree the Windows installer ships
 ```
 
 On **Windows**, to also build the installer (requires **Inno Setup 6**):
@@ -138,10 +169,14 @@ On **Windows**, to also build the installer (requires **Inno Setup 6**):
 powershell -File packaging\build_and_install.ps1 -Force   # or: build-and-install.bat
 ```
 
-This builds `dist\openmbb.exe`, then `packaging\Output\openmbb-setup-windows-x64.exe`,
-installs it per-user, and verifies with `--selftest` / `--smoketest` (`-Force`
-closes a running OpenMBB first). PyInstaller can't cross-compile — build a Windows
-binary on Windows and a Linux binary on Linux, which is what the CI matrix does.
+This builds the `--onedir` tree (`dist\onedir\openmbb\`: `openmbb.exe` beside
+`_internal\`, so nothing self-extracts at launch), wraps it as
+`packaging\Output\openmbb-setup-windows-x64.exe`, installs it per-user, and
+verifies the installed copy with `--selftest` / `--smoketest` (`-Force` closes a
+running OpenMBB first). On Windows both builds carry a version resource generated
+from `openmbb.__version__`, and UPX is pinned off in the spec. PyInstaller can't
+cross-compile — build a Windows binary on Windows and a Linux binary on Linux,
+which is what the CI matrix does.
 
 ## Wiring (FTDI TTL-232R-3V3 → OBD-II J1962, port under the seat)
 

@@ -1,8 +1,11 @@
 name: build
 
-# Builds the single-file OpenMBB binary for Windows and Linux. Runs on any
-# tag push (attaches binaries to a GitHub Release) or on manual dispatch.
-# PyInstaller can't cross-compile, so each binary is built on its own runner.
+# Builds the OpenMBB binaries: the portable single-file exe on Windows and
+# Linux, plus - on Windows - the --onedir tree the installer ships (nothing
+# self-extracts at launch, which is the biggest heuristic-antivirus trigger an
+# unsigned PyInstaller build has). Runs on any tag push (attaches binaries and
+# SHA256SUMS.txt to a GitHub Release) or on manual dispatch. PyInstaller can't
+# cross-compile, so each binary is built on its own runner.
 
 on:
   push:
@@ -58,8 +61,8 @@ jobs:
             echo "tag ${GITHUB_REF_NAME} != v$ver (openmbb.__version__)"; exit 1
           fi
 
-      - name: Build single-file binary
-        run: python packaging/build.py
+      - name: Build portable binary (onefile)
+        run: python packaging/build.py --mode onefile
 
       - name: Verify binary (Linux)
         if: runner.os == 'Linux'
@@ -77,8 +80,40 @@ jobs:
           $p2 = Start-Process -FilePath dist\openmbb.exe -ArgumentList '--smoketest' -Wait -PassThru
           if ($p2.ExitCode -ne 0) { throw "frozen --smoketest failed ($($p2.ExitCode))" }
 
-      # Installer wraps the already-verified portable exe: Start menu entry,
-      # optional desktop icon, per-user (no admin), uninstaller.
+      # The installer ships a --onedir tree, not the portable exe: openmbb.exe
+      # beside _internal\, run in place, nothing extracted to %TEMP% at launch.
+      # Built and verified exactly like the portable one before Inno wraps it.
+      - name: Build installer tree (onedir, Windows)
+        if: runner.os == 'Windows'
+        run: python packaging/build.py --mode onedir
+
+      - name: Verify installer tree + version resources (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tree = "dist\onedir\openmbb"
+          if (-not (Test-Path "$tree\_internal")) { throw "$tree has no _internal\ - not a onedir tree" }
+          $p = Start-Process -FilePath "$tree\openmbb.exe" -ArgumentList '--selftest' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "onedir --selftest failed ($($p.ExitCode))" }
+          $p2 = Start-Process -FilePath "$tree\openmbb.exe" -ArgumentList '--smoketest' -Wait -PassThru
+          if ($p2.ExitCode -ne 0) { throw "onedir --smoketest failed ($($p2.ExitCode))" }
+          # Both exes carry the version resource build.py generated from
+          # openmbb.__version__. Blank Properties > Details is one of the things
+          # heuristic AV scores, and a stale number there would be a lie.
+          $ver = python -c "import openmbb; print(openmbb.__version__)"
+          foreach ($exe in @("dist\openmbb.exe", "$tree\openmbb.exe")) {
+            $vi = (Get-Item $exe).VersionInfo
+            if ($vi.FileVersion -ne $ver -or $vi.ProductVersion -ne $ver) {
+              throw "$exe version resource says '$($vi.FileVersion)' / '$($vi.ProductVersion)', expected $ver"
+            }
+            if ($vi.CompanyName -ne 'OpenMBB' -or -not $vi.FileDescription) {
+              throw "$exe version resource lacks company/description"
+            }
+            Write-Host "$exe : $($vi.FileDescription) v$($vi.FileVersion)"
+          }
+
+      # Installer wraps the verified onedir tree: Start menu entry, optional
+      # desktop icon, per-user (no admin), uninstaller.
       - name: Build Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
@@ -87,7 +122,7 @@ jobs:
           if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
           if (-not (Test-Path $iscc)) { throw "Inno Setup not found on runner" }
           $ver = python -c "import openmbb; print(openmbb.__version__)"
-          & $iscc "/DAppVersion=$ver" "/DExeSrc=$PWD\dist\openmbb.exe" packaging\openmbb.iss
+          & $iscc "/DAppVersion=$ver" "/DDistDir=$PWD\dist\onedir\openmbb" packaging\openmbb.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
           if (-not (Test-Path packaging\Output\openmbb-setup-windows-x64.exe)) { throw "installer missing" }
 
@@ -117,6 +152,18 @@ jobs:
         with:
           path: dist-all
           merge-multiple: true
+
+      # SHA-256 of every artifact, in sha256sum's own format so a download can
+      # be checked with `sha256sum --ignore-missing -c SHA256SUMS.txt` (or
+      # certutil / Get-FileHash by eye). Redirection, not a pipe into tee: the
+      # shell expands the glob before it opens the output file, so the sums file
+      # cannot list itself, and sha256sum's own exit status fails the step. See
+      # README, "Windows SmartScreen and antivirus".
+      - name: Write SHA256SUMS.txt
+        working-directory: dist-all
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
