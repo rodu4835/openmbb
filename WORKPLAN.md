@@ -11,10 +11,10 @@ current: what to do next, what needs a motorcycle, and what was deliberately not
 Opus sessions. Queue items below are scaffolded for direct pickup — files, the change,
 the tests, and the mutation each test must catch.
 
-**State:** **v0.28.0 released 2026-09-01** — tagged, CI green both OSes,
-three binaries and release notes published. **721 tests passing with 0
-skipped**, **111/111 mutation entries catching**. One commit unpushed
-(`4ebb7b9`, the 23b decision).
+**State:** **v0.29.0 released 2026-09-06** — tagged, CI green both OSes,
+three binaries, `SHA256SUMS.txt` and release notes published. **727 tests
+passing, 0 skipped on Windows** (one Windows-only test skips on Linux by
+design), **115/115 mutation entries catching**. Nothing unpushed.
 
 **Next: three small items from the data-driven-design audit (2026-09-05) —
 items 29–31.** About 250 lines between them, all tests and named constants,
@@ -63,6 +63,18 @@ tool read EVERY capture (a line with fragments of itself spliced in was parsed
 into confident wrong numbers — item 26), and made comparison possible (item
 28, which honestly declines two of four against the real pair). v0.28.0
 carried both.
+
+**The Wacatac report (2026-09-05).** A user had to click past
+`Trojan:Win32/Wacatac.C!ml` to run v0.28.0 — Defender's ML classifier, a false
+positive that unsigned PyInstaller single-file builds earn routinely. v0.29.0
+answers with packaging only: the installer lays down a `--onedir` tree so
+nothing self-extracts at launch, both exes carry a version resource generated
+from `__version__`, UPX is pinned on both shapes, every release carries
+`SHA256SUMS.txt`, and the README says what the warning is. Code signing and a
+bootloader rebuild were researched and not done; the reasoning is in the
+v0.29.0 release notes and the commit `b1f85a1`. The review of that change
+found the one-click script's verify step had never waited for the exe it was
+verifying. Nothing under `src/` changed.
 
 **The organising constraint, restated:** two motorcycles have now been
 measured, and the code has caught up with what two can teach. Two bikes yield
@@ -1890,6 +1902,9 @@ One line per ship, newest first; the full reasoning is the commit message.
 
 | what | commit / tag |
 |---|---|
+| **v0.29.0** — the installer lays down a program folder instead of a self-extracting exe, both exes carry a version resource, every release carries `SHA256SUMS.txt`; the one-click script's verify step could not fail and now can | tag `v0.29.0` |
+| Packaging for the Wacatac!ml false positive: `--mode onedir` for the installer, `onefile` for the portable, UPX pinned on both shapes, version resource from `__version__`, README "Windows SmartScreen and antivirus", six guards and four mutation entries | `b1f85a1` |
+| The data-driven-design audit recorded: three small items filed (29–31), the architecture declined with reopen conditions, four live defects found | `b86ddc1` |
 | **v0.28.0** — a line carrying fragments of itself is refused whole and counted; your pack beside the one other measured Gen2 (a comparison, never a range); reference readings as data with provenance | tag `v0.28.0` |
 | Your pack beside the one other measured Gen2: `reference_readings.json`, `comparison_lines`, two of four decline against the real pair and say why | `bbc1db8` |
 | A line with fragments of itself spliced in is not a reading: whole record refused, counted, cause named — 104 of 267 on the second bike, 0 of 4,732 on the reference captures | `991794c` |
